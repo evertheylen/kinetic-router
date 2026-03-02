@@ -1,0 +1,13 @@
+{
+  "name": "@kinetic-router/monorepo",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc --build"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "@types/node": "catalog:"
+  }
+}

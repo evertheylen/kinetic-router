@@ -1,0 +1,17 @@
+packages:
+  - definition
+  - url
+  - solid
+
+catalog:
+  '@types/node': ^22.0.0
+  solid-js: ^1.9.0
+  typescript: ^5.7.0
+  vitest: ^3.0.0
+
+catalogMode: prefer
+
+prefer-workspace-packages: true
+
+onlyBuiltDependencies:
+  - esbuild
