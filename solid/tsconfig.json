@@ -7,7 +7,7 @@
   },
   "include": ["src/**/*"],
   "references": [
-    "../definition",
-    "../url"
+    { "path": "../definition" },
+    { "path": "../url" }
   ]
 }

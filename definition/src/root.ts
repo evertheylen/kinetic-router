@@ -6,8 +6,8 @@ export const defaultSerde: unique symbol = Symbol('kinetic-router:defaultSerde')
 
 export type Slug = string | ParamDef<any, 'path'>;
 
-export type RootSitemap<Sm extends RootSitemapInput> = Sm & {
-  [slugLookup]:    Map<Route<any>, Slug[]>,
+export type RootSitemap = {
+  [slugLookup]: Map<Route<any>, Slug[]>,
   [defaultSerde]?: Serde<any>
 };
 
@@ -22,7 +22,7 @@ export type RootSitemap<Sm extends RootSitemapInput> = Sm & {
  *  - Every route must have a unique slug path (no two routes resolve to the
  *    same URL pattern).
  */
-export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any>): RootSitemap<Sm> {
+export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any>): RootSitemap & Sm {
   const map = new Map<Route<any>, Slug[]>();
 
   function walk(node: Sitemap, slugPath: Slug[], activePathParams: Set<ParamDef<any, 'path'>>) {
@@ -79,11 +79,11 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
 
   walk(sitemap, [], new Set());
 
-  return { ...sitemap, [slugLookup]: map, [defaultSerde]: serde } as RootSitemap<Sm>;
+  return { ...sitemap, [slugLookup]: map, [defaultSerde]: serde } as RootSitemap & Sm;
 }
 
 /** Return the slug path for a route registered in a RootSitemap. */
-export function getSlugPath(rootSitemap: RootSitemap<any>, r: Route<any>): Slug[] | undefined {
+export function getSlugPath(rootSitemap: RootSitemap, r: Route<any>): Slug[] | undefined {
   return (rootSitemap as any)[slugLookup].get(r);
 }
 
@@ -99,6 +99,6 @@ function slugPathsEqual(a: Slug[], b: Slug[]): boolean {
   return true;
 }
 
-function slugPathToString(path: Slug[]): string {
+export function slugPathToString(path: Slug[]): string {
   return path.map(s => s instanceof ParamDef ? '<param>' : s).join('/');
 }

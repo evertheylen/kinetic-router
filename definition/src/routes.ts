@@ -21,17 +21,26 @@ export class Route<ParamDefs extends Record<string, ParamDef<any>>> {
   }
 
   // Returns Locator<any> because Alias may resolve to a different route.
-  getUrl(values: ParamValues<ParamDefs>): Locator<any> {
+  locate(values: ParamValues<ParamDefs>): Locator<any> {
     return { route: this, values };
   }
 }
 
-class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Route<ParamDefs> {
+export class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Route<ParamDefs> {
   public aliasFunc: (values: ParamValues<ParamDefs>) => Locator<any>;
 
   constructor(paramDefs: ParamDefs, aliasFunc: (values: ParamValues<ParamDefs>) => Locator<any>) {
     super(paramDefs);
     this.aliasFunc = aliasFunc;
+  }
+
+  override locate(values: ParamValues<ParamDefs>): Locator<any> {
+    // core aliasing logic
+    let locator: Locator<any> = this.aliasFunc(values);
+    while (locator.route instanceof Alias) {
+      locator = locator.route.aliasFunc(locator.values);
+    }
+    return locator;
   }
 }
 

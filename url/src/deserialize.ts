@@ -180,7 +180,7 @@ function walkTree(
  * `Locator`'s values. Search params absent from the URL are restored to their
  * declared default (if any).
  */
-export function urlToLocator(rootSitemap: RootSitemap<RootSitemapInput>, url: string): Locator<any> | undefined {
+export function urlToLocator(rootSitemap: RootSitemap, url: string): Locator<any> | undefined {
   const rootDefault: Serde<any> | undefined = (rootSitemap as any)[defaultSerde];
 
   // Normalize the URL — accept both absolute and relative forms.

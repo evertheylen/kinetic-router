@@ -40,7 +40,9 @@ export const param = {
   search: <T>(serde?: Serde<T>) => new ParamDef<T, 'search'>('search', serde),
 }
 
-export type ParamValues<ParamDefs extends Record<string, ParamDef<any>>> = (
+export type AnyParamDefs = Record<string, ParamDef<any>>;
+
+export type ParamValues<ParamDefs extends AnyParamDefs> = (
   { [key in keyof ParamDefs as ParamDefs[key] extends ParamDefWithDefault<any> ? key : never]?: ParamDefs[key] extends ParamDefWithDefault<infer T> ? T : never }
   &
   { [key in keyof ParamDefs as ParamDefs[key] extends ParamDefWithDefault<any> ? never : key]: ParamDefs[key] extends ParamDef<infer T> ? T : never }

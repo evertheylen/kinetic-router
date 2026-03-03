@@ -151,7 +151,7 @@ describe('urlToLocator', () => {
       posts: parameter(postIdWS, postRoute),
     }));
 
-    const url = locatorToUrl(sm, postRoute.getUrl({ userId: 'carol', postId: 7 }));
+    const url = locatorToUrl(sm, postRoute.locate({ userId: 'carol', postId: 7 }));
     const locator = urlToLocator(sm, url);
     expect(locator?.route).toBe(postRoute);
     expect(locator?.values).toEqual({ userId: 'carol', postId: 7 });
@@ -164,7 +164,7 @@ describe('urlToLocator', () => {
     });
     const sm = root({ search: r });
 
-    const url = locatorToUrl(sm, r.getUrl({ q: 'test', page: 5 }));
+    const url = locatorToUrl(sm, r.locate({ q: 'test', page: 5 }));
     expect(urlToLocator(sm, url)?.values).toEqual({ q: 'test', page: 5 });
   });
 
@@ -175,7 +175,7 @@ describe('urlToLocator', () => {
     });
     const sm = root({ search: r });
 
-    const url = locatorToUrl(sm, r.getUrl({ q: 'test', page: 1 }));
+    const url = locatorToUrl(sm, r.locate({ q: 'test', page: 1 }));
     expect(url).toBe('/search?q=test');
     expect(urlToLocator(sm, url)?.values).toEqual({ q: 'test', page: 1 });
   });

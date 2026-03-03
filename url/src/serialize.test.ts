@@ -9,22 +9,22 @@ describe('locatorToUrl', () => {
     const about = route({});
     const sm = root({ home, about });
 
-    expect(locatorToUrl(sm, home.getUrl({}))).toBe('/home');
-    expect(locatorToUrl(sm, about.getUrl({}))).toBe('/about');
+    expect(locatorToUrl(sm, home.locate({}))).toBe('/home');
+    expect(locatorToUrl(sm, about.locate({}))).toBe('/about');
   });
 
   it('handles the [index] route at the root level', () => {
     const indexRoute = route({});
     const sm = root({ [index]: indexRoute, home: route({}) });
 
-    expect(locatorToUrl(sm, indexRoute.getUrl({}))).toBe('/');
+    expect(locatorToUrl(sm, indexRoute.locate({}))).toBe('/');
   });
 
   it('handles a parameterized path segment', () => {
     const userPage = route({ userId });
     const sm = root(parameter(userId, userPage));
 
-    expect(locatorToUrl(sm, userPage.getUrl({ userId: 'alice' }))).toBe('/alice');
+    expect(locatorToUrl(sm, userPage.locate({ userId: 'alice' }))).toBe('/alice');
   });
 
   it('handles nested parameterized paths', () => {
@@ -34,7 +34,7 @@ describe('locatorToUrl', () => {
       posts: parameter(postIdWithSerde, postRoute),
     }));
 
-    expect(locatorToUrl(sm, postRoute.getUrl({ userId: 'alice', postId: 42 }))).toBe('/alice/posts/42');
+    expect(locatorToUrl(sm, postRoute.locate({ userId: 'alice', postId: 42 }))).toBe('/alice/posts/42');
   });
 
   it('appends search params', () => {
@@ -44,7 +44,7 @@ describe('locatorToUrl', () => {
     });
     const sm = root({ search: r });
 
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hello' }))).toBe('/search?q=hello');
+    expect(locatorToUrl(sm, r.locate({ q: 'hello' }))).toBe('/search?q=hello');
   });
 
   it('appends multiple search params', () => {
@@ -54,7 +54,7 @@ describe('locatorToUrl', () => {
     });
     const sm = root({ search: r });
 
-    const url = locatorToUrl(sm, r.getUrl({ q: 'world', page: 2 }));
+    const url = locatorToUrl(sm, r.locate({ q: 'world', page: 2 }));
     expect(url).toContain('/search');
     expect(url).toContain('q=world');
     expect(url).toContain('page=2');
@@ -64,7 +64,7 @@ describe('locatorToUrl', () => {
     const r = route({ foobar: param.hidden<number>() });
     const sm = root({ page: r });
 
-    expect(locatorToUrl(sm, r.getUrl({ foobar: 999 }))).toBe('/page');
+    expect(locatorToUrl(sm, r.locate({ foobar: 999 }))).toBe('/page');
   });
 
   it('omits a search param when its value equals the optional default (undefined)', () => {
@@ -74,8 +74,8 @@ describe('locatorToUrl', () => {
     });
     const sm = root({ search: r });
 
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hi' }))).toBe('/search?q=hi');
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hi', tag: undefined } as any))).toBe('/search?q=hi');
+    expect(locatorToUrl(sm, r.locate({ q: 'hi' }))).toBe('/search?q=hi');
+    expect(locatorToUrl(sm, r.locate({ q: 'hi', tag: undefined } as any))).toBe('/search?q=hi');
   });
 
   it('omits a search param when its value equals the declared default', () => {
@@ -85,8 +85,8 @@ describe('locatorToUrl', () => {
     });
     const sm = root({ search: r });
 
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hi', page: 1 }))).toBe('/search?q=hi');
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hi', page: 2 }))).toBe('/search?q=hi&page=2');
+    expect(locatorToUrl(sm, r.locate({ q: 'hi', page: 1 }))).toBe('/search?q=hi');
+    expect(locatorToUrl(sm, r.locate({ q: 'hi', page: 2 }))).toBe('/search?q=hi&page=2');
   });
 
   it('omits a search param when its value equals the optional default (undefined)', () => {
@@ -96,8 +96,8 @@ describe('locatorToUrl', () => {
     });
     const sm = root({ search: r });
 
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hi', tag: undefined }))).toBe('/search?q=hi');
-    expect(locatorToUrl(sm, r.getUrl({ q: 'hi', tag: 'news' }))).toBe('/search?q=hi&tag=news');
+    expect(locatorToUrl(sm, r.locate({ q: 'hi', tag: undefined }))).toBe('/search?q=hi');
+    expect(locatorToUrl(sm, r.locate({ q: 'hi', tag: 'news' }))).toBe('/search?q=hi&tag=news');
   });
 
   it('uses the param serde for path segments', () => {
@@ -105,7 +105,7 @@ describe('locatorToUrl', () => {
     const r = route({ id: idParam });
     const sm = root(parameter(idParam, r));
 
-    expect(locatorToUrl(sm, r.getUrl({ id: 7 }))).toBe('/7');
+    expect(locatorToUrl(sm, r.locate({ id: 7 }))).toBe('/7');
   });
 
   it('falls back to defaultSerde on the root for path params', () => {
@@ -113,7 +113,7 @@ describe('locatorToUrl', () => {
     const r = route({ id: idParam });
     const sm = root(parameter(idParam, r), numberSerde);
 
-    expect(locatorToUrl(sm, r.getUrl({ id: 42 }))).toBe('/42');
+    expect(locatorToUrl(sm, r.locate({ id: 42 }))).toBe('/42');
   });
 
   it('falls back to String() when no serde is available', () => {
@@ -121,7 +121,7 @@ describe('locatorToUrl', () => {
     const r = route({ id: idParam });
     const sm = root(parameter(idParam, r));
 
-    expect(locatorToUrl(sm, r.getUrl({ id: 5 }))).toBe('/5');
+    expect(locatorToUrl(sm, r.locate({ id: 5 }))).toBe('/5');
   });
 
   it('handles deeply nested SubPaths + ParameterizedPath', () => {
@@ -138,14 +138,14 @@ describe('locatorToUrl', () => {
       }).withIndex(usersIndex),
     });
 
-    expect(locatorToUrl(sm, rootIndex.getUrl({}))).toBe('/');
-    expect(locatorToUrl(sm, usersIndex.getUrl({ userId: 'bob' }))).toBe('/users/bob');
-    expect(locatorToUrl(sm, quuzIndex.getUrl({ userId: 'bob' }))).toBe('/users/bob/foo/bar/quuz');
-    expect(locatorToUrl(sm, postRoute.getUrl({ userId: 'bob', postId: 3 }))).toBe('/users/bob/posts/3');
+    expect(locatorToUrl(sm, rootIndex.locate({}))).toBe('/');
+    expect(locatorToUrl(sm, usersIndex.locate({ userId: 'bob' }))).toBe('/users/bob');
+    expect(locatorToUrl(sm, quuzIndex.locate({ userId: 'bob' }))).toBe('/users/bob/foo/bar/quuz');
+    expect(locatorToUrl(sm, postRoute.locate({ userId: 'bob', postId: 3 }))).toBe('/users/bob/posts/3');
   });
 
   it('throws when route is not in the sitemap', () => {
     const sm = root({ home: route({}) });
-    expect(() => locatorToUrl(sm, route({}).getUrl({}))).toThrow(/not registered/);
+    expect(() => locatorToUrl(sm, route({}).locate({}))).toThrow(/not registered/);
   });
 });

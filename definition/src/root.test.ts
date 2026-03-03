@@ -48,7 +48,7 @@ describe('root', () => {
 
   it('handles a realistic nested sitemap', () => {
     const indexR = route({ lastVisited: param.hidden<Date>().optional() }).aliasTo(req =>
-      usersOverview.getUrl({ foobar: 123, nameFilter: req.lastVisited === undefined ? 'test' : undefined })
+      usersOverview.locate({ foobar: 123, nameFilter: req.lastVisited === undefined ? 'test' : undefined })
     );
     const postRoute = route({ postId, userId, foo: param.search<string>() });
     const usersIndexRoute = route({});
