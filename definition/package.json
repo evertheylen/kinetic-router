@@ -6,6 +6,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./*.js": {
+      "import": "./dist/*.js",
+      "types": "./dist/*.d.ts"
     }
   },
   "main": "./dist/index.js",

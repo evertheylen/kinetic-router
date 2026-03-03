@@ -1,13 +1,8 @@
-import {
-  defaultSerde,
-  getSlugPath,
-  Locator,
-  ParamDef,
-  ParamDefWithDefault,
-  RootSitemap,
-  RootSitemapInput,
-  Serde,
-} from '@kinetic-router/definition';
+import type { Locator, Serde } from '@kinetic-router/definition';
+import { defaultSerde, getSlugPath } from '@kinetic-router/definition/root.js';
+import { ParamDef, ParamDefWithDefault } from '@kinetic-router/definition/params.js';
+import type { RootSitemapInput } from '@kinetic-router/definition/routes.js';
+import type { RootSitemap } from '@kinetic-router/definition/root.js';
 
 /** Returns true when a ParamDef was created with .withDefault() or .optional(). */
 export function hasDefault(def: ParamDef<any>): def is ParamDefWithDefault<any> {

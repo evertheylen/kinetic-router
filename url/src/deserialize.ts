@@ -1,14 +1,10 @@
-import {
-  defaultSerde,
-  index as indexSymbol,
-  Locator,
-  ParamDef,
-  Route,
-  RootSitemap,
-  RootSitemapInput,
-  Serde,
-  Sitemap,
-} from '@kinetic-router/definition';
+import { index as indexSymbol } from '@kinetic-router/definition';
+import type { Locator, Serde } from '@kinetic-router/definition';
+import { defaultSerde } from '@kinetic-router/definition/root.js';
+import { Route } from '@kinetic-router/definition/routes.js';
+import { ParamDef } from '@kinetic-router/definition/params.js';
+import type { RootSitemapInput, Sitemap } from '@kinetic-router/definition/routes.js';
+import type { RootSitemap } from '@kinetic-router/definition/root.js';
 import { hasDefault } from './serialize.js';
 
 // ---------------------------------------------------------------------------

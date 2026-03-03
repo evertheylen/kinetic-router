@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { index, param, parameter, route, root, getSlugPath } from "./index.js";
+import { index, param, parameter, route, root } from "./index.js";
+import { getSlugPath } from "./root.js";
 
 const userId = param.path<string>();
 const postId = param.path<number>();
