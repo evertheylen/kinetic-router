@@ -9,7 +9,6 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "sourceMap": true,
-    "outDir": "dist",
     "composite": true,
     "incremental": true,
     "erasableSyntaxOnly": true,

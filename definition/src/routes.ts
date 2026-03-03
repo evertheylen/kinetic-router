@@ -1,0 +1,83 @@
+import { ParamDef, ParamValues } from "./params.js";
+
+// ---------------------------------------------------------------------------
+// Route
+// ---------------------------------------------------------------------------
+
+export type Locator<ParamDefs extends Record<string, ParamDef<any>>> = {
+  route: Route<ParamDefs>,
+  values: ParamValues<ParamDefs>
+}
+
+export class Route<ParamDefs extends Record<string, ParamDef<any>>> {
+  public paramDefs: ParamDefs;
+
+  constructor(paramDefs: ParamDefs) {
+    this.paramDefs = paramDefs;
+  }
+
+  aliasTo(aliasFunc: (params: ParamValues<ParamDefs>) => Locator<any>) {
+    return new Alias(this.paramDefs, aliasFunc);
+  }
+
+  // Returns Locator<any> because Alias may resolve to a different route.
+  getUrl(values: ParamValues<ParamDefs>): Locator<any> {
+    return { route: this, values };
+  }
+}
+
+class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Route<ParamDefs> {
+  public aliasFunc: (values: ParamValues<ParamDefs>) => Locator<any>;
+
+  constructor(paramDefs: ParamDefs, aliasFunc: (values: ParamValues<ParamDefs>) => Locator<any>) {
+    super(paramDefs);
+    this.aliasFunc = aliasFunc;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sitemap tree
+// ---------------------------------------------------------------------------
+
+export const index: unique symbol = Symbol('kinetic-router:index');
+
+export class ParameterizedPath<T, const SubSitemap extends Sitemap> {
+  protected paramDef: ParamDef<T, 'path'>;
+  PARAM: SubSitemap;
+
+  constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap) {
+    this.paramDef = paramDef;
+    this.PARAM = subSitemap;
+  }
+
+  withIndex(route: Route<any>) {
+    return new ParameterizedPathWithIndex(this.paramDef, this.PARAM, route);
+  }
+}
+
+export class ParameterizedPathWithIndex<T, const SubSitemap extends Sitemap> extends ParameterizedPath<T, SubSitemap> {
+  index: Route<any>;
+
+  constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap, index: Route<any>) {
+    super(paramDef, subSitemap);
+    this.index = index;
+  }
+}
+
+export type RootSitemapInput = ParameterizedPath<any, any> | SubPaths;
+export type Sitemap = RootSitemapInput | Route<any>;
+export type SubPaths = { [key in typeof index]?: Route<any> } & { [key in string]: Sitemap | Route<any> };
+
+// ---------------------------------------------------------------------------
+// Factory functions
+// ---------------------------------------------------------------------------
+
+export function route<const ParamDefs extends Record<string, ParamDef<any>>>(paramDefs: ParamDefs) {
+  return new Route(paramDefs);
+}
+
+export function parameter<const SubSitemap extends Sitemap>(paramDef: ParamDef<any, 'path'>, subSitemap: SubSitemap) {
+  return new ParameterizedPath(paramDef, subSitemap);
+}
+
+
