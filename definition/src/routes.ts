@@ -51,7 +51,7 @@ export class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Rout
 export const index: unique symbol = Symbol('kinetic-router:index');
 
 export class ParameterizedPath<T, const SubSitemap extends Sitemap> {
-  protected paramDef: ParamDef<T, 'path'>;
+  public paramDef: ParamDef<T, 'path'>;
   PARAM: SubSitemap;
 
   constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap) {
@@ -59,17 +59,17 @@ export class ParameterizedPath<T, const SubSitemap extends Sitemap> {
     this.PARAM = subSitemap;
   }
 
-  withIndex(route: Route<any>) {
-    return new ParameterizedPathWithIndex(this.paramDef, this.PARAM, route);
+  withoutParam(route: Route<any>) {
+    return new ParameterizedPathWithoutParam(this.paramDef, this.PARAM, route);
   }
 }
 
-export class ParameterizedPathWithIndex<T, const SubSitemap extends Sitemap> extends ParameterizedPath<T, SubSitemap> {
-  index: Route<any>;
+export class ParameterizedPathWithoutParam<T, const SubSitemap extends Sitemap> extends ParameterizedPath<T, SubSitemap> {
+  parentRoute: Route<any>;
 
-  constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap, index: Route<any>) {
+  constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap, parentRoute: Route<any>) {
     super(paramDef, subSitemap);
-    this.index = index;
+    this.parentRoute = parentRoute;
   }
 }
 

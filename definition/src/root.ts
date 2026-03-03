@@ -1,5 +1,5 @@
 import { ParamDef, Serde } from "./params.js";
-import { index, ParameterizedPath, ParameterizedPathWithIndex, Route, RootSitemapInput, Sitemap, SubPaths } from "./routes.js";
+import { index, ParameterizedPath, ParameterizedPathWithoutParam, Route, RootSitemapInput, Sitemap, SubPaths } from "./routes.js";
 
 export const slugLookup:   unique symbol = Symbol('kinetic-router:slugLookup');
 export const defaultSerde: unique symbol = Symbol('kinetic-router:defaultSerde');
@@ -19,8 +19,9 @@ export type RootSitemap = {
  * Validates:
  *  - Path params referenced in a route's paramDefs must be introduced by an
  *    ancestor ParameterizedPath node.
- *  - Every route must have a unique slug path (no two routes resolve to the
- *    same URL pattern).
+ *  - Every ancestor path param must be present in every route beneath it (not
+ *    applicable to routes registered via withoutParam, which sit above the param).
+ *  - A withoutParam route must not use any param that is not yet in scope.
  */
 export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any>): RootSitemap & Sm {
   const map = new Map<Route<any>, Slug[]>();
@@ -28,12 +29,12 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
   function walk(node: Sitemap, slugPath: Slug[], activePathParams: Set<ParamDef<any, 'path'>>) {
     if (node instanceof ParameterizedPath) {
       const nextActivePathParams = new Set(activePathParams);
-      nextActivePathParams.add(node['paramDef'] as ParamDef<any, 'path'>);
-      const nextSlugPath = [...slugPath, node['paramDef'] as ParamDef<any, 'path'>];
+      nextActivePathParams.add(node.paramDef);
+      const nextSlugPath = [...slugPath, node.paramDef];
 
-      // If it has an index route, register it at the current parameterized level.
-      if (node instanceof ParameterizedPathWithIndex) {
-        registerRoute(node.index, nextSlugPath, nextActivePathParams);
+      // If it has a parent route, register it at the slug path before the param.
+      if (node instanceof ParameterizedPathWithoutParam) {
+        registerRoute(node.parentRoute, slugPath, activePathParams);
       }
 
       walk(node.PARAM, nextSlugPath, nextActivePathParams);
@@ -65,11 +66,14 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
       }
     }
 
-    // Validate uniqueness: no two routes may share the same slug path.
-    for (const [existingRoute, existingPath] of map) {
-      if (existingRoute !== r && slugPathsEqual(existingPath, slugPath)) {
+    // Validate: every ancestor path param must be used by this route.
+    const routePathParams = new Set(
+      (Object.values(r.paramDefs) as ParamDef<any, any>[]).filter(d => d.type === 'path')
+    );
+    for (const ancestorParam of activePathParams) {
+      if (!routePathParams.has(ancestorParam)) {
         throw new Error(
-          `Two routes share the same slug path: [${slugPathToString(slugPath)}]`
+          `Route at [${slugPathToString(slugPath)}] does not use all ancestor path params.`
         );
       }
     }
@@ -79,7 +83,7 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
 
   walk(sitemap, [], new Set());
 
-  return { ...sitemap, [slugLookup]: map, [defaultSerde]: serde } as RootSitemap & Sm;
+  return Object.assign(sitemap, { [slugLookup]: map, [defaultSerde]: serde }) as RootSitemap & Sm;
 }
 
 /** Return the slug path for a route registered in a RootSitemap. */
@@ -90,14 +94,6 @@ export function getSlugPath(rootSitemap: RootSitemap, r: Route<any>): Slug[] | u
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-function slugPathsEqual(a: Slug[], b: Slug[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
 
 export function slugPathToString(path: Slug[]): string {
   return path.map(s => s instanceof ParamDef ? '<param>' : s).join('/');

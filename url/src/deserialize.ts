@@ -1,38 +1,11 @@
 import { index as indexSymbol } from '@kinetic-router/definition';
 import type { Locator, Serde } from '@kinetic-router/definition';
 import { defaultSerde } from '@kinetic-router/definition/root.js';
-import { Route } from '@kinetic-router/definition/routes.js';
-import { ParamDef } from '@kinetic-router/definition/params.js';
-import type { RootSitemapInput, Sitemap } from '@kinetic-router/definition/routes.js';
+import { Route, ParameterizedPath, ParameterizedPathWithoutParam } from '@kinetic-router/definition/routes.js';
+import type { Sitemap } from '@kinetic-router/definition/routes.js';
+import type { ParamDef } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
 import { hasDefault } from './serialize.js';
-
-// ---------------------------------------------------------------------------
-// Sitemap node type guards
-// ---------------------------------------------------------------------------
-
-function isParameterizedPath(node: unknown): node is { paramDef: ParamDef<any, 'path'>; PARAM: Sitemap } {
-  return (
-    node !== null &&
-    typeof node === 'object' &&
-    'paramDef' in node &&
-    'PARAM' in node &&
-    !isPlainRoute(node)
-  );
-}
-
-function isPlainRoute(node: unknown): node is Route<any> {
-  return node instanceof Route;
-}
-
-function isSubPaths(node: unknown): node is Record<string | symbol, unknown> {
-  return (
-    node !== null &&
-    typeof node === 'object' &&
-    !isParameterizedPath(node) &&
-    !isPlainRoute(node)
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Value helpers
@@ -110,25 +83,24 @@ function walkTree(
   searchParams: URLSearchParams,
   rootDefault: Serde<any> | undefined,
 ): Locator<any> | undefined {
-  if (isParameterizedPath(node)) {
+  if (node instanceof ParameterizedPath) {
+    // If this node has a withoutParam route, it sits at the current slug path
+    // (before the param segment). Match it when all segments are consumed here.
+    if (node instanceof ParameterizedPathWithoutParam && depth === segments.length) {
+      return buildLocatorFromRoute(node.parentRoute, searchParams, rootDefault);
+    }
+
     // Consume one segment as the path-param value.
     if (depth >= segments.length) return undefined;
 
     const rawSegment = segments[depth];
-    let childResult = walkTree(node.PARAM as Sitemap, segments, depth + 1, searchParams, rootDefault);
-
-    // If the child walk didn't match and this node has a .index route
-    // (ParameterizedPathWithIndex), try it when all segments are consumed.
-    if (childResult === undefined && 'index' in node && depth + 1 === segments.length) {
-      const indexRoute = (node as unknown as { index: Route<any> }).index;
-      childResult = buildLocatorFromRoute(indexRoute, searchParams, rootDefault);
-    }
+    const childResult = walkTree(node.PARAM as Sitemap, segments, depth + 1, searchParams, rootDefault);
 
     if (childResult === undefined) return undefined;
 
     // Find which param in the matched route's paramDefs corresponds to this
-    // paramDef. If the route doesn't declare it (e.g. a withIndex route with
-    // no params), the segment is structural — skip injecting a value.
+    // paramDef. If the route doesn't declare it, the segment is structural —
+    // skip injecting a value.
     const paramName = findParamName(childResult.route.paramDefs, node.paramDef);
     if (paramName === undefined) return childResult;
 
@@ -141,30 +113,24 @@ function walkTree(
     };
   }
 
-  if (isPlainRoute(node)) {
+  if (node instanceof Route) {
     // Must have consumed all path segments.
     if (depth !== segments.length) return undefined;
     return buildLocatorFromRoute(node, searchParams, rootDefault);
   }
 
-  // SubPaths plain object
-  if (isSubPaths(node)) {
-    const subPaths = node as Record<string | symbol, unknown>;
-
-    if (depth === segments.length) {
-      const indexRoute = subPaths[indexSymbol];
-      if (indexRoute instanceof Route) {
-        return buildLocatorFromRoute(indexRoute, searchParams, rootDefault);
-      }
-      return undefined;
+  // SubPaths: plain object with string keys and optional index symbol key.
+  if (depth === segments.length) {
+    const indexRoute = (node as any)[indexSymbol];
+    if (indexRoute instanceof Route) {
+      return buildLocatorFromRoute(indexRoute, searchParams, rootDefault);
     }
-
-    const child = (subPaths as Record<string, unknown>)[segments[depth]];
-    if (child === undefined) return undefined;
-    return walkTree(child as Sitemap, segments, depth + 1, searchParams, rootDefault);
+    return undefined;
   }
 
-  return undefined;
+  const child = (node as Record<string, unknown>)[segments[depth]];
+  if (child === undefined) return undefined;
+  return walkTree(child as Sitemap, segments, depth + 1, searchParams, rootDefault);
 }
 
 // ---------------------------------------------------------------------------

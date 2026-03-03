@@ -1,11 +1,11 @@
 import { RootSitemap, slugLookup, slugPathToString } from "@kinetic-router/definition/root.js";
 import { Route } from "@kinetic-router/definition/routes.js";
 import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
-import { PageFunction } from "./page.js";
+import { PageHandler } from "./page.js";
 
 type PageFuncLoader<Input extends object, Output extends object> = (
-  { lazy: false, func: PageFunction<Input, Output> }
-  | { lazy: true, load: (() => Promise<PageFunction<Input, Output>>) }
+  { lazy: false, func: PageHandler<Input, Output> }
+  | { lazy: true, load: (() => Promise<PageHandler<Input, Output>>) }
 );
 
 export class PageFunctionMap<
@@ -37,13 +37,13 @@ export class PageFunctionMap<
   }
 
   public implement<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, func: PageFunction<ParamValues<ParamDefs> & ExtraInput, ExtraOutput>
+    route: Route<ParamDefs>, func: PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput>
   ) {
     return this._implement(route, { lazy: false, func: func as any })
   }
 
   public implementLazy<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, load: () => Promise<PageFunction<ParamValues<ParamDefs> & ExtraInput, ExtraOutput>>
+    route: Route<ParamDefs>, load: () => Promise<PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput>>
   ) {
     return this._implement(route, { lazy: true, load: load as any })
   }

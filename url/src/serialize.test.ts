@@ -127,7 +127,7 @@ describe('locatorToUrl', () => {
   it('handles deeply nested SubPaths + ParameterizedPath', () => {
     const quuzIndex = route({ userId });
     const postRoute = route({ userId, postId });
-    const usersIndex = route({ userId });
+    const usersIndex = route({});
     const rootIndex = route({});
 
     const sm = root({
@@ -135,11 +135,11 @@ describe('locatorToUrl', () => {
       users: parameter(userId, {
         foo: { bar: { quuz: { [index]: quuzIndex } } },
         posts: parameter(postId, postRoute),
-      }).withIndex(usersIndex),
+      }).withoutParam(usersIndex),
     });
 
     expect(locatorToUrl(sm, rootIndex.locate({}))).toBe('/');
-    expect(locatorToUrl(sm, usersIndex.locate({ userId: 'bob' }))).toBe('/users/bob');
+    expect(locatorToUrl(sm, usersIndex.locate({}))).toBe('/users');
     expect(locatorToUrl(sm, quuzIndex.locate({ userId: 'bob' }))).toBe('/users/bob/foo/bar/quuz');
     expect(locatorToUrl(sm, postRoute.locate({ userId: 'bob', postId: 3 }))).toBe('/users/bob/posts/3');
   });

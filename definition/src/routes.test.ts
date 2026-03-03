@@ -12,7 +12,7 @@ root(route({}));
 const _sitemap = {
   users: parameter(userId, {
     posts: parameter(postId, route({ postId, userId, foo: param.search<string>() }))
-  }).withIndex(route({}))
+  }).withoutParam(route({}))
 };
 _sitemap.users.PARAM.posts.PARAM.locate({ postId: 1, userId: 'u', foo: 'x' });
 
@@ -37,13 +37,10 @@ describe('aliasTo', () => {
   });
 
   it('locate resolves a chain where each alias transforms the params', () => {
-    // target expects { n: number }
-    // middle expects { s: string } and converts s -> n by parsing
-    // alias expects { raw: string } and converts raw -> s by uppercasing
     const target = route({ n: param.hidden<number>() });
     const middle = route({ s: param.hidden<string>() }).aliasTo((p) => target.locate({ n: parseInt(p.s, 10) }));
-    const alias  = route({ raw: param.hidden<string>() }).aliasTo((p) => middle.locate({ s: p.raw.trim() }));
-    const locator = alias.locate({ raw: '  42  ' });
+    const alias  = route({ raw: param.hidden<string>() }).aliasTo((p) => middle.locate({ s: p.raw.split(',')[0] }));
+    const locator = alias.locate({ raw: '42,blabla,slkdfj' });
     expect(locator.route).toBe(target);
     expect(locator.values).toEqual({ n: 42 });
   });

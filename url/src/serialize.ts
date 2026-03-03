@@ -30,7 +30,7 @@ export function serializeValue(value: unknown, paramSerde: Serde<any> | undefine
  *
  * Throws if the route is not registered in the given `rootSitemap`.
  */
-export function locatorToUrl(rootSitemap: RootSitemap<RootSitemapInput>, locator: Locator<any>): string {
+export function locatorToUrl(rootSitemap: RootSitemap, locator: Locator<any>): string {
   const slugPath = getSlugPath(rootSitemap, locator.route);
   if (slugPath === undefined) {
     throw new Error('Route is not registered in the provided rootSitemap.');

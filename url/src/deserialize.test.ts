@@ -116,30 +116,21 @@ describe('urlToLocator', () => {
     expect(urlToLocator(sm, 'https://example.com/home')?.route).toBe(home);
   });
 
-  it('matches a withIndex route at a parameterized level (route with no params)', () => {
+  it('matches a withoutParam route at the parent path (before the param segment)', () => {
     const usersIndex = route({});
-    const sm = root(parameter(userId, { child: route({}) }).withIndex(usersIndex));
+    const sm = root({ users: parameter(userId, { child: route({ userId }) }).withoutParam(usersIndex) });
 
-    const locator = urlToLocator(sm, '/alice');
+    const locator = urlToLocator(sm, '/users');
     expect(locator?.route).toBe(usersIndex);
     expect(locator?.values).toEqual({});
   });
 
-  it('matches a withIndex route at a parameterized level (route declaring the param)', () => {
-    const usersIndex = route({ userId });
-    const sm = root(parameter(userId, { child: route({}) }).withIndex(usersIndex));
-
-    const locator = urlToLocator(sm, '/alice');
-    expect(locator?.route).toBe(usersIndex);
-    expect(locator?.values).toMatchObject({ userId: 'alice' });
-  });
-
-  it('matches sub-routes under a withIndex parameterized level', () => {
+  it('matches sub-routes under a withoutParam parameterized level', () => {
     const usersIndex = route({});
     const childRoute = route({ userId });
-    const sm = root(parameter(userId, { child: childRoute }).withIndex(usersIndex));
+    const sm = root({ users: parameter(userId, { child: childRoute }).withoutParam(usersIndex) });
 
-    const locator = urlToLocator(sm, '/alice/child');
+    const locator = urlToLocator(sm, '/users/alice/child');
     expect(locator?.route).toBe(childRoute);
     expect(locator?.values).toMatchObject({ userId: 'alice' });
   });

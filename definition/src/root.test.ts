@@ -33,12 +33,12 @@ describe('root', () => {
     expect(getSlugPath(sm, userPage)).toEqual([userId]);
   });
 
-  it('registers a withIndex route at the parameterized level', () => {
-    const indexRoute = route({});
-    const childRoute = route({});
-    const sm = root(parameter(userId, { child: childRoute }).withIndex(indexRoute));
-    expect(getSlugPath(sm, indexRoute)).toEqual([userId]);
-    expect(getSlugPath(sm, childRoute)).toEqual([userId, 'child']);
+  it('registers a withoutParam route at the parent slug path (before the param)', () => {
+    const parentRoute = route({});
+    const childRoute = route({ userId });
+    const sm = root({ users: parameter(userId, { child: childRoute }).withoutParam(parentRoute) });
+    expect(getSlugPath(sm, parentRoute)).toEqual(['users']);
+    expect(getSlugPath(sm, childRoute)).toEqual(['users', userId, 'child']);
   });
 
   it('returns undefined for a route not in the sitemap', () => {
@@ -52,18 +52,18 @@ describe('root', () => {
     );
     const postRoute = route({ postId, userId, foo: param.search<string>() });
     const usersIndexRoute = route({});
-    const quuzIndexRoute = route({});
+    const quuzIndexRoute = route({ userId });
 
     const sm = root({
       [index]: indexR,
       users: parameter(userId, {
         foo: { bar: { quuz: { [index]: quuzIndexRoute } } },
         posts: parameter(postId, postRoute),
-      }).withIndex(usersIndexRoute),
+      }).withoutParam(usersIndexRoute),
     });
 
     expect(getSlugPath(sm, indexR)).toEqual([]);
-    expect(getSlugPath(sm, usersIndexRoute)).toEqual(['users', userId]);
+    expect(getSlugPath(sm, usersIndexRoute)).toEqual(['users']);
     expect(getSlugPath(sm, quuzIndexRoute)).toEqual(['users', userId, 'foo', 'bar', 'quuz']);
     expect(getSlugPath(sm, postRoute)).toEqual(['users', userId, 'posts', postId]);
   });
@@ -75,10 +75,11 @@ describe('root validation', () => {
     expect(() => root({ home: route({ orphan }) })).toThrow(/path param that is not defined by an ancestor/);
   });
 
-  it('throws when two different routes share the same slug path', () => {
-    // parameter(userId, routeB).withIndex(routeA): both routeA and routeB end up at [userId]
+  it('throws when a route does not use all ancestor path params', () => {
     expect(() =>
-      root(parameter(userId, route({ userId })).withIndex(route({})))
-    ).toThrow(/Two routes share the same slug path/);
+      root(parameter(userId, { home: route({}) }))
+    ).toThrow(/does not use all ancestor path params/);
   });
+
+
 });
