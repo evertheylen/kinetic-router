@@ -27,8 +27,7 @@ export type PageHints = {
 }
 
 export type PageHandler<Input extends object, Output extends object = {}> = {
-  displayIn: 
-  (params: ParamWrapper<Input>, hints: PageHints) => Promise<
+  render: (params: ParamWrapper<Input>, hints: PageHints) => Promise<
     {html: JSX.Element, title: string } & Output
   >
 }

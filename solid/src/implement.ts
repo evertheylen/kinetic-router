@@ -3,24 +3,25 @@ import { Route } from "@kinetic-router/definition/routes.js";
 import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
 import { PageHandler } from "./page.js";
 
-type PageFuncLoader<Input extends object, Output extends object> = (
-  { lazy: false, func: PageHandler<Input, Output> }
+type PageHandlerLoader<Input extends object, Output extends object> = (
+  { lazy: false, handler: PageHandler<Input, Output> }
   | { lazy: true, load: (() => Promise<PageHandler<Input, Output>>) }
 );
 
-export class PageFunctionMap<
+export class PageHandlerMap<
+  ExtraHandlerAttributes extends object = {},
   ExtraInput extends object = {},
   ExtraOutput extends object = {}
 > {
   root: RootSitemap;
-  map = new Map<Route<any>, PageFuncLoader<ExtraInput, ExtraOutput>>;
+  map = new Map<Route<any>, PageHandlerLoader<ExtraInput, ExtraOutput> & ExtraHandlerAttributes>;
 
   constructor(root: RootSitemap) {
     this.root = root;
   }
 
   protected _implement<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, pageLoader: PageFuncLoader<ExtraInput, ExtraOutput>
+    route: Route<ParamDefs>, pageLoader: PageHandlerLoader<ExtraInput, ExtraOutput> & ExtraHandlerAttributes
   ) {
     const isInSlugMap = this.root[slugLookup].has(route);
     const isNestRoute = !isInSlugMap && this._isKnownNestRoute(route);
@@ -57,13 +58,13 @@ export class PageFunctionMap<
   }
 
   public implement<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, func: PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput>
+    route: Route<ParamDefs>, func: PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput> & ExtraHandlerAttributes
   ) {
-    return this._implement(route, { lazy: false, func: func as any })
+    return this._implement(route, { lazy: false, handler: func as any })
   }
 
   public implementLazy<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, load: () => Promise<PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput>>
+    route: Route<ParamDefs>, load: () => Promise<PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput> & ExtraHandlerAttributes>
   ) {
     return this._implement(route, { lazy: true, load: load as any })
   }
@@ -83,7 +84,7 @@ export class PageFunctionMap<
     }
   }
 
-  public getPageFunction<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
+  public getPageHandler<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
     if (!this.root[slugLookup].has(route) && !this._isKnownNestRoute(route)) {
       throw new Error(`Route ${route} is not part of given root`);
     }
