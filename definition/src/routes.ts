@@ -1,4 +1,4 @@
-import { ParamDef, ParamValues } from "./params.js";
+import { AnyParamDefs, ParamDef, ParamValues } from "./params.js";
 
 // ---------------------------------------------------------------------------
 // Route
@@ -11,9 +11,12 @@ export type Locator<ParamDefs extends Record<string, ParamDef<any>>> = {
 
 export class Route<ParamDefs extends Record<string, ParamDef<any>>> {
   public paramDefs: ParamDefs;
+  /** Ancestor nest routes, ordered from outermost to innermost (closest). Empty for non-nested routes. */
+  public nestedInRoutes: Route<any>[];
 
-  constructor(paramDefs: ParamDefs) {
+  constructor(paramDefs: ParamDefs, nestedInRoutes: Route<any>[] = []) {
     this.paramDefs = paramDefs;
+    this.nestedInRoutes = nestedInRoutes;
   }
 
   aliasTo(aliasFunc: (params: ParamValues<ParamDefs>) => Locator<any>) {
@@ -23,6 +26,25 @@ export class Route<ParamDefs extends Record<string, ParamDef<any>>> {
   // Returns Locator<any> because Alias may resolve to a different route.
   locate(values: ParamValues<ParamDefs>): Locator<any> {
     return { route: this, values };
+  }
+
+  nest<const SubSitemap extends Sitemap>(
+    factory: (
+      nestedRoute: <const OwnParamDefs extends AnyParamDefs>(
+        ownParamDefs: OwnParamDefs
+      ) => Route<ParamDefs & OwnParamDefs>
+    ) => SubSitemap
+  ): SubSitemap {
+    // The ancestor list for children = this route's own ancestors + this route itself.
+    const ancestorsForChildren: Route<any>[] = [...this.nestedInRoutes, this];
+
+    const nestedRoute = <const OwnParamDefs extends AnyParamDefs>(
+      ownParamDefs: OwnParamDefs
+    ): Route<ParamDefs & OwnParamDefs> => {
+      return new Route({ ...this.paramDefs, ...ownParamDefs }, ancestorsForChildren);
+    };
+
+    return factory(nestedRoute);
   }
 }
 
@@ -88,5 +110,4 @@ export function route<const ParamDefs extends Record<string, ParamDef<any>>>(par
 export function parameter<const SubSitemap extends Sitemap>(paramDef: ParamDef<any, 'path'>, subSitemap: SubSitemap) {
   return new ParameterizedPath(paramDef, subSitemap);
 }
-
 

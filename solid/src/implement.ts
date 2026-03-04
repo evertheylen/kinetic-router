@@ -22,18 +22,38 @@ export class PageFunctionMap<
   protected _implement<ParamDefs extends AnyParamDefs>(
     route: Route<ParamDefs>, pageLoader: PageFuncLoader<ExtraInput, ExtraOutput>
   ) {
-    if (!this.root[slugLookup].has(route)) {
+    const isInSlugMap = this.root[slugLookup].has(route);
+    const isNestRoute = !isInSlugMap && this._isKnownNestRoute(route);
+
+    if (!isInSlugMap && !isNestRoute) {
       throw new Error(`Route ${route} is not part of given root`);
     }
 
     const existingPage = this.map.get(route);
     if (existingPage !== undefined) {
-      const hint = slugPathToString(this.root[slugLookup].get(route)!);
+      const slugHint = this.root[slugLookup].get(route);
+      const hint = slugHint ? slugPathToString(slugHint) : '(nest route)';
       throw new Error(`Route <${hint}> already implemented: ${existingPage}`);
     }
 
     // @ts-ignore
     this.map.set(route, pageLoader);
+  }
+
+  /** Collect all unique nest ancestor routes referenced by routes in the sitemap. */
+  private _collectNestRoutes(): Set<Route<any>> {
+    const nestRoutes = new Set<Route<any>>();
+    for (const r of this.root[slugLookup].keys()) {
+      for (const ancestor of r.nestedInRoutes) {
+        nestRoutes.add(ancestor);
+      }
+    }
+    return nestRoutes;
+  }
+
+  /** Check whether a given route is a nest ancestor route referenced by routes in the sitemap. */
+  private _isKnownNestRoute(route: Route<any>): boolean {
+    return this._collectNestRoutes().has(route);
   }
 
   public implement<ParamDefs extends AnyParamDefs>(
@@ -49,16 +69,22 @@ export class PageFunctionMap<
   }
 
   public check() {
-    const noMatch = [...this.root[slugLookup].keys().filter(route => !this.map.has(route))];
+    const missingSlugRoutes = [...this.root[slugLookup].keys().filter(route => !this.map.has(route))];
+    const missingNestRoutes = [...this._collectNestRoutes()].filter(r => !this.map.has(r));
 
-    if (noMatch.length > 0) {
-      const paths = noMatch.map(r => slugPathToString(this.root[slugLookup].get(r)!));
+    const missing = [...missingSlugRoutes, ...missingNestRoutes];
+
+    if (missing.length > 0) {
+      const paths = missing.map(r => {
+        const slugHint = this.root[slugLookup].get(r);
+        return slugHint ? slugPathToString(slugHint) : '(nest route)';
+      });
       throw new Error(`No implementation found for ${paths.join(', ')}`);
     }
   }
 
   public getPageFunction<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
-    if (!this.root[slugLookup].has(route)) {
+    if (!this.root[slugLookup].has(route) && !this._isKnownNestRoute(route)) {
       throw new Error(`Route ${route} is not part of given root`);
     }
 
