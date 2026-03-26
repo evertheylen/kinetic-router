@@ -20,6 +20,7 @@
   "dependencies": {
     "@kinetic-router/definition": "workspace:*",
     "@kinetic-router/url": "workspace:*",
+    "@solidjs/web": "catalog:",
     "solid-js": "catalog:"
   },
   "devDependencies": {

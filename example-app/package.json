@@ -1,0 +1,21 @@
+{
+  "name": "@kinetic-router/example-app",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev"
+  },
+  "dependencies": {
+    "@kinetic-router/definition": "workspace:*",
+    "@kinetic-router/solid": "workspace:*",
+    "@solidjs/web": "catalog:",
+    "solid-js": "catalog:",
+    "vite": "catalog:",
+    "vite-plugin-solid": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

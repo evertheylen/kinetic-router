@@ -5,7 +5,7 @@
     "jsx": "preserve",
     "jsxImportSource": "solid-js"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/router.ts", "../definition/src/implement.ts", "../definition/src/implement.test.ts"],
   "references": [
     { "path": "../definition" },
     { "path": "../url" }

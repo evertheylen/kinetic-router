@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { index, param, parameter, route, root } from "./index.js";
+import { index, param, parameter, route, root, missing } from "./index.js";
 import { getSlugPath } from "./root.js";
 
 const userId = param.path<string>();
@@ -33,10 +33,10 @@ describe('root', () => {
     expect(getSlugPath(sm, userPage)).toEqual([userId]);
   });
 
-  it('registers a withoutParam route at the parent slug path (before the param)', () => {
+  it('registers a noParamGiven route at the parent slug path (before the param)', () => {
     const parentRoute = route({});
     const childRoute = route({ userId });
-    const sm = root({ users: parameter(userId, { child: childRoute }).withoutParam(parentRoute) });
+    const sm = root({ users: parameter(userId, { child: childRoute, [missing]: parentRoute }) });
     expect(getSlugPath(sm, parentRoute)).toEqual(['users']);
     expect(getSlugPath(sm, childRoute)).toEqual(['users', userId, 'child']);
   });
@@ -57,9 +57,10 @@ describe('root', () => {
     const sm = root({
       [index]: indexR,
       users: parameter(userId, {
+        [missing]: usersIndexRoute,
         foo: { bar: { quuz: { [index]: quuzIndexRoute } } },
         posts: parameter(postId, postRoute),
-      }).withoutParam(usersIndexRoute),
+      })
     });
 
     expect(getSlugPath(sm, indexR)).toEqual([]);

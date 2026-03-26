@@ -116,19 +116,19 @@ describe('urlToLocator', () => {
     expect(urlToLocator(sm, 'https://example.com/home')?.route).toBe(home);
   });
 
-  it('matches a withoutParam route at the parent path (before the param segment)', () => {
+  it('matches a noParamGiven route at the parent path (before the param segment)', () => {
     const usersIndex = route({});
-    const sm = root({ users: parameter(userId, { child: route({ userId }) }).withoutParam(usersIndex) });
+    const sm = root({ users: parameter(userId, { child: route({ userId }) }).withDefaultRoute(usersIndex) });
 
     const locator = urlToLocator(sm, '/users');
     expect(locator?.route).toBe(usersIndex);
     expect(locator?.values).toEqual({});
   });
 
-  it('matches sub-routes under a withoutParam parameterized level', () => {
+  it('matches sub-routes under a noParamGiven parameterized level', () => {
     const usersIndex = route({});
     const childRoute = route({ userId });
-    const sm = root({ users: parameter(userId, { child: childRoute }).withoutParam(usersIndex) });
+    const sm = root({ users: parameter(userId, { child: childRoute }).withDefaultRoute(usersIndex) });
 
     const locator = urlToLocator(sm, '/users/alice/child');
     expect(locator?.route).toBe(childRoute);

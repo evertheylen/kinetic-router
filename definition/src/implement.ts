@@ -1,27 +1,30 @@
-import { RootSitemap, slugLookup, slugPathToString } from "@kinetic-router/definition/root.js";
-import { Route } from "@kinetic-router/definition/routes.js";
-import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
-import { PageHandler } from "./page.js";
+import { RootSitemap, slugLookup, slugPathToString } from "./root.js";
+import { Route } from "./routes.js";
+import { AnyParamDefs, ParamDef, ParamValues } from "./params.js";
 
-type PageHandlerLoader<Input extends object, Output extends object> = (
-  { lazy: false, handler: PageHandler<Input, Output> }
-  | { lazy: true, load: (() => Promise<PageHandler<Input, Output>>) }
-);
+type ImplLoader<Impl, StaticData> = (
+  { lazy: false, impl: Impl & StaticData }
+  // for lazy routes, we may need some data up front
+  | { lazy: true, loadImpl: (() => Promise<Impl>), staticData: StaticData }
+)
 
-export class PageHandlerMap<
-  ExtraHandlerAttributes extends object = {},
-  ExtraInput extends object = {},
-  ExtraOutput extends object = {}
+export class ImplementationMap<
+  // In the most common example, this is a Page
+  Impl,
+
+  // Static data that describe all page instances handled by that Page
+  // Example: { displayAs: 'popup' }
+  StaticData,
 > {
   root: RootSitemap;
-  map = new Map<Route<any>, PageHandlerLoader<ExtraInput, ExtraOutput> & ExtraHandlerAttributes>;
+  map = new Map<Route<any>, ImplLoader<Impl, StaticData>>;
 
   constructor(root: RootSitemap) {
     this.root = root;
   }
 
   protected _implement<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, pageLoader: PageHandlerLoader<ExtraInput, ExtraOutput> & ExtraHandlerAttributes
+    route: Route<ParamDefs>, impl: ImplLoader<Impl, StaticData>
   ) {
     const isInSlugMap = this.root[slugLookup].has(route);
     const isNestRoute = !isInSlugMap && this._isKnownNestRoute(route);
@@ -37,8 +40,7 @@ export class PageHandlerMap<
       throw new Error(`Route <${hint}> already implemented: ${existingPage}`);
     }
 
-    // @ts-ignore
-    this.map.set(route, pageLoader);
+    this.map.set(route, impl);
   }
 
   /** Collect all unique nest ancestor routes referenced by routes in the sitemap. */
@@ -58,15 +60,17 @@ export class PageHandlerMap<
   }
 
   public implement<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, func: PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput> & ExtraHandlerAttributes
+    route: Route<ParamDefs>, impl: Impl & StaticData,
   ) {
-    return this._implement(route, { lazy: false, handler: func as any })
+    return this._implement(route, { lazy: false, impl });
   }
 
   public implementLazy<ParamDefs extends AnyParamDefs>(
-    route: Route<ParamDefs>, load: () => Promise<PageHandler<ParamValues<ParamDefs> & ExtraInput, ExtraOutput> & ExtraHandlerAttributes>
+    route: Route<ParamDefs>,
+    loadImpl: () => Promise<Impl>,
+    staticData: StaticData,
   ) {
-    return this._implement(route, { lazy: true, load: load as any })
+    return this._implement(route, { lazy: true, loadImpl, staticData });
   }
 
   public check() {

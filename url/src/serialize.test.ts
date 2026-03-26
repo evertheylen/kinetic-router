@@ -135,7 +135,7 @@ describe('locatorToUrl', () => {
       users: parameter(userId, {
         foo: { bar: { quuz: { [index]: quuzIndex } } },
         posts: parameter(postId, postRoute),
-      }).withoutParam(usersIndex),
+      }).withDefaultRoute(usersIndex),
     });
 
     expect(locatorToUrl(sm, rootIndex.locate({}))).toBe('/');

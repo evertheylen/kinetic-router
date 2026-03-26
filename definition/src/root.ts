@@ -1,5 +1,5 @@
 import { ParamDef, Serde } from "./params.js";
-import { index, ParameterizedPath, ParameterizedPathWithoutParam, Route, RootSitemapInput, Sitemap, SubPaths } from "./routes.js";
+import { index, ParameterizedPath, OptionalParameterizedPath, Route, RootSitemapInput, Sitemap, SubPaths } from "./routes.js";
 
 export const slugLookup:   unique symbol = Symbol('kinetic-router:slugLookup');
 export const defaultSerde: unique symbol = Symbol('kinetic-router:defaultSerde');
@@ -20,8 +20,8 @@ export type RootSitemap = {
  *  - Path params referenced in a route's paramDefs must be introduced by an
  *    ancestor ParameterizedPath node.
  *  - Every ancestor path param must be present in every route beneath it (not
- *    applicable to routes registered via withoutParam, which sit above the param).
- *  - A withoutParam route must not use any param that is not yet in scope.
+ *    applicable to routes registered via noParamGiven, which sit above the param).
+ *  - A noParamGiven route must not use any param that is not yet in scope.
  */
 export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any>): RootSitemap & Sm {
   const map = new Map<Route<any>, Slug[]>();
@@ -33,8 +33,8 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
       const nextSlugPath = [...slugPath, node.paramDef];
 
       // If it has a parent route, register it at the slug path before the param.
-      if (node instanceof ParameterizedPathWithoutParam) {
-        registerRoute(node.parentRoute, slugPath, activePathParams);
+      if (node instanceof OptionalParameterizedPath) {
+        registerRoute(node.defaultRoute, slugPath, activePathParams);
       }
 
       walk(node.PARAM, nextSlugPath, nextActivePathParams);

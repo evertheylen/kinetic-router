@@ -72,6 +72,8 @@ export class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Rout
 
 export const index: unique symbol = Symbol('kinetic-router:index');
 
+export const missing: unique symbol = Symbol('kinetic-router:missing');
+
 export class ParameterizedPath<T, const SubSitemap extends Sitemap> {
   public paramDef: ParamDef<T, 'path'>;
   PARAM: SubSitemap;
@@ -80,18 +82,16 @@ export class ParameterizedPath<T, const SubSitemap extends Sitemap> {
     this.paramDef = paramDef;
     this.PARAM = subSitemap;
   }
-
-  withoutParam(route: Route<any>) {
-    return new ParameterizedPathWithoutParam(this.paramDef, this.PARAM, route);
-  }
 }
 
-export class ParameterizedPathWithoutParam<T, const SubSitemap extends Sitemap> extends ParameterizedPath<T, SubSitemap> {
-  parentRoute: Route<any>;
+export class OptionalParameterizedPath<
+  T, const SubSitemap extends Sitemap, const Default extends Record<string, ParamDef<any>>
+> extends ParameterizedPath<T, SubSitemap> {
+  defaultRoute: Route<any>;
 
-  constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap, parentRoute: Route<any>) {
+  constructor(paramDef: ParamDef<T, 'path'>, subSitemap: SubSitemap, defaultRoute: Route<any>) {
     super(paramDef, subSitemap);
-    this.parentRoute = parentRoute;
+    this.defaultRoute = defaultRoute;
   }
 }
 
@@ -107,7 +107,20 @@ export function route<const ParamDefs extends Record<string, ParamDef<any>>>(par
   return new Route(paramDefs);
 }
 
-export function parameter<const SubSitemap extends Sitemap>(paramDef: ParamDef<any, 'path'>, subSitemap: SubSitemap) {
-  return new ParameterizedPath(paramDef, subSitemap);
+export function parameter<const SubSitemap extends Sitemap>(
+  paramDef: ParamDef<any, 'path'>, subSitemap: SubSitemap
+): ParameterizedPath<ParamDef<any, 'path'>, SubSitemap>
+
+export function parameter<const SubSitemap extends Sitemap, Default extends Record<string, ParamDef<any>>>(
+  paramDef: ParamDef<any, 'path'>, subSitemap: SubSitemap & { [missing]: Route<Default> }
+): OptionalParameterizedPath<ParamDef<any, 'path'>, SubSitemap, Default>
+
+export function parameter<const SubSitemap extends Sitemap>(paramDef: ParamDef<any, 'path'>, subSitemap: SubSitemap &  { [missing]?: Route<any> }) {
+  if (subSitemap[missing] !== undefined) {
+    const { [missing]: defaultRoute, ...subSitemapWithoutMissing } = subSitemap;
+    return new OptionalParameterizedPath(paramDef, subSitemapWithoutMissing as any, defaultRoute!);
+  } else {
+    return new ParameterizedPath(paramDef, subSitemap);
+  }
 }
 

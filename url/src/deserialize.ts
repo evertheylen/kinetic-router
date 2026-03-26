@@ -1,7 +1,7 @@
 import { index as indexSymbol } from '@kinetic-router/definition';
 import type { Locator, Serde } from '@kinetic-router/definition';
 import { defaultSerde } from '@kinetic-router/definition/root.js';
-import { Route, ParameterizedPath, ParameterizedPathWithoutParam } from '@kinetic-router/definition/routes.js';
+import { Route, ParameterizedPath, OptionalParameterizedPath } from '@kinetic-router/definition/routes.js';
 import type { Sitemap } from '@kinetic-router/definition/routes.js';
 import type { ParamDef } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
@@ -84,10 +84,10 @@ function walkTree(
   rootDefault: Serde<any> | undefined,
 ): Locator<any> | undefined {
   if (node instanceof ParameterizedPath) {
-    // If this node has a withoutParam route, it sits at the current slug path
+    // If this node has a noParamGiven route, it sits at the current slug path
     // (before the param segment). Match it when all segments are consumed here.
-    if (node instanceof ParameterizedPathWithoutParam && depth === segments.length) {
-      return buildLocatorFromRoute(node.parentRoute, searchParams, rootDefault);
+    if (node instanceof OptionalParameterizedPath && depth === segments.length) {
+      return buildLocatorFromRoute(node.defaultRoute, searchParams, rootDefault);
     }
 
     // Consume one segment as the path-param value.
