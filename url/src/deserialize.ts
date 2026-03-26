@@ -1,11 +1,10 @@
 import { index as indexSymbol } from '@kinetic-router/definition';
 import type { Locator, Serde } from '@kinetic-router/definition';
 import { defaultSerde } from '@kinetic-router/definition/root.js';
-import { Route, ParameterizedPath, OptionalParameterizedPath } from '@kinetic-router/definition/routes.js';
-import type { Sitemap } from '@kinetic-router/definition/routes.js';
-import type { ParamDef } from '@kinetic-router/definition/params.js';
+import { Route } from '@kinetic-router/definition/routes.js';
+import { PathParamDef, SearchParamDef, SearchParamDefWithDefault, type ParamDef } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
-import { hasDefault } from './serialize.js';
+import { index, Sitemap } from '@kinetic-router/definition/sitemap.js';
 
 // ---------------------------------------------------------------------------
 // Value helpers
@@ -49,11 +48,11 @@ function buildLocatorFromRoute(
   const values: Record<string, unknown> = {};
 
   for (const [name, def] of Object.entries(paramDefs)) {
-    if (def.type === 'search') {
+    if (def instanceof SearchParamDef) {
       const raw = searchParams.get(name);
       if (raw !== null) {
         values[name] = deserializeValue(raw, def.serde, rootDefault);
-      } else if (hasDefault(def)) {
+      } else if (def instanceof SearchParamDefWithDefault) {
         // Param absent from URL — restore the declared default value.
         values[name] = def.makeDefault();
       }
@@ -83,43 +82,14 @@ function walkTree(
   searchParams: URLSearchParams,
   rootDefault: Serde<any> | undefined,
 ): Locator<any> | undefined {
-  if (node instanceof ParameterizedPath) {
-    // If this node has a noParamGiven route, it sits at the current slug path
-    // (before the param segment). Match it when all segments are consumed here.
-    if (node instanceof OptionalParameterizedPath && depth === segments.length) {
-      return buildLocatorFromRoute(node.defaultRoute, searchParams, rootDefault);
-    }
-
-    // Consume one segment as the path-param value.
-    if (depth >= segments.length) return undefined;
-
-    const rawSegment = segments[depth];
-    const childResult = walkTree(node.PARAM as Sitemap, segments, depth + 1, searchParams, rootDefault);
-
-    if (childResult === undefined) return undefined;
-
-    // Find which param in the matched route's paramDefs corresponds to this
-    // paramDef. If the route doesn't declare it, the segment is structural —
-    // skip injecting a value.
-    const paramName = findParamName(childResult.route.paramDefs, node.paramDef);
-    if (paramName === undefined) return childResult;
-
-    return {
-      route: childResult.route,
-      values: {
-        ...childResult.values,
-        [paramName]: deserializeValue(rawSegment, node.paramDef.serde, rootDefault),
-      },
-    };
-  }
-
   if (node instanceof Route) {
     // Must have consumed all path segments.
     if (depth !== segments.length) return undefined;
     return buildLocatorFromRoute(node, searchParams, rootDefault);
   }
 
-  // SubPaths: plain object with string keys and optional index symbol key.
+  const { [index]: indexRoute, ...subRoutes } = node;
+
   if (depth === segments.length) {
     const indexRoute = (node as any)[indexSymbol];
     if (indexRoute instanceof Route) {
@@ -128,9 +98,35 @@ function walkTree(
     return undefined;
   }
 
-  const child = (node as Record<string, unknown>)[segments[depth]];
-  if (child === undefined) return undefined;
-  return walkTree(child as Sitemap, segments, depth + 1, searchParams, rootDefault);
+  const keys = Reflect.ownKeys(subRoutes);
+
+  if (typeof keys[0] === 'symbol') {
+    // parameter!
+    const paramDef = PathParamDef.symbolRegistry.get(keys[0])!;
+    // Consume one segment as the path-param value.
+    if (depth >= segments.length) return undefined;
+
+    const rawSegment = segments[depth];
+    const childResult = walkTree(subRoutes, segments, depth + 1, searchParams, rootDefault);
+
+    if (childResult === undefined) return undefined;
+
+    const paramName = findParamName(childResult.route.paramDefs, paramDef);
+    if (paramName === undefined) return childResult;
+
+    return {
+      route: childResult.route,
+      values: {
+        ...childResult.values,
+        [paramName]: deserializeValue(rawSegment, paramDef.serde, rootDefault),
+      },
+    };
+  } else {
+    // string subroutes
+    const child = (subRoutes as { [key in string]: Sitemap })[segments[depth]];
+    if (child === undefined) return undefined;
+    return walkTree(child as Sitemap, segments, depth + 1, searchParams, rootDefault);
+  }
 }
 
 // ---------------------------------------------------------------------------

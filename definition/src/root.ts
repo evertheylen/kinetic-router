@@ -1,4 +1,4 @@
-import { param, ParamDef, PathParamDef, Serde } from "./params.js";
+import { ParamDef, PathParamDef, Serde } from "./params.js";
 import { Route } from "./routes.js";
 import { index, Sitemap, SubRoutes } from "./sitemap.js";
 
@@ -48,7 +48,7 @@ export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): Roo
         if (typeof keys[0] === 'string') {
           // registering fixed subpaths
           if (keys.some(k => typeof k !== 'string')) {
-            throw new Error('expected all string keys');
+            throw new Error(`Expected all string keys but got [${keys.map(k => k.toString()).join(', ')}]`);
           }
 
           for (const [key, child] of Object.entries(subRoutes)) {
@@ -76,11 +76,9 @@ export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): Roo
 
   function registerRoute(r: Route, slugPath: Slug[], activePathParams: Set<PathParamDef<any>>) {
     // Validate: all path params in this route's paramDefs must be in scope.
-    for (const [, def] of Object.entries(r.paramDefs) as any) {
-      if (def.type === 'path' && !activePathParams.has(def)) {
-        throw new Error(
-          `Route uses path param that is not defined by an ancestor ParameterizedPath node.`
-        );
+    for (const paramDef of Object.values(r.paramDefs as Record<string, ParamDef<any>>)) {
+      if (paramDef instanceof PathParamDef && !activePathParams.has(paramDef)) {
+        throw new Error(`Route uses path param that is not defined by an ancestor ParameterizedPath node.`);
       }
     }
 
@@ -101,12 +99,7 @@ export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): Roo
 
   walk(sitemap, [], new Set());
 
-  // check nested routes
-  for (const route of map.keys()) {
-    if (route.nestedInRoutes.some(r => !map.has(r))) {
-      throw new Error(`Route ${route} is nested in routes not part of given root`);
-    }
-  }
+  // Note: we don't have to check nested routes, as they are not "real" routes!
 
   return Object.assign(sitemap, { [slugLookup]: map, [defaultSerde]: serde }) as RootSitemap & Sm;
 }

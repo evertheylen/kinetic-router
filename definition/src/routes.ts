@@ -25,6 +25,7 @@ export class Route<ParamDefs extends Record<string, ParamDef<any>> = any> {
     return { route: this, values };
   }
 
+  /** Nesting makes this Route no longer navigable! But it does require implementation. */
   nest<const SubSitemap extends Sitemap>(
     factory: (
       nestedRoute: <const OwnParamDefs extends AnyParamDefs>(

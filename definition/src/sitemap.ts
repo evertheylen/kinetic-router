@@ -1,4 +1,3 @@
-import { ParamDef } from "./params";
 import { Route } from "./routes";
 
 export const index: unique symbol = Symbol('kinetic-router:index');

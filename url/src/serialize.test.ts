@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { index, param, parameter, route, root } from '@kinetic-router/definition';
+import { index, param, route, root } from '@kinetic-router/definition';
 import { locatorToUrl } from './serialize.js';
 import { userId, postId, numberSerde } from './test_fixtures.js';
 
@@ -22,7 +22,7 @@ describe('locatorToUrl', () => {
 
   it('handles a parameterized path segment', () => {
     const userPage = route({ userId });
-    const sm = root(parameter(userId, userPage));
+    const sm = root({[userId.$]: userPage});
 
     expect(locatorToUrl(sm, userPage.locate({ userId: 'alice' }))).toBe('/alice');
   });
@@ -30,9 +30,13 @@ describe('locatorToUrl', () => {
   it('handles nested parameterized paths', () => {
     const postIdWithSerde = param.path<number>(numberSerde);
     const postRoute = route({ userId, postId: postIdWithSerde });
-    const sm = root(parameter(userId, {
-      posts: parameter(postIdWithSerde, postRoute),
-    }));
+    const sm = root({
+      [userId.$]: {
+        posts: {
+          [postIdWithSerde.$]: postRoute
+        }
+      }
+    });
 
     expect(locatorToUrl(sm, postRoute.locate({ userId: 'alice', postId: 42 }))).toBe('/alice/posts/42');
   });
@@ -103,7 +107,7 @@ describe('locatorToUrl', () => {
   it('uses the param serde for path segments', () => {
     const idParam = param.path<number>(numberSerde);
     const r = route({ id: idParam });
-    const sm = root(parameter(idParam, r));
+    const sm = root({[idParam.$]: r});
 
     expect(locatorToUrl(sm, r.locate({ id: 7 }))).toBe('/7');
   });
@@ -111,7 +115,7 @@ describe('locatorToUrl', () => {
   it('falls back to defaultSerde on the root for path params', () => {
     const idParam = param.path<number>();
     const r = route({ id: idParam });
-    const sm = root(parameter(idParam, r), numberSerde);
+    const sm = root({[idParam.$]: r}, numberSerde);
 
     expect(locatorToUrl(sm, r.locate({ id: 42 }))).toBe('/42');
   });
@@ -119,12 +123,12 @@ describe('locatorToUrl', () => {
   it('falls back to String() when no serde is available', () => {
     const idParam = param.path<number>();
     const r = route({ id: idParam });
-    const sm = root(parameter(idParam, r));
+    const sm = root({[idParam.$]: r});
 
     expect(locatorToUrl(sm, r.locate({ id: 5 }))).toBe('/5');
   });
 
-  it('handles deeply nested SubPaths + ParameterizedPath', () => {
+  it('handles deeply nested SubPaths + parameters', () => {
     const quuzIndex = route({ userId });
     const postRoute = route({ userId, postId });
     const usersIndex = route({});
@@ -132,10 +136,15 @@ describe('locatorToUrl', () => {
 
     const sm = root({
       [index]: rootIndex,
-      users: parameter(userId, {
-        foo: { bar: { quuz: { [index]: quuzIndex } } },
-        posts: parameter(postId, postRoute),
-      }).withDefaultRoute(usersIndex),
+      users: {
+        [index]: usersIndex,
+        [userId.$]: {
+          foo: { bar: { quuz: { [index]: quuzIndex } } },
+        },
+      },
+      posts: {
+        [postId.$]: postRoute
+      }
     });
 
     expect(locatorToUrl(sm, rootIndex.locate({}))).toBe('/');

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { index, param, parameter, route, root } from '@kinetic-router/definition';
+import { index, param, route, root } from '@kinetic-router/definition';
 import { locatorToUrl } from './serialize.js';
 import { urlToLocator } from './deserialize.js';
 import { userId, postId, numberSerde, stringSerde } from './test_fixtures.js';
@@ -30,7 +30,7 @@ describe('urlToLocator', () => {
   it('matches a parameterized path and deserializes the param', () => {
     const idParam = param.path<number>(numberSerde);
     const r = route({ id: idParam });
-    const sm = root(parameter(idParam, r));
+    const sm = root({[idParam.$]: r});
 
     const locator = urlToLocator(sm, '/42');
     expect(locator?.route).toBe(r);
@@ -39,9 +39,13 @@ describe('urlToLocator', () => {
 
   it('matches nested parameterized paths', () => {
     const postRoute = route({ userId, postId });
-    const sm = root(parameter(userId, {
-      posts: parameter(postId, postRoute),
-    }));
+    const sm = root({
+      [userId.$]: {
+        posts: {
+          [postId.$]: postRoute
+        }
+      }
+    });
 
     const locator = urlToLocator(sm, '/alice/posts/99');
     expect(locator?.route).toBe(postRoute);
@@ -118,7 +122,14 @@ describe('urlToLocator', () => {
 
   it('matches a noParamGiven route at the parent path (before the param segment)', () => {
     const usersIndex = route({});
-    const sm = root({ users: parameter(userId, { child: route({ userId }) }).withDefaultRoute(usersIndex) });
+    const sm = root({
+      users: {
+        [index]: usersIndex,
+        [userId.$]: {
+          child: route({ userId })
+        }
+      }
+    });
 
     const locator = urlToLocator(sm, '/users');
     expect(locator?.route).toBe(usersIndex);
@@ -128,7 +139,12 @@ describe('urlToLocator', () => {
   it('matches sub-routes under a noParamGiven parameterized level', () => {
     const usersIndex = route({});
     const childRoute = route({ userId });
-    const sm = root({ users: parameter(userId, { child: childRoute }).withDefaultRoute(usersIndex) });
+    const sm = root({
+      users: {
+        [index]: usersIndex,
+        [userId.$]: { child: childRoute }
+      }
+    });
 
     const locator = urlToLocator(sm, '/users/alice/child');
     expect(locator?.route).toBe(childRoute);
@@ -138,9 +154,13 @@ describe('urlToLocator', () => {
   it('round-trips path params through locatorToUrl → urlToLocator', () => {
     const postIdWS = param.path<number>(numberSerde);
     const postRoute = route({ userId, postId: postIdWS });
-    const sm = root(parameter(userId, {
-      posts: parameter(postIdWS, postRoute),
-    }));
+    const sm = root({
+      [userId.$]: {
+        posts: {
+          [postIdWS.$]: postRoute
+        }
+      }
+    });
 
     const url = locatorToUrl(sm, postRoute.locate({ userId: 'carol', postId: 7 }));
     const locator = urlToLocator(sm, url);

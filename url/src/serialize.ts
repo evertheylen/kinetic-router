@@ -1,13 +1,8 @@
 import type { Locator, Serde } from '@kinetic-router/definition';
 import { defaultSerde, getSlugPath } from '@kinetic-router/definition/root.js';
-import { ParamDef, ParamDefWithDefault } from '@kinetic-router/definition/params.js';
-import type { RootSitemapInput } from '@kinetic-router/definition/routes.js';
+import { ParamDef, SearchParamDef, SearchParamDefWithDefault } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
 
-/** Returns true when a ParamDef was created with .withDefault() or .optional(). */
-export function hasDefault(def: ParamDef<any>): def is ParamDefWithDefault<any> {
-  return def instanceof ParamDefWithDefault;
-}
 
 /** Serialize a single value using a param's serde, falling back to the root's
  *  defaultSerde, and finally to `String()`. */
@@ -66,12 +61,12 @@ export function locatorToUrl(rootSitemap: RootSitemap, locator: Locator<any>): s
   // --- Search params ---
   const searchParams = new URLSearchParams();
   for (const [name, def] of Object.entries(paramDefs)) {
-    if (def.type !== 'search') continue;
+    if (def instanceof SearchParamDef) continue;
     const rawValue = values[name];
     if (rawValue === undefined) continue;
     // Omit the param when its value equals the declared default.
-    if (hasDefault(def)) {
-      const defaultValue = (def as ParamDefWithDefault<unknown>).makeDefault();
+    if (def instanceof SearchParamDefWithDefault) {
+      const defaultValue = def.makeDefault();
       if (serializeValue(rawValue, def.serde, rootDefault) === serializeValue(defaultValue, def.serde, rootDefault)) continue;
     }
     searchParams.set(name, serializeValue(rawValue, def.serde, rootDefault));

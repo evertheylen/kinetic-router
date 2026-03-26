@@ -23,7 +23,7 @@ export class ImplementationMap<
     this.root = root;
   }
 
-  protected _implement<ParamDefs extends AnyParamDefs>(
+  protected _implement(
     route: Route, impl: ImplLoader<Impl, StaticData>
   ) {
     const lookup = this.root[slugLookup];
@@ -58,10 +58,15 @@ export class ImplementationMap<
   }
 
   public check() {
-    const missing = [...this.root[slugLookup].keys().filter(route => !this.map.has(route))];
+    const allRoutes = new Set<Route>();
+    for (const route of this.root[slugLookup].keys()) {
+      allRoutes.add(route);
+      route.nestedInRoutes.forEach(r => allRoutes.add(r));
+    }
+    const missing = allRoutes.difference(new Set(this.map.keys()));
 
-    if (missing.length > 0) {
-      const paths = missing.map(r => {
+    if (missing.size > 0) {
+      const paths = [...missing].map(r => {
         const slugHint = this.root[slugLookup].get(r);
         return slugHint ? slugPathToString(slugHint) : '(nest route)';
       });
@@ -69,8 +74,11 @@ export class ImplementationMap<
     }
   }
 
+  /** return list of loaded implementations, from outermost to innermost (nested) route
+   * (last one is the implementation for the actual route)
+   */
   public async loadRouteAndNested<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
-    const allRoutes = [route, ...route.nestedInRoutes] as Route[];
+    const allRoutes = [...route.nestedInRoutes, route] as Route[];
     const implPromises = allRoutes.map(r => {
       const impl = this.map.get(r)!;
       if (impl.lazy) {
