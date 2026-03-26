@@ -76,9 +76,9 @@ export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): Roo
 
   function registerRoute(r: Route, slugPath: Slug[], activePathParams: Set<PathParamDef<any>>) {
     // Validate: all path params in this route's paramDefs must be in scope.
-    for (const paramDef of Object.values(r.paramDefs as Record<string, ParamDef<any>>)) {
+    for (const [key, paramDef] of Object.entries(r.paramDefs as Record<string, ParamDef<any>>)) {
       if (paramDef instanceof PathParamDef && !activePathParams.has(paramDef)) {
-        throw new Error(`Route uses path param that is not defined by an ancestor ParameterizedPath node.`);
+        throw new Error(`Route ${slugPathToString(slugPath)} uses path param ${key} that is not defined by an ancestor ParameterizedPath node.`);
       }
     }
 

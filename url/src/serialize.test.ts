@@ -140,11 +140,11 @@ describe('locatorToUrl', () => {
         [index]: usersIndex,
         [userId.$]: {
           foo: { bar: { quuz: { [index]: quuzIndex } } },
+          posts: {
+            [postId.$]: postRoute
+          }
         },
       },
-      posts: {
-        [postId.$]: postRoute
-      }
     });
 
     expect(locatorToUrl(sm, rootIndex.locate({}))).toBe('/');

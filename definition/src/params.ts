@@ -85,7 +85,7 @@ export class SearchParamDef<T> extends ParamDef<T> {
   static type = 'search';
 
   withDefault(default_: (() => T) | (T extends Constant ? T : never) ) {
-    return new HiddenParamDefWithDefault<T>(
+    return new SearchParamDefWithDefault<T>(
       typeof default_ === 'function' ? default_ : () => default_, this.serde
     );
   }
@@ -95,7 +95,7 @@ export class SearchParamDef<T> extends ParamDef<T> {
   }
 }
 
-export class SearchParamDefWithDefault<T> extends HiddenParamDef<T> implements ParamDefWithDefault<T> {
+export class SearchParamDefWithDefault<T> extends SearchParamDef<T> implements ParamDefWithDefault<T> {
   makeDefault: () => T;
 
   constructor(makeDefault: () => T, serde?: Serde<T>) {

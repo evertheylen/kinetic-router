@@ -1,6 +1,6 @@
 import type { Locator, Serde } from '@kinetic-router/definition';
 import { defaultSerde, getSlugPath } from '@kinetic-router/definition/root.js';
-import { ParamDef, SearchParamDef, SearchParamDefWithDefault } from '@kinetic-router/definition/params.js';
+import { HiddenParamDef, ParamDef, PathParamDef, SearchParamDef, SearchParamDefWithDefault } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
 
 
@@ -31,7 +31,7 @@ export function locatorToUrl(rootSitemap: RootSitemap, locator: Locator<any>): s
     throw new Error('Route is not registered in the provided rootSitemap.');
   }
 
-  const rootDefault: Serde<any> | undefined = (rootSitemap as any)[defaultSerde];
+  const rootDefault: Serde<any> | undefined = rootSitemap[defaultSerde];
   const paramDefs: Record<string, ParamDef<any>> = locator.route.paramDefs;
   const values: Record<string, unknown> = locator.values as Record<string, unknown>;
 
@@ -61,15 +61,19 @@ export function locatorToUrl(rootSitemap: RootSitemap, locator: Locator<any>): s
   // --- Search params ---
   const searchParams = new URLSearchParams();
   for (const [name, def] of Object.entries(paramDefs)) {
-    if (def instanceof SearchParamDef) continue;
+    if (!(def instanceof SearchParamDef)) continue;
+
     const rawValue = values[name];
     if (rawValue === undefined) continue;
+    const serializedValue = serializeValue(rawValue, def.serde, rootDefault);
+
     // Omit the param when its value equals the declared default.
     if (def instanceof SearchParamDefWithDefault) {
-      const defaultValue = def.makeDefault();
-      if (serializeValue(rawValue, def.serde, rootDefault) === serializeValue(defaultValue, def.serde, rootDefault)) continue;
+      const defaultValue = def.makeDefault();  
+      const serializedDefault = serializeValue(defaultValue, def.serde, rootDefault);
+      if (serializedValue === serializedDefault) continue;
     }
-    searchParams.set(name, serializeValue(rawValue, def.serde, rootDefault));
+    searchParams.set(name, serializedValue);
   }
 
   const search = searchParams.size > 0 ? '?' + searchParams.toString() : '';
