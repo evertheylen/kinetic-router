@@ -1,26 +1,28 @@
+import { ImplementationMap } from "@kinetic-router/definition/implement.js";
 import { RootSitemap } from "@kinetic-router/definition/root.js";
 import { Page } from "./page";
-import { ImplementationMap } from "@kinetic-router/definition/implement.js";
 
-export class KineticSolid<
-  // Static data about a page, should also be defined upfront for lazy routes
-  // example: { 'viewAs': 'mainpage' | 'detail' | 'fullscreen' }
-  StaticData extends object,
-
-  // Output (besides html and title) that each page is supposed to give
-  // example: opengraph attributes
-  Output extends object,
+export class Router<
+  StaticData extends object, Output extends object,
 > {
+  readonly sitemap: RootSitemap;
+  readonly implMap: ImplementationMap<Page<Output, any, any>, StaticData>;
 
-  page<Input extends object, StaticParams extends keyof Input = any>(
-    p: Page<Output, Input, StaticParams> & StaticData
-  ) {
-    return p;
+  didInit = false;
+
+  constructor(sitemap: RootSitemap, implMap: ImplementationMap<Page<Output, any, any>, StaticData>) {
+    this.sitemap = sitemap;
+    this.implMap = implMap;
   }
 
-  implementation(root: RootSitemap) {
-    return new ImplementationMap<Page<Output, any, any>, StaticData>(root);
+  async init() {
+    if (this.didInit) {
+      return;
+    }
+
+    this.implMap.check()
   }
 
+  // register with navigation API
 
 }

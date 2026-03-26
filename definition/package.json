@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run"
   },
   "devDependencies": {

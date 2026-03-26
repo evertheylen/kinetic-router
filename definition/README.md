@@ -11,10 +11,10 @@ Parameters are declared with `param.path<T>()`, `param.search<T>()`, or `param.h
 
 ## Routes and Sitemaps
 
-A `Route` is created with `route(paramDefs)`. Routes are composed into a sitemap tree using plain objects (string keys map to sub-sitemaps), the `index` symbol (marks the route for the current path level), and `parameter(paramDef, subSitemap)` (introduces a dynamic path segment). Call `.withIndex(route)` on a `parameter(...)` node to add an index route at the parameterized level.
+A `Route` is created with `route(paramDefs)`. Routes are composed into a sitemap tree using plain objects (string keys map to sub-sitemaps), the `index` symbol (marks the route for the current path level), and `pathParam.$` (introduces a dynamic path segment).
 
 The tree is sealed with `root(sitemap)`, which validates it and returns a `RootSitemap`. Validation ensures:
-- every path param used in a route's `paramDefs` is introduced by an ancestor `parameter()` node
+- every path param used in a route's `paramDefs` is introduced by an ancestor `param.$` key
 - no two routes resolve to the same URL pattern
 
 ## Aliases

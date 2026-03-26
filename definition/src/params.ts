@@ -5,39 +5,110 @@ export type Serde<T> = {
   deserialize(data: Json): T,
 }
 
-type ParamType = 'path' | 'search' | 'hidden';
+type Constant = string | number | boolean | bigint | null | undefined;
 
-export class ParamDef<ValueT, ParamT extends ParamType = ParamType> {
-  type: ParamT;
-  serde?: Serde<ValueT>;
+export abstract class ParamDef<T> {
+  serde?: Serde<T>;
 
-  constructor(type: ParamT, serde?: Serde<ValueT>) {
-    this.type = type;
+  constructor(serde?: Serde<T>) {
     this.serde = serde;
-  }
-
-  withDefault(makeDefault: () => ValueT) {
-    return new ParamDefWithDefault<ValueT>(this.type, makeDefault, this.serde);
-  }
-
-  optional() {
-    return new ParamDefWithDefault<ValueT | undefined>(this.type, () => undefined, this.serde);
   }
 }
 
-export class ParamDefWithDefault<T> extends ParamDef<T> {
+interface ParamDefWithDefault<T> extends ParamDef<T> {
+  makeDefault: () => T;
+}
+
+// PATH PARAMS -------------------------------
+
+export class PathParamDef<T> extends ParamDef<T> {
+  readonly $: symbol;
+  static symbolRegistry = new WeakMap<Symbol, PathParamDef<any>>();
+
+  constructor(serde?: Serde<T>) {
+    super(serde);
+    // see comment above, we are cheating
+    this.$ = Symbol();
+    PathParamDef.symbolRegistry.set(this.$, this);
+  }
+
+  withDefault(default_: (() => T) | (T extends Constant ? T : never) ) {
+    return new PathParamDefWithDefault<T>(
+      typeof default_ === 'function' ? default_ : () => default_, this.serde
+    );
+  }
+
+  optional() {
+    return new PathParamDefWithDefault<T | undefined>(() => undefined, this.serde);
+  }
+}
+
+export class PathParamDefWithDefault<T> extends PathParamDef<T> implements ParamDefWithDefault<T> {
   makeDefault: () => T;
 
-  constructor(type: ParamType, makeDefault: () => T, serde?: Serde<T>) {
-    super(type, serde);
+  constructor(makeDefault: () => T, serde?: Serde<T>) {
+    super(serde);
     this.makeDefault = makeDefault;
   }
 }
 
+
+// HIDDEN PARAMS -------------------------------
+
+export class HiddenParamDef<T> extends ParamDef<T> {
+  static type = 'hidden';
+
+  withDefault(default_: (() => T) | (T extends Constant ? T : never) ) {
+    return new HiddenParamDefWithDefault<T>(
+      typeof default_ === 'function' ? default_ : () => default_, this.serde
+    );
+  }
+
+  optional() {
+    return new HiddenParamDefWithDefault<T | undefined>(() => undefined, this.serde);
+  }
+}
+
+export class HiddenParamDefWithDefault<T> extends HiddenParamDef<T> implements ParamDefWithDefault<T> {
+  makeDefault: () => T;
+
+  constructor(makeDefault: () => T, serde?: Serde<T>) {
+    super(serde);
+    this.makeDefault = makeDefault;
+  }
+}
+
+
+// SEARCH PARAMS -------------------------------
+
+export class SearchParamDef<T> extends ParamDef<T> {
+  static type = 'search';
+
+  withDefault(default_: (() => T) | (T extends Constant ? T : never) ) {
+    return new HiddenParamDefWithDefault<T>(
+      typeof default_ === 'function' ? default_ : () => default_, this.serde
+    );
+  }
+
+  optional() {
+    return new SearchParamDefWithDefault<T | undefined>(() => undefined, this.serde);
+  }
+}
+
+export class SearchParamDefWithDefault<T> extends HiddenParamDef<T> implements ParamDefWithDefault<T> {
+  makeDefault: () => T;
+
+  constructor(makeDefault: () => T, serde?: Serde<T>) {
+    super(serde);
+    this.makeDefault = makeDefault;
+  }
+}
+
+
 export const param = {
-  path:   <T>(serde?: Serde<T>) => new ParamDef<T, 'path'>('path', serde),
-  hidden: <T>(serde?: Serde<T>) => new ParamDef<T, 'hidden'>('hidden', serde),
-  search: <T>(serde?: Serde<T>) => new ParamDef<T, 'search'>('search', serde),
+  path: <T>(serde?: Serde<T>) => new PathParamDef<T>(serde),
+  hidden: <T>(serde?: Serde<T>) => new HiddenParamDef<T>(serde),
+  search: <T>(serde?: Serde<T>) => new SearchParamDef<T>(serde),
 }
 
 export type AnyParamDefs = Record<string, ParamDef<any>>;

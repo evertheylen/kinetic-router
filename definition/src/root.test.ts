@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { index, param, parameter, route, root, missing } from "./index.js";
+import { index, param, route, root } from "./index.js";
 import { getSlugPath } from "./root.js";
 
 const userId = param.path<string>();
@@ -29,14 +29,14 @@ describe('root', () => {
 
   it('registers routes inside a ParameterizedPath using the paramDef as a slug segment', () => {
     const userPage = route({ userId });
-    const sm = root(parameter(userId, userPage));
+    const sm = root({ [userId.$]: userPage });
     expect(getSlugPath(sm, userPage)).toEqual([userId]);
   });
 
   it('registers a noParamGiven route at the parent slug path (before the param)', () => {
     const parentRoute = route({});
     const childRoute = route({ userId });
-    const sm = root({ users: parameter(userId, { child: childRoute, [missing]: parentRoute }) });
+    const sm = root({ users: { [userId.$]: { child: childRoute }, [index]: parentRoute }});
     expect(getSlugPath(sm, parentRoute)).toEqual(['users']);
     expect(getSlugPath(sm, childRoute)).toEqual(['users', userId, 'child']);
   });
@@ -56,11 +56,15 @@ describe('root', () => {
 
     const sm = root({
       [index]: indexR,
-      users: parameter(userId, {
-        [missing]: usersIndexRoute,
-        foo: { bar: { quuz: { [index]: quuzIndexRoute } } },
-        posts: parameter(postId, postRoute),
-      })
+      users: {
+        [index]: usersIndexRoute,
+        [userId.$]: {
+          foo: { bar: { quuz: { [index]: quuzIndexRoute } } },
+          posts: {
+            [postId.$]: postRoute
+          }
+        }
+      }
     });
 
     expect(getSlugPath(sm, indexR)).toEqual([]);
@@ -78,7 +82,7 @@ describe('root validation', () => {
 
   it('throws when a route does not use all ancestor path params', () => {
     expect(() =>
-      root(parameter(userId, { home: route({}) }))
+      root({ [userId.$]: { home: route({}) }})
     ).toThrow(/does not use all ancestor path params/);
   });
 

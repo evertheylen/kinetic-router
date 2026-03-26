@@ -41,7 +41,7 @@ function findParamName(paramDefs: Record<string, ParamDef<any>>, target: ParamDe
  *  route's search-type paramDefs. Path params are filled in by walkTree as
  *  it unwinds the recursion; hidden params are absent. */
 function buildLocatorFromRoute(
-  route: Route<any>,
+  route: Route,
   searchParams: URLSearchParams,
   rootDefault: Serde<any> | undefined,
 ): Locator<any> {

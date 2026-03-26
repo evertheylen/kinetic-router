@@ -1,13 +1,14 @@
-import { ParamDef, Serde } from "./params.js";
-import { index, ParameterizedPath, OptionalParameterizedPath, Route, RootSitemapInput, Sitemap, SubPaths } from "./routes.js";
+import { param, ParamDef, PathParamDef, Serde } from "./params.js";
+import { Route } from "./routes.js";
+import { index, Sitemap, SubRoutes } from "./sitemap.js";
 
 export const slugLookup:   unique symbol = Symbol('kinetic-router:slugLookup');
 export const defaultSerde: unique symbol = Symbol('kinetic-router:defaultSerde');
 
-export type Slug = string | ParamDef<any, 'path'>;
+export type Slug = string | PathParamDef<any>;
 
 export type RootSitemap = {
-  [slugLookup]: Map<Route<any>, Slug[]>,
+  [slugLookup]: Map<Route, Slug[]>,
   [defaultSerde]?: Serde<any>
 };
 
@@ -23,40 +24,57 @@ export type RootSitemap = {
  *    applicable to routes registered via noParamGiven, which sit above the param).
  *  - A noParamGiven route must not use any param that is not yet in scope.
  */
-export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any>): RootSitemap & Sm {
-  const map = new Map<Route<any>, Slug[]>();
+export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): RootSitemap & Sm {
+  const map = new Map<Route, Slug[]>();
 
-  function walk(node: Sitemap, slugPath: Slug[], activePathParams: Set<ParamDef<any, 'path'>>) {
-    if (node instanceof ParameterizedPath) {
-      const nextActivePathParams = new Set(activePathParams);
-      nextActivePathParams.add(node.paramDef);
-      const nextSlugPath = [...slugPath, node.paramDef];
-
-      // If it has a parent route, register it at the slug path before the param.
-      if (node instanceof OptionalParameterizedPath) {
-        registerRoute(node.defaultRoute, slugPath, activePathParams);
-      }
-
-      walk(node.PARAM, nextSlugPath, nextActivePathParams);
-    } else if (node instanceof Route) {
+  function walk(node: Sitemap, slugPath: Slug[], activePathParams: Set<PathParamDef<any>>) {
+    if (node instanceof Route) {
       // A bare Route can appear as a leaf value inside SubPaths.
       registerRoute(node, slugPath, activePathParams);
     } else {
-      // SubPaths: plain object (possibly with index symbol key and string keys).
-      const subPaths = node as SubPaths;
+      const { [index]: indexRoute, ...subRoutes } = node;
+      const keys = Reflect.ownKeys(subRoutes);
 
-      if (subPaths[index] !== undefined) {
-        registerRoute(subPaths[index]!, slugPath, activePathParams);
+      if (indexRoute !== undefined) {
+        registerRoute(indexRoute, slugPath, activePathParams);
       }
 
-      for (const key of Object.keys(subPaths)) {
-        const child = subPaths[key];
-        walk(child as Sitemap, [...slugPath, key], activePathParams);
+      if (keys.length === 0) {
+        if (indexRoute === undefined) {
+          throw new Error('empty SubRoutes object');
+        }
+        // else: a bit weird to only have [index] but legal (already registered)
+      } else {
+        if (typeof keys[0] === 'string') {
+          // registering fixed subpaths
+          if (keys.some(k => typeof k !== 'string')) {
+            throw new Error('expected all string keys');
+          }
+
+          for (const [key, child] of Object.entries(subRoutes)) {
+            walk(child, [...slugPath, key], activePathParams);
+          }
+        } else {
+          // we expect a single symbol that is also registered in PathParamDef.symbolRegistry
+          if (keys.length !== 1) {
+            throw new Error(`Expect a single path param symbol, found ${keys.length}`);
+          }
+
+          const key = keys[0];
+          const paramDef = PathParamDef.symbolRegistry.get(key);
+          if (paramDef === undefined) {
+            throw new Error(`No PathParamDef found for ${key.toString()}`);
+          }
+          const nextActivePathParams = new Set(activePathParams);
+          nextActivePathParams.add(paramDef);
+
+          walk((subRoutes as { [key in symbol]: Sitemap })[key], [...slugPath, paramDef], nextActivePathParams);
+        }
       }
     }
   }
 
-  function registerRoute(r: Route<any>, slugPath: Slug[], activePathParams: Set<ParamDef<any, 'path'>>) {
+  function registerRoute(r: Route, slugPath: Slug[], activePathParams: Set<PathParamDef<any>>) {
     // Validate: all path params in this route's paramDefs must be in scope.
     for (const [, def] of Object.entries(r.paramDefs) as any) {
       if (def.type === 'path' && !activePathParams.has(def)) {
@@ -68,7 +86,7 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
 
     // Validate: every ancestor path param must be used by this route.
     const routePathParams = new Set(
-      (Object.values(r.paramDefs) as ParamDef<any, any>[]).filter(d => d.type === 'path')
+      Object.values(r.paramDefs).filter(d => d instanceof PathParamDef)
     );
     for (const ancestorParam of activePathParams) {
       if (!routePathParams.has(ancestorParam)) {
@@ -83,17 +101,20 @@ export function root<Sm extends RootSitemapInput>(sitemap: Sm, serde?: Serde<any
 
   walk(sitemap, [], new Set());
 
+  // check nested routes
+  for (const route of map.keys()) {
+    if (route.nestedInRoutes.some(r => !map.has(r))) {
+      throw new Error(`Route ${route} is nested in routes not part of given root`);
+    }
+  }
+
   return Object.assign(sitemap, { [slugLookup]: map, [defaultSerde]: serde }) as RootSitemap & Sm;
 }
 
 /** Return the slug path for a route registered in a RootSitemap. */
-export function getSlugPath(rootSitemap: RootSitemap, r: Route<any>): Slug[] | undefined {
+export function getSlugPath(rootSitemap: RootSitemap, r: Route): Slug[] | undefined {
   return (rootSitemap as any)[slugLookup].get(r);
 }
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
 
 export function slugPathToString(path: Slug[]): string {
   return path.map(s => s instanceof ParamDef ? '<param>' : s).join('/');

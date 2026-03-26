@@ -8,6 +8,7 @@
   "dependencies": {
     "@kinetic-router/definition": "workspace:*",
     "@kinetic-router/solid": "workspace:*",
+    "@kinetic-router/url": "workspace:*",
     "@solidjs/web": "catalog:",
     "solid-js": "catalog:",
     "vite": "catalog:",

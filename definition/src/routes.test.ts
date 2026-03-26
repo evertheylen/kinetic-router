@@ -1,5 +1,5 @@
 import { it, describe, expect } from 'vitest';
-import { param, parameter, route, root, index, missing } from "./index.js";
+import { param, route, root, index } from "./index.js";
 import { getSlugPath } from "./root.js";
 
 const userId = param.path<string>();
@@ -10,12 +10,17 @@ root(route({}));
 
 // PARAM accessor works through deeply nested SubPaths
 const _sitemap = {
-  users: parameter(userId, {
-    [missing]: route({}),
-    posts: parameter(postId, route({ postId, userId, foo: param.search<string>() }))
-  })
+  [index]: route({}),
+  users: {
+    [userId.$]: {
+      posts: {
+        [postId.$]: route({ postId, userId, foo: param.search<string>() })
+      }
+    }
+  }
 };
-_sitemap.users.PARAM.posts.PARAM.locate({ postId: 1, userId: 'u', foo: 'x' });
+
+_sitemap.users[userId.$].posts[postId.$].locate({ postId: 1, userId: 'u', foo: 'x' });
 
 it('type-checks pass', () => {});
 

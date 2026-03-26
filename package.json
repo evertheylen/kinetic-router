@@ -2,8 +2,7 @@
   "name": "@kinetic-router/monorepo",
   "private": true,
   "scripts": {
-    "test": "pnpm run build && vitest run",
-    "build": "tsc --build definition/tsconfig.build.json url/tsconfig.build.json"
+    "test": "pnpm -r build && vitest run"
   },
   "devDependencies": {
     "typescript": "catalog:",
