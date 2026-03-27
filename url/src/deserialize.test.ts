@@ -22,9 +22,9 @@ describe('urlToLocator', () => {
     expect(urlToLocator(sm, '/')?.route).toBe(indexRoute);
   });
 
-  it('returns undefined for unknown paths', () => {
+  it('throws for unknown paths', () => {
     const sm = root({ home: route({}) });
-    expect(urlToLocator(sm, '/notfound')).toBeUndefined();
+    expect(() => urlToLocator(sm, '/notfound')).toThrow(/Couldnt find notfound/);
   });
 
   it('matches a parameterized path and deserializes the param', () => {

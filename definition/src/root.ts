@@ -19,7 +19,7 @@ export type RootSitemap = {
  *
  * Validates:
  *  - Path params referenced in a route's paramDefs must be introduced by an
- *    ancestor ParameterizedPath node.
+ *    ancestor parameter node.
  *  - Every ancestor path param must be present in every route beneath it (not
  *    applicable to routes registered via noParamGiven, which sit above the param).
  *  - A noParamGiven route must not use any param that is not yet in scope.
@@ -78,7 +78,7 @@ export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): Roo
     // Validate: all path params in this route's paramDefs must be in scope.
     for (const [key, paramDef] of Object.entries(r.paramDefs as Record<string, ParamDef<any>>)) {
       if (paramDef instanceof PathParamDef && !activePathParams.has(paramDef)) {
-        throw new Error(`Route ${slugPathToString(slugPath)} uses path param ${key} that is not defined by an ancestor ParameterizedPath node.`);
+        throw new Error(`Route ${slugPathToString(slugPath)} uses path param ${key} that is not defined by an ancestor path param key.`);
       }
     }
 

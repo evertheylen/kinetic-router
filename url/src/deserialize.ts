@@ -81,21 +81,23 @@ function walkTree(
   depth: number,
   searchParams: URLSearchParams,
   rootDefault: Serde<any> | undefined,
-): Locator<any> | undefined {
+): Locator<any> {
   if (node instanceof Route) {
     // Must have consumed all path segments.
-    if (depth !== segments.length) return undefined;
+    if (depth !== segments.length) {
+      throw new Error(`Didn't consume all path segments: ${segments.slice(depth)}`)
+    }
     return buildLocatorFromRoute(node, searchParams, rootDefault);
   }
 
   const { [index]: indexRoute, ...subRoutes } = node;
 
   if (depth === segments.length) {
-    const indexRoute = (node as any)[indexSymbol];
-    if (indexRoute instanceof Route) {
+    if (indexRoute !== undefined) {
       return buildLocatorFromRoute(indexRoute, searchParams, rootDefault);
+    } else {
+      throw new Error(`Reached final depth after ${segments.join('/')} but no route was found, instead got ${indexRoute}`);
     }
-    return undefined;
   }
 
   const keys = Reflect.ownKeys(subRoutes);
@@ -104,15 +106,15 @@ function walkTree(
     // parameter!
     const paramDef = PathParamDef.symbolRegistry.get(keys[0])!;
     // Consume one segment as the path-param value.
-    if (depth >= segments.length) return undefined;
+    if (depth >= segments.length) {
+      throw new Error(`Tried to use too many segments`);
+    };
 
     const rawSegment = segments[depth];
-    const childResult = walkTree(subRoutes, segments, depth + 1, searchParams, rootDefault);
-
-    if (childResult === undefined) return undefined;
+    const childResult = walkTree((subRoutes as { [key in symbol]: Sitemap })[keys[0]], segments, depth + 1, searchParams, rootDefault);
 
     const paramName = findParamName(childResult.route.paramDefs, paramDef);
-    if (paramName === undefined) return childResult;
+    if (paramName === undefined) return childResult
 
     return {
       route: childResult.route,
@@ -124,7 +126,9 @@ function walkTree(
   } else {
     // string subroutes
     const child = (subRoutes as { [key in string]: Sitemap })[segments[depth]];
-    if (child === undefined) return undefined;
+    if (child === undefined) {
+      throw new Error(`Couldnt find ${segments[depth]} in [${Object.keys(subRoutes).join(', ')}]`);
+    }
     return walkTree(child as Sitemap, segments, depth + 1, searchParams, rootDefault);
   }
 }

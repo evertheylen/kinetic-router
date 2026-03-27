@@ -75,9 +75,9 @@ describe('root', () => {
 });
 
 describe('root validation', () => {
-  it('throws when a route uses a path param not scoped by an ancestor ParameterizedPath', () => {
+  it('throws when a route uses a path param not scoped by an ancestor parameter', () => {
     const orphan = param.path<string>();
-    expect(() => root({ home: route({ orphan }) })).toThrow(/path param that is not defined by an ancestor/);
+    expect(() => root({ home: route({ orphan }) })).toThrow(/uses path param orphan that is not defined by an ancestor path param key/);
   });
 
   it('throws when a route does not use all ancestor path params', () => {
@@ -85,6 +85,4 @@ describe('root validation', () => {
       root({ [userId.$]: { home: route({}) }})
     ).toThrow(/does not use all ancestor path params/);
   });
-
-
 });
