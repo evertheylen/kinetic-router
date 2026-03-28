@@ -1,4 +1,4 @@
-import { RoutingContract } from "@kinetic-router/solid/src/contract";
+import { RoutingContract } from "@kinetic-router/solid/contract.js";
 import { sitemap } from "./sitemap";
 
 export const contract = new RoutingContract<

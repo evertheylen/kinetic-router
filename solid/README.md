@@ -3,50 +3,27 @@
 
 This is the most important package, as it implements the actual router for Solid SPA apps.
 
-It uses these important concepts:
+## Scenario
 
-## `ParamWrapper`
-
-```ts
-type ParamWrapper<T extends object> = {
-    read: Store<T>,
-    // These two functions do the same: they update the parameters and calling them will result in
-    // changed params as 'read'. However, `replace` will replace the current history entry
-    // while `setNew` will create a new entry.
-    replace: SetStoreFunction<Params>,
-    setNew: SetStoreFunction<Params>
-};
-```
-
-## `PageHints`
-
-These provide hints towards the state of the page:
+Let's assume this sitemap:
 
 ```ts
-type PageHints = {
-    shouldLoad: () => boolean,
-    isVisible: () => boolean,
-    isAnimating: () => boolean,
-    hasFocus: () => boolean,
-}
+const sitemap = root({
+  [index]: route({}).aliasTo(() => homePage.locate({})),
+  home: homePage,
+  explore: {
+    [index]: agencyList,
+    [agencyId.$]:  {
+      [index]: serviceBrandList,  //explore/NMBS/brand/
+      [serviceBrand.$]: {
+        [index]: trainList,  //explore/NMBS/brand/IC/train
+        [trainNumber.$]: trainDetail,
+      }
+    }
+  },
+  account: route({})
+});
 ```
 
-
-## `Page`
-
-The `Page` takes parameters (wrapped). Parameters can be changed through the wrapper only. It does not specify whether they are path/search/hidden parameters. It returns returns `html` along with metadata like `title` and more.
-  
-```ts
-type Page<Input extends object, Output = {}> = (
-    (params: ParamWrapper<Input>, hints: PageHints) => Promise<
-        {html: JSX.Element, title: string } & Output
-    >
-)
-```
-
-
-## `Implement`
-
-
-Each `Route` (that isn't an `Alias`) is mapped to a `Page`.
-- a page takes a 
+1. Initial load of '/'. Follow alias. URL is replaced with '/home'. `homePage` loads. State:
+    - active page = [ () ]

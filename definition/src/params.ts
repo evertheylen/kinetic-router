@@ -113,8 +113,21 @@ export const param = {
 
 export type AnyParamDefs = Record<string, ParamDef<any>>;
 
+export type ParamMap = Map<ParamDef<any>, any>;
+
 export type ParamValues<ParamDefs extends AnyParamDefs> = (
   { [key in keyof ParamDefs as ParamDefs[key] extends ParamDefWithDefault<any> ? key : never]?: ParamDefs[key] extends ParamDefWithDefault<infer T> ? T : never }
   &
   { [key in keyof ParamDefs as ParamDefs[key] extends ParamDefWithDefault<any> ? never : key]: ParamDefs[key] extends ParamDef<infer T> ? T : never }
 );
+
+export function paramsByDefinition<ParamDefs extends AnyParamDefs>(
+  params: ParamValues<ParamDefs>,
+  definitions: ParamDefs,
+): ParamMap {
+  const res: ParamMap = new Map();
+  for (const [key, paramDef] of Object.entries(definitions)) {
+    res.set(paramDef, (params as any)[key]);
+  }
+  return res;
+}

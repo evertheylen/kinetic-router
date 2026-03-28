@@ -25,6 +25,11 @@ export class Route<ParamDefs extends Record<string, ParamDef<any>> = any> {
     return { route: this, values };
   }
 
+  nestedRoute<const OwnParamDefs extends AnyParamDefs>(ownParamDefs: OwnParamDefs): Route<ParamDefs & OwnParamDefs> {
+    // The nestedIn list for children = this route's own ancestors + this route itself.
+      return new Route({ ...this.paramDefs, ...ownParamDefs }, [...this.nestedInRoutes, this]);
+    };
+
   /** Nesting makes this Route no longer navigable! But it does require implementation. */
   nest<const SubSitemap extends Sitemap>(
     factory: (
@@ -33,16 +38,7 @@ export class Route<ParamDefs extends Record<string, ParamDef<any>> = any> {
       ) => Route<ParamDefs & OwnParamDefs>
     ) => SubSitemap
   ): SubSitemap {
-    // The ancestor list for children = this route's own ancestors + this route itself.
-    const ancestorsForChildren: Route[] = [...this.nestedInRoutes, this as Route];
-
-    const nestedRoute = <const OwnParamDefs extends AnyParamDefs>(
-      ownParamDefs: OwnParamDefs
-    ): Route<ParamDefs & OwnParamDefs> => {
-      return new Route({ ...this.paramDefs, ...ownParamDefs }, ancestorsForChildren);
-    };
-
-    return factory(nestedRoute);
+    return factory((ownParamDefs) => this.nestedRoute(ownParamDefs));
   }
 }
 

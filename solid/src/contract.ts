@@ -12,8 +12,8 @@ export class RoutingContract<
   Output extends object,
 > {
 
-  page<Input extends object, StaticParams extends keyof Input = any>(
-    p: Page<Output, Input, StaticParams> & StaticData
+  page<Input extends object, UntrackedKeys extends keyof Input = any>(
+    p: Page<Output, Input, UntrackedKeys> & StaticData
   ) {
     return p;
   }

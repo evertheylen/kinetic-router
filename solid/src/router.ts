@@ -2,6 +2,12 @@ import { ImplementationMap } from "@kinetic-router/definition/implement.js";
 import { RootSitemap } from "@kinetic-router/definition/root.js";
 import { Page } from "./page";
 
+
+
+// states
+type Created = { state: 'created' };
+type Initialized = { state: 'initialized', new:  }
+
 export class Router<
   StaticData extends object, Output extends object,
 > {

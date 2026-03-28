@@ -1,8 +1,8 @@
-import { param, route, root, index, parameter, missing } from "@kinetic-router/definition";
+import { param, route, root, index } from "@kinetic-router/definition";
 
 export const agencyId = param.path<string>();
 export const serviceBrand = param.path<string>();
-export const trainNumber = param.path<number>();
+export const trainNumber = param.path<string>();
 
 export const homePage = route({});
 
@@ -11,22 +11,33 @@ export const serviceBrandList = route({ agencyId });
 export const trainList = route({ agencyId, serviceBrand });
 export const trainDetail = route({ agencyId, serviceBrand, trainNumber });
 
+export const journeys = route({
+  from: param.search<string>(),
+  to: param.search<string>(),
+  departure: param.search<string>()
+});
+
+export const journeyId = param.path<string>();
+
+export const journeyDetail = journeys.nested()
+
 export const sitemap = root({
-  [index]: homePage,
-  explore: parameter(agencyId, {
-    [missing]: agencyList,  //explore/
-    brand: parameter(serviceBrand, {
-      [missing]: serviceBrandList,  //explore/NMBS/brand/
-      train: parameter(trainNumber, {
-        [missing]: trainList,  //explore/NMBS/brand/IC/train
-        [index]: trainDetail,
-      })
-    }),
-  }),
-  posts: parameter(postId, {
-    [missing]: postList,
-    [index]: postDetail,
-  })
+  [index]: route({}).aliasTo(() => homePage.locate({})),
+  home: homePage,
+  explore: {
+    [index]: agencyList,
+    [agencyId.$]:  {
+      [index]: serviceBrandList,  //explore/NMBS/brand/
+      [serviceBrand.$]: {
+        [index]: trainList,  //explore/NMBS/brand/IC/train
+        [trainNumber.$]: trainDetail,
+      }
+    }
+  },
+  journeys: journeys.nest(subRoute => ({
+    [journeyId.$]: 
+  })),
+  account: route({})
 });
 
 const x = {

@@ -77,23 +77,20 @@ export class ImplementationMap<
   /** return list of loaded implementations, from outermost to innermost (nested) route
    * (last one is the implementation for the actual route)
    */
-  public loadRouteAndNestedPromises<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
-    const allRoutes = [...route.nestedInRoutes, route] as Route[];
-    return allRoutes.map(async r => {
-      const impl = this.map.get(r)!;
-      if (impl.lazy) {
-        const loadedImpl = await impl.loadImpl();
-        for (const [key, staticValue] of Object.entries(impl.staticData)) {
-          const loadedValue = (loadedImpl as any)[key];
-          if (staticValue !== loadedValue) {
-            const slugs = this.root[slugLookup].get(r)!;
-            console.warn(`While loading ${slugPathToString(slugs)} we got conflicting values for key ${key}`, { staticValue, loadedValue });
-          }
+  public async loadRoute<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
+    const impl = this.map.get(route)!;
+    if (impl.lazy) {
+      const loadedImpl = await impl.loadImpl();
+      for (const [key, staticValue] of Object.entries(impl.staticData)) {
+        const loadedValue = (loadedImpl as any)[key];
+        if (staticValue !== loadedValue) {
+          const slugs = this.root[slugLookup].get(route)!;
+          console.warn(`While loading ${slugPathToString(slugs)} we got conflicting values for key ${key}`, { staticValue, loadedValue });
         }
-        return { route, impl: { ...impl.staticData, ...loadedImpl } };
-      } else {
-        return { route, impl: impl.impl };
       }
-    });
+      return { ...impl.staticData, ...loadedImpl };
+    } else {
+      return impl.impl;
+    }
   }
 }

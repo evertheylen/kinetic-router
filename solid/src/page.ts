@@ -1,13 +1,14 @@
 import { JSX } from "solid-js/jsx-runtime";
-import { Store, StoreSetter } from "solid-js";
 
-export type ParamWrapper<Input extends object> = {
-  dynamic: Store<Input>,
+export type SimpleSetter<T> = (values: Partial<T>) => void;
+
+export type ReactiveParamWrapper<Input extends object> = {
+  values: { readonly [P in keyof Input]: Input[P]; },
   // These two functions do the same: they update the parameters and calling them will result in
   // changed params as 'read'. However, `replace` will replace the current history entry
   // while `setNew` will create a new entry.
-  replace: StoreSetter<Input>,
-  setNew: StoreSetter<Input>
+  replace: SimpleSetter<Input>,
+  setNew: SimpleSetter<Input>
 };
 
 export type PageState = {
@@ -29,11 +30,11 @@ export type PageState = {
 export type Page<
   Output extends object,
   Input extends object = any,
-  StaticParams extends keyof Input = any,
+  UntrackedKeys extends keyof Input = any,
 > = {
-  readonly staticParams: ReadonlyArray<StaticParams>,
-  readonly render: (staticParams: {[K in StaticParams]: Input[K]}) => Promise<(
-    (params: ParamWrapper<{[K in Exclude<keyof Input, StaticParams>]: Input[K]}>, pageState: PageState) => (
+  readonly untrackedKeys: ReadonlyArray<UntrackedKeys>,
+  readonly render: (untrackedKeys: {[K in UntrackedKeys]: Input[K]}) => Promise<(
+    (params: ReactiveParamWrapper<{[K in Exclude<keyof Input, UntrackedKeys>]: Input[K]}>, pageState: PageState) => (
       {html: JSX.Element, title: string } & Output
     )
   )>
