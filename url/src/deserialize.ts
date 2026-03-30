@@ -146,30 +146,11 @@ function walkTree(
  * `Locator`'s values. Search params absent from the URL are restored to their
  * declared default (if any).
  */
-export function urlToLocator(rootSitemap: RootSitemap, url: string): Locator<any> | undefined {
+export function urlToLocator(rootSitemap: RootSitemap, url: { pathname: string, search: string }): Locator<any> {
   const rootDefault: Serde<any> | undefined = (rootSitemap as any)[defaultSerde];
 
-  // Normalize the URL — accept both absolute and relative forms.
-  let pathname: string;
-  let search: string;
-
-  try {
-    const parsed = new URL(url);
-    pathname = parsed.pathname;
-    search = parsed.search;
-  } catch {
-    const qIdx = url.indexOf('?');
-    if (qIdx === -1) {
-      pathname = url;
-      search = '';
-    } else {
-      pathname = url.slice(0, qIdx);
-      search = url.slice(qIdx);
-    }
-  }
-
-  const segments = pathname.replace(/^\//, '').split('/').filter(s => s.length > 0);
-  const searchParams = new URLSearchParams(search);
+  const segments = url.pathname.replace(/^\//, '').split('/').filter(s => s.length > 0);
+  const searchParams = new URLSearchParams(url.search);
 
   return walkTree(rootSitemap as Sitemap, segments, 0, searchParams, rootDefault);
 }

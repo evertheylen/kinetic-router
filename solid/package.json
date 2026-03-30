@@ -23,7 +23,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@kinetic-router/definition": "workspace:*"
+    "@kinetic-router/definition": "workspace:*",
+    "@kinetic-router/url": "workspace:*"
   },
   "peerDependencies": {
     "@solidjs/web": "catalog:",

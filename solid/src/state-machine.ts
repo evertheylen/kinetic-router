@@ -25,7 +25,7 @@ export function makeStateMachine<
     trans: Transition,
     ...args: (Transitions[Transition] extends ((state: S, ...args: (infer Args extends any[])) => Promise<any>) ? Args : never )
   ) {
-    // TODO block transitions while another is running?
+    // block transitions while another is running?
     this.transitionPromise = this.transitions[trans](this.state, ...args).then(s => {
       this.state = s;
       return s;

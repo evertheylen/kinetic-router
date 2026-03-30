@@ -5,7 +5,7 @@ import { ImplementationMap } from "@kinetic-router/definition/implement.js";
 export class RoutingContract<
   // Static data about a page, should also be defined upfront for lazy routes
   // example: { 'viewAs': 'mainpage' | 'detail' | 'fullscreen' }
-  StaticData extends object,
+  ExtraStaticData extends object,
 
   // Output (besides html and title) that each page is supposed to give
   // example: opengraph attributes
@@ -13,7 +13,7 @@ export class RoutingContract<
 > {
 
   page<Input extends object, UntrackedKeys extends keyof Input = any>(
-    p: Page<Output, Input, UntrackedKeys> & StaticData
+    p: Page<Output, Input, UntrackedKeys> & ExtraStaticData
   ) {
     return p;
   }

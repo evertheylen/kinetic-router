@@ -8,7 +8,7 @@ type ImplLoader<Impl extends object, StaticData extends object> = (
   | { lazy: true, loadImpl: (() => Promise<Impl>), staticData: StaticData }
 )
 
-export class ImplementationMap<
+export abstract class ImplementationMap<
   // In the most common example, this is a Page
   Impl extends object,
 
@@ -72,15 +72,29 @@ export class ImplementationMap<
       });
       throw new Error(`No implementation found for ${paths.join(', ')}`);
     }
+
+    for (const route of allRoutes) {
+      this.checkStaticPartOfImpl(route, this.getStaticPartOfImplementation(route));
+    }
   }
 
-  /** return list of loaded implementations, from outermost to innermost (nested) route
-   * (last one is the implementation for the actual route)
-   */
-  public async loadRoute<ParamDefs extends AnyParamDefs>(route: Route<ParamDefs>) {
+  public abstract checkStaticPartOfImpl(route: Route, staticImpl: StaticData): void;
+
+  public getStaticPartOfImplementation(route: Route): StaticData {
+    const impl = this.map.get(route)!;
+    if (impl.lazy) {
+      return impl.staticData;
+    } else {
+      return impl.impl;
+    }
+  }
+
+  /** return loaded implementation */
+  public async loadImplementation(route: Route) {
     const impl = this.map.get(route)!;
     if (impl.lazy) {
       const loadedImpl = await impl.loadImpl();
+      // check staticData
       for (const [key, staticValue] of Object.entries(impl.staticData)) {
         const loadedValue = (loadedImpl as any)[key];
         if (staticValue !== loadedValue) {
