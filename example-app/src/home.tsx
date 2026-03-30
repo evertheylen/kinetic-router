@@ -1,7 +1,7 @@
-import { routeImpl } from "./routing";
+import { router } from "./routing";
 import { homePage } from "./sitemap";
 
-routeImpl.implement(homePage, {
+router.implement(homePage, {
   untrackedKeys: [],
   viewAs: 'mainpage',
   async render(untrackedParams) {

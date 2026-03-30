@@ -64,3 +64,9 @@ export class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Rout
   }
 }
 
+export function resolveAliases(locator: Locator<any>) {
+  while (locator.route instanceof Alias) {
+    locator = locator.route.locate(locator.values);
+  }
+  return locator;
+}

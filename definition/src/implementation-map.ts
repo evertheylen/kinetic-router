@@ -1,5 +1,5 @@
-import { RootSitemap, slugLookup, slugPathToString } from "./root.js";
-import { Route } from "./routes.js";
+import { getSlugPath, RootSitemap, slugLookup, slugPathToString } from "./root.js";
+import { Alias, Route } from "./routes.js";
 import { AnyParamDefs, ParamDef, ParamValues } from "./params.js";
 
 type ImplLoader<Impl extends object, StaticData extends object> = (
@@ -60,6 +60,9 @@ export abstract class ImplementationMap<
   public check() {
     const allRoutes = new Set<Route>();
     for (const route of this.root[slugLookup].keys()) {
+      if (route instanceof Alias) {
+        continue;
+      }
       allRoutes.add(route);
       route.nestedInRoutes.forEach(r => allRoutes.add(r));
     }
@@ -91,7 +94,14 @@ export abstract class ImplementationMap<
 
   /** return loaded implementation */
   public async loadImplementation(route: Route) {
-    const impl = this.map.get(route)!;
+    const impl = this.map.get(route);
+
+    if (impl === undefined) {
+      const slugPath = getSlugPath(this.root, route)!;
+      const slugPathStr = slugPathToString(slugPath);
+      throw new Error(`Couldnt find implementation for ${slugPathStr}`);
+    }
+
     if (impl.lazy) {
       const loadedImpl = await impl.loadImpl();
       // check staticData

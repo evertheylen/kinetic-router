@@ -1,7 +1,7 @@
-import { getSlugPath, RootSitemap } from "@kinetic-router/definition/root.js";
+import { getSlugPath, RootSitemap, slugPathToString } from "@kinetic-router/definition/root.js";
 import { AnyParamDefs, ParamValues } from "@kinetic-router/definition/params.js";
-import { Locator, Route } from "@kinetic-router/definition/routes.js";
-import { urlToLocator } from "@kinetic-router/url";
+import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
+import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 
 import { Page, PageState } from "./page";
 import { AppState } from "./app-state";
@@ -37,14 +37,22 @@ export class ActualRouter<
     // TODO register with Navigation API
 
     const locator = urlToLocator(this.sitemap, window.location);
+    const resolvedLocator = resolveAliases(locator);
+    const url = locatorToUrl(this.sitemap, resolvedLocator);
+    console.debug("TODO: Rewrite URL to ", url);
 
-    this.rootFrame = (document.getElementById(rootFrameId)! as any)[frameDelegateAttribute];
-
-    if (this.rootFrame === undefined) {
+    const rootFrameElement = document.getElementById(rootFrameId);
+    if (rootFrameElement === null) {
       throw new Error('No root frame found');
     }
 
-    await this.navigate(locator, { updateCurrent: true });
+    this.rootFrame = (rootFrameElement as any)[frameDelegateAttribute];
+
+    if (this.rootFrame === undefined) {
+      throw new Error('No delegate on root frame found');
+    }
+
+    await this.navigate(resolvedLocator, { updateCurrent: true });
   }
 
   createPageState(): PageState {
@@ -63,6 +71,10 @@ export class ActualRouter<
   ) {
     // TODO dont just ignore old RI's duuude
     // TODO use Navigation API and respect options
+
+    if (locator.route instanceof Alias) {
+      throw new Error(`Cant navigate to an alias`);
+    }
 
     const routeStack = [...locator.route.nestedInRoutes, locator.route];
     const last = routeStack.length - 1;
@@ -104,8 +116,9 @@ export class ActualRouter<
       const renderedRI = await renderedRIPromise;
 
       if (frame === undefined) {
-        const slugPath = getSlugPath(this.sitemap, renderedRI.route);
-        throw new Error(`Cant render ${slugPath!.join('/')}: no frame!`);
+        const slugPath = getSlugPath(this.sitemap, renderedRI.route)!;
+        const slugPathStr = slugPathToString(slugPath);
+        throw new Error(`Cant render ${slugPathStr}: no frame!`);
       }
 
       frame.setElement(renderedRI.renderOutput!.html);

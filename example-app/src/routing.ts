@@ -1,9 +1,8 @@
-import { RoutingContract } from "@kinetic-router/solid/contract.js";
+import { Router } from "@kinetic-router/solid/router.js";
 import { sitemap } from "./sitemap";
 
-export const contract = new RoutingContract<
+export const router = new Router<
   { viewAs: 'mainpage' | 'detail' | 'fullscreen' },
   { description: string }
->()
+>(sitemap);
 
-export const routeImpl = contract.implementation(sitemap);

@@ -1,6 +1,8 @@
 import { RootSitemap } from "@kinetic-router/definition/root.js";
 import { SolidImplementationMap } from "./implementation-map";
 import { ActualRouter } from "./actual-router";
+import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
+import { Locator } from "@kinetic-router/definition";
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
@@ -23,7 +25,7 @@ export class Router<
     this.sitemap = sitemap;
     this.implMap = new SolidImplementationMap(this.sitemap);
 
-    document.addEventListener('onload', async () => {
+    queueMicrotask(async () => {
       this.implMap.check();
       const router = new ActualRouter(this.sitemap, this.implMap);
       await router.init()
@@ -51,5 +53,13 @@ export class Router<
     }
 
     return this.actualRouter.navigate(...args);
+  }
+
+  toUrl(locator: Locator<any>) {
+    return locatorToUrl(this.sitemap, locator)
+  }
+
+  toLocator(url: URL) {
+    return urlToLocator(this.sitemap, url);
   }
 }

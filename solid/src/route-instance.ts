@@ -38,7 +38,7 @@ type Rendered = {
   subFrame: FrameDelegate | undefined;
 } & Shared;
 
-export const InRenderedRoute = createContext<Rendered>();
+export const InRenderedRoute = createContext<Rendered | null>(null);
 
 export type RouteInstance<Tag = any> = (Initial | ImplLoaded | Rendered) & { tag: Tag };
 

@@ -19,51 +19,23 @@ export const journeys = route({
 
 export const journeyId = param.path<string>();
 
-export const journeyDetail = journeys.nested()
+//export const journeyDetail = journeys.nestedRoute()
 
 export const sitemap = root({
   [index]: route({}).aliasTo(() => homePage.locate({})),
   home: homePage,
-  explore: {
-    [index]: agencyList,
-    [agencyId.$]:  {
-      [index]: serviceBrandList,  //explore/NMBS/brand/
-      [serviceBrand.$]: {
-        [index]: trainList,  //explore/NMBS/brand/IC/train
-        [trainNumber.$]: trainDetail,
-      }
-    }
-  },
-  journeys: journeys.nest(subRoute => ({
-    [journeyId.$]: 
-  })),
+  // explore: {
+  //   [index]: agencyList,
+  //   [agencyId.$]: {
+  //     [index]: serviceBrandList,  //explore/NMBS/brand/
+  //     [serviceBrand.$]: {
+  //       [index]: trainList,  //explore/NMBS/brand/IC/train
+  //       [trainNumber.$]: trainDetail,
+  //     }
+  //   }
+  // },
+  // journeys: journeys.nest(subRoute => ({
+  //   [journeyId.$]: 
+  // })),
   account: route({})
 });
-
-const x = {
-  [index]: homePage,
-  explore: {
-    [index]: 
-    [agencyId.$]: 
-  }
-}
-
-function test(): 'test' {
-  return 'test'
-};
-
-const a = {
-  test: 1,
-  test: 2,
-}
-
-class Foo {
-  [Symbol.toPrimitive]() {
-    return 'test'
-  }
-}
-
-const b = {
-  [a]: 
-  
-}
