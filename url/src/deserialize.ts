@@ -1,7 +1,7 @@
 import { index as indexSymbol } from '@kinetic-router/definition';
 import type { Locator, Serde } from '@kinetic-router/definition';
 import { defaultSerde } from '@kinetic-router/definition/root.js';
-import { Route } from '@kinetic-router/definition/routes.js';
+import { resolveAliases, Route } from '@kinetic-router/definition/routes.js';
 import { PathParamDef, SearchParamDef, SearchParamDefWithDefault, type ParamDef } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
 import { index, Sitemap } from '@kinetic-router/definition/sitemap.js';
@@ -152,5 +152,6 @@ export function urlToLocator(rootSitemap: RootSitemap, url: { pathname: string, 
   const segments = url.pathname.replace(/^\//, '').split('/').filter(s => s.length > 0);
   const searchParams = new URLSearchParams(url.search);
 
-  return walkTree(rootSitemap as Sitemap, segments, 0, searchParams, rootDefault);
+  const locator = walkTree(rootSitemap as Sitemap, segments, 0, searchParams, rootDefault);
+  return resolveAliases(locator);
 }

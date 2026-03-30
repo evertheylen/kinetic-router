@@ -21,9 +21,15 @@ export const journeyId = param.path<string>();
 
 //export const journeyDetail = journeys.nestedRoute()
 
+export const explore = route({});
+
 export const sitemap = root({
   [index]: route({}).aliasTo(() => homePage.locate({})),
   home: homePage,
+  explore: {
+    [index]: explore.nestedRoute({}),
+    [agencyId.$]: explore.nestedRoute({ agencyId })
+  },
   // explore: {
   //   [index]: agencyList,
   //   [agencyId.$]: {

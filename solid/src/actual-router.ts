@@ -1,9 +1,9 @@
 import { getSlugPath, RootSitemap, slugPathToString } from "@kinetic-router/definition/root.js";
-import { AnyParamDefs, ParamValues } from "@kinetic-router/definition/params.js";
-import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
-import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
+import { AnyParamDefs } from "@kinetic-router/definition/params.js";
+import { Alias, Locator, resolveAliases } from "@kinetic-router/definition/routes.js";
+import { urlToLocator } from "@kinetic-router/url";
 
-import { Page, PageState } from "./page";
+import { PageState } from "./page";
 import { AppState } from "./app-state";
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
 import { createParamStorage, mapParamObjectToParamInitMap, ParamStorage } from "./params";
@@ -20,6 +20,8 @@ export class ActualRouter<
   readonly implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>;
 
   // TODO keep cache of RouteInstance!
+  // TODO use Backstage!
+  // TODO use AppState!
 
   /** AppState of which ALL RouteInstance's are rendered */
   loadedAppState: AppState | undefined;
@@ -37,9 +39,7 @@ export class ActualRouter<
     // TODO register with Navigation API
 
     const locator = urlToLocator(this.sitemap, window.location);
-    const resolvedLocator = resolveAliases(locator);
-    const url = locatorToUrl(this.sitemap, resolvedLocator);
-    console.debug("TODO: Rewrite URL to ", url);
+    // url may be rewritten by navigate call window.location may point to Alias
 
     const rootFrameElement = document.getElementById(rootFrameId);
     if (rootFrameElement === null) {
@@ -52,7 +52,7 @@ export class ActualRouter<
       throw new Error('No delegate on root frame found');
     }
 
-    await this.navigate(resolvedLocator, { updateCurrent: true });
+    await this.navigate(locator, { updateCurrent: true });
   }
 
   createPageState(): PageState {
@@ -73,7 +73,8 @@ export class ActualRouter<
     // TODO use Navigation API and respect options
 
     if (locator.route instanceof Alias) {
-      throw new Error(`Cant navigate to an alias`);
+      console.warn(`Shouldnt navigate to an alias!`);
+      locator = resolveAliases(locator);
     }
 
     const routeStack = [...locator.route.nestedInRoutes, locator.route];
