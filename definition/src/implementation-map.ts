@@ -10,11 +10,11 @@ type ImplLoader<Impl extends object, StaticData extends object> = (
 
 export abstract class ImplementationMap<
   // In the most common example, this is a Page
-  Impl extends object,
+  out Impl extends object,
 
   // Static data that describe all page instances handled by that Page
   // Example: { displayAs: 'popup' }
-  StaticData extends object,
+  out StaticData extends object,
 > {
   protected root: RootSitemap;
   protected map = new Map<Route, ImplLoader<Impl, StaticData>>;

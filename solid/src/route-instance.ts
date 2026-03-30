@@ -33,7 +33,7 @@ type Rendered = {
     params: ParamStorage,
     pageState: PageState,
   }
-  renderOutput: {html: JSX.Element, title: string },
+  renderOutput?: {html: Node, title: string },
   owner: SolidRoot,
   subFrame: FrameDelegate | undefined;
 } & Shared;
@@ -44,12 +44,12 @@ export type RouteInstance<Tag = any> = (Initial | ImplLoaded | Rendered) & { tag
 
 
 export const transitions = {
-  makeInitial(initial: Exclude<Initial, 'tag'>): Initial {
+  makeInitial(initial: Omit<Initial, 'tag'>): Initial {
     return {...initial, tag: 'initial'}
   },
 
-  async implLoaded(initial: Exclude<Initial, 'tag'>, implMap: SolidImplementationMap<Page<any, any, any>, {}>): Promise<ImplLoaded> {
-    const implementation = await implMap.(initial.route);
+  async implLoaded(initial: Omit<Initial, 'tag'>, implMap: SolidImplementationMap): Promise<ImplLoaded> {
+    const implementation = await implMap.loadImplementation(initial.route);
     return {
       ...initial,
       implementation,
@@ -63,20 +63,23 @@ export const transitions = {
   }): Promise<Rendered> {
     const owner = args.renderArgs.params.owner;
     const renderFunc = await implLoaded.implementation.render(args.renderArgs.params.untrackedObject);
-    let renderOutput!: Rendered['renderOutput'];
 
-    runWithOwner(owner, () => {
-      renderOutput = renderFunc(args.renderArgs.params.reactiveProxyObject, args.renderArgs.pageState);
-    });
-
-    return {
+    const res: Rendered = {
       tag: 'rendered',
       route: implLoaded.route,
       implementation: implLoaded.implementation,
       renderArgs: args.renderArgs,
-      renderOutput,
+      subFrame: undefined,  // to be set later 
       owner,
     };
+
+    // manually setting Context here (yeah I'm kinda abusing solid here, dont care)
+    owner._context[(InRenderedRoute as any).id] = res;
+    runWithOwner(owner, () => {
+      res.renderOutput = renderFunc(args.renderArgs.params.reactiveProxyObject, args.renderArgs.pageState);
+    });
+
+    return res;
   }
 }
 

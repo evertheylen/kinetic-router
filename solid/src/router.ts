@@ -1,62 +1,55 @@
-import { ImplementationMap } from "@kinetic-router/definition/implement.js";
 import { RootSitemap } from "@kinetic-router/definition/root.js";
-import { AnyParamDefs, ParamValues } from "@kinetic-router/definition/params.js";
-import { Locator, Route } from "@kinetic-router/definition/routes.js";
-import { urlToLocator } from "@kinetic-router/url";
+import { SolidImplementationMap } from "./implementation-map";
+import { ActualRouter } from "./actual-router";
 
-import { Page } from "./page";
-import { AppState } from "./app-state";
-import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
-
-
+// This class just collects the most useful methods of the various objects
+// and centralizes it into one type-safe object that delegates the calls to the 
+// correct sub-object. Should never be used within the library, only for clients.
 
 export class Router<
-  StaticData extends object, Output extends object,
+  // Static data about a page, should also be defined upfront for lazy routes
+  // example: { 'viewAs': 'mainpage' | 'detail' | 'fullscreen' }
+  ExtraStaticData extends object = {},
+
+  // Output (besides html and title) that each page is supposed to give
+  // example: opengraph attributes
+  ExtraOutput extends object = {},
 > {
-  readonly sitemap: RootSitemap;
-  readonly implMap: ImplementationMap<Page<Output, any, any>, StaticData>;
+  implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>;
+  sitemap: RootSitemap;
+  protected actualRouter: ActualRouter<ExtraStaticData, ExtraOutput> | undefined;
 
-  // TODO keep cache of RouteInstance!
-
-  /** AppState of which ALL RouteInstance's are rendered */
-  loadedAppState: AppState | undefined;
-  /** AppState of which at least one RouteInstance has state Initial or ImplLoaded */
-  loadingAppState: AppState | undefined;
-
-  rootFrame!: FrameDelegate;
-
-  didStartInit = false;
-
-  constructor(sitemap: RootSitemap, implMap: ImplementationMap<Page<Output, any, any>, StaticData>) {
+  constructor(sitemap: RootSitemap) {
     this.sitemap = sitemap;
-    this.implMap = implMap;
+    this.implMap = new SolidImplementationMap(this.sitemap);
+
+    document.addEventListener('onload', async () => {
+      this.implMap.check();
+      const router = new ActualRouter(this.sitemap, this.implMap);
+      await router.init()
+      this.actualRouter = router;
+    });
   }
 
-  async init() {
-    if (this.didStartInit) {
-      return;
-    }
-    
-    this.implMap.check();
+  // page<Input extends object, UntrackedKeys extends keyof Input = any>(
+  //   p: Page<ExtraOutput, Input, UntrackedKeys> & ExtraStaticData
+  // ) {
+  //   return p;
+  // }
 
-    // TODO register with Navigation API
-
-    const locator = urlToLocator(this.sitemap, window.location);
-
-    this.rootFrame = (document.getElementById(rootFrameId)! as any)[frameDelegateAttribute];
-
-    if (this.rootFrame === undefined) {
-      throw new Error('No root frame found');
-    }
-
-    this.didStartInit = true;
-    await this.navigate(locator, { updateCurrent: true });
+  implement(...args: Parameters<typeof this.implMap.implement>) {
+    return this.implMap.implement(...args);
   }
 
-  async navigate<ParamDefs extends AnyParamDefs>(
-    locator: Locator<ParamDefs>,
-    options: { updateCurrent?: boolean, forceNewInstance?: boolean }
-  ) {
-    // TODO implement navigate
+  implementLazy(...args: Parameters<typeof this.implMap.implementLazy>) {
+    return this.implMap.implementLazy(...args);
+  }
+
+  navigate(...args: Parameters<ActualRouter<ExtraStaticData, ExtraOutput>['navigate']>) {
+    if (this.actualRouter === undefined) {
+      throw new Error('Router didnt init yet')
+    }
+
+    return this.actualRouter.navigate(...args);
   }
 }

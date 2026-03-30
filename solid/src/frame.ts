@@ -5,7 +5,7 @@ import { useContext } from "solid-js";
 export const rootFrameId = '__kinetic_router_root_frame';
 export const frameDelegateAttribute = '__kinetic_router_frame_delegate'
 
-export type FrameDelegate {
+export type FrameDelegate = {
   setElement(element: Node): void;
   clear(): void;
 }
@@ -24,11 +24,10 @@ export function Frame() {
     }
   };
 
-  // @ts-ignore
-  el[frameDelegateAttribute] = delegate;
-
   if (route === undefined) {
     el.setAttribute('id', rootFrameId);
+    // @ts-ignore
+    el[frameDelegateAttribute] = delegate;
   } else {
     route.subFrame = delegate;
   }

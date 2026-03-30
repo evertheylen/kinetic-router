@@ -8,7 +8,7 @@ export type Locator<ParamDefs extends Record<string, ParamDef<any>>> = {
 
 export class Route<ParamDefs extends Record<string, ParamDef<any>> = any> {
   public paramDefs: ParamDefs;
-  /** Ancestor nest routes, ordered from outermost to innermost (closest). Empty for non-nested routes. */
+  /** Ancestor nest routes, ordered from outermost to innermost (closest). `this` would come at the end. Empty for non-nested routes. */
   public nestedInRoutes: Route[];
 
   constructor(paramDefs: ParamDefs, nestedInRoutes: Route[] = []) {

@@ -4,15 +4,9 @@ import { Route } from "@kinetic-router/definition/routes.js";
 import { AnyParamDefs, ParamDef } from "@kinetic-router/definition/params.js";
 
 export class SolidImplementationMap<
-  // Static data about a page, should also be defined upfront for lazy routes
-  // example: { 'viewAs': 'mainpage' | 'detail' | 'fullscreen' }
-  ExtraStaticData extends object,
-
-  // Output (besides html and title) that each page is supposed to give
-  // example: opengraph attributes
-  Output extends object,
-
-> extends ImplementationMap<Page<Output, any, any>, StaticPage<any> & ExtraStaticData> {
+  out ExtraStaticData extends object = {},
+  out ExtraOutput extends object = {},
+> extends ImplementationMap<Page<ExtraOutput, any, any>, StaticPage<any> & ExtraStaticData> {
   public override checkStaticPartOfImpl(route: Route, staticImpl: StaticPage<any> & ExtraStaticData): void {
 
     // check if untrackedKeys is used correctly
