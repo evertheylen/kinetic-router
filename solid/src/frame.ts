@@ -13,33 +13,32 @@ export type FrameDelegate = {
 
 export const Frame: typeof Dynamic = (props) => {
   const route = useContext(InRenderedRoute);
-
-  let el = createComponent(Dynamic, props);
-  if (typeof el === 'function') {
-    // @ts-ignore
-    el = el();
-  }
-
-  if (!(el instanceof HTMLElement)) {
-    throw new Error('Frame must be HTMLElement');
-  }
+  let frameElement: HTMLElement;
 
   const delegate: FrameDelegate = {
     setElement(element) {
-      el.replaceChildren(element)
+      frameElement.replaceChildren(element)
     },
     clear() {
-      el.replaceChildren();
+      frameElement.replaceChildren();
     }
   };
 
-  if (route === null) {
-    el.setAttribute('id', rootFrameId);
-    // @ts-ignore
-    el[frameDelegateAttribute] = delegate;
-  } else {
+  const setRef = (element: HTMLElement) => {
+    frameElement = element;
+    if (route === null) {
+      element.setAttribute('id', rootFrameId);
+      // @ts-ignore
+      element[frameDelegateAttribute] = delegate;
+    }
+  }
+
+  // @ts-ignore
+  const res = createComponent(Dynamic, { ...props, ref: setRef });
+
+  if (route !== null) {
     route.subFrame = delegate;
   }
 
-  return el;
+  return res;
 }

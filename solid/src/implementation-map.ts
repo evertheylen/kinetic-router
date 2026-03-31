@@ -1,7 +1,8 @@
 import { ImplementationMap } from "@kinetic-router/definition/implementation-map.js";
-import { Page, StaticPage } from "./page";
+import { Page, PageState, StaticPage } from "./page";
 import { Route } from "@kinetic-router/definition/routes.js";
-import { AnyParamDefs, ParamDef } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
+import { JSX } from "solid-js/jsx-runtime";
 
 export class SolidImplementationMap<
   out ExtraStaticData extends object = {},
@@ -25,5 +26,21 @@ export class SolidImplementationMap<
         }
       }
     }
+  }
+
+  // no higher order types >:(
+  public override implement<ParamDefs extends AnyParamDefs, UntrackedKeys extends (keyof ParamValues<ParamDefs> & string)>(
+    route: Route<ParamDefs>,
+    impl: Page<ExtraOutput, ParamValues<ParamDefs>, UntrackedKeys> & ExtraStaticData
+  ): void {
+    super.implement(route, impl as any);
+  }
+
+  public override implementLazy<ParamDefs extends AnyParamDefs, UntrackedKeys extends (keyof ParamValues<ParamDefs> & string)>(
+    route: Route<ParamDefs>,
+    loadImpl: () => Promise<Page<ExtraOutput, ParamValues<ParamDefs>, UntrackedKeys>>,
+    staticData: StaticPage<UntrackedKeys> & ExtraStaticData
+  ): void {
+    super.implementLazy(route, loadImpl as any, staticData);
   }
 }

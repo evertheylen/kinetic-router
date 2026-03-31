@@ -13,4 +13,7 @@ export default defineConfig({
     target: 'esnext',
   },
   base: './',
+  optimizeDeps: {
+    exclude: ['@kinetic-router/definition', '@kinetic-router/url', '@kinetic-router/solid']
+  }
 });

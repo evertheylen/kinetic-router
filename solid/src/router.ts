@@ -3,6 +3,8 @@ import { SolidImplementationMap } from "./implementation-map";
 import { ActualRouter } from "./actual-router";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator } from "@kinetic-router/definition";
+import { AnyParamDefs } from "@kinetic-router/definition/params.js";
+import { Route } from "@kinetic-router/definition/routes.js";
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
@@ -25,6 +27,9 @@ export class Router<
     this.sitemap = sitemap;
     this.implMap = new SolidImplementationMap(this.sitemap);
 
+    this.implement = this.implMap.implement.bind(this.implMap);
+    this.implementLazy = this.implMap.implementLazy.bind(this.implMap);
+
     queueMicrotask(async () => {
       this.implMap.check();
       const router = new ActualRouter(this.sitemap, this.implMap);
@@ -39,13 +44,8 @@ export class Router<
   //   return p;
   // }
 
-  implement(...args: Parameters<typeof this.implMap.implement>) {
-    return this.implMap.implement(...args);
-  }
-
-  implementLazy(...args: Parameters<typeof this.implMap.implementLazy>) {
-    return this.implMap.implementLazy(...args);
-  }
+  implement: typeof this.implMap.implement;
+  implementLazy: typeof this.implMap.implementLazy;
 
   navigate(...args: Parameters<ActualRouter<ExtraStaticData, ExtraOutput>['navigate']>) {
     if (this.actualRouter === undefined) {

@@ -26,14 +26,6 @@ export abstract class ImplementationMap<
   protected _implement(
     route: Route, impl: ImplLoader<Impl, StaticData>
   ) {
-    // TODO: nest routes not in root?
-    // const lookup = this.root[slugLookup];
-    // const isInSlugMap = lookup.has(route);
-
-    // if (!isInSlugMap) {
-    //   throw new Error(`Route ${route} is not part of given root`);
-    // }
-
     const existingPage = this.map.get(route);
     if (existingPage !== undefined) {
       const slugHint = this.root[slugLookup].get(route);

@@ -16,7 +16,7 @@ export function mapParamObjectToParamInitMap<ParamDefs extends AnyParamDefs>(
 
   for (const [key, pd] of Object.entries(paramDefs)) {
     allParamInits.set(pd, {
-      reactive: untrackedKeys.includes(key),
+      reactive: !untrackedKeys.includes(key),
       initValue: (snapshot as any)[key]
     });
   }
@@ -34,9 +34,7 @@ export function createParamStorage(
     Object.values(routeInstance.route.paramDefs)
   )
 
-  // TODO: check if this is ok?
-  const o = () => createOwner();
-  const owner = parent?.owner !== undefined ? runWithOwner(parent.owner, o) : o();
+  const owner = parent?.owner !== undefined ? runWithOwner(parent.owner, createOwner) : createOwner();
   
   const ownedParamDefs = (
     parent === undefined

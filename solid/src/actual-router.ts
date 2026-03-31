@@ -123,6 +123,7 @@ export class ActualRouter<
       }
 
       frame.setElement(renderedRI.renderOutput!.html);
+      frame = renderedRI.subFrame;
     }
 
     document.title = (await renderedRIs[last]).renderOutput!.title;

@@ -21,13 +21,14 @@ interface ParamDefWithDefault<T> extends ParamDef<T> {
 
 // PATH PARAMS -------------------------------
 
+const pathParamSymbol: unique symbol = Symbol();
+
 export class PathParamDef<T> extends ParamDef<T> {
   readonly $: symbol;
   static symbolRegistry = new WeakMap<Symbol, PathParamDef<any>>();
 
   constructor(serde?: Serde<T>) {
     super(serde);
-    // see comment above, we are cheating
     this.$ = Symbol();
     PathParamDef.symbolRegistry.set(this.$, this);
   }

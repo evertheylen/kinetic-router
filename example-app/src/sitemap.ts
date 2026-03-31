@@ -26,6 +26,7 @@ export const explore = route({});
 export const sitemap = root({
   [index]: route({}).aliasTo(() => homePage.locate({})),
   home: homePage,
+  account: route({}),
   explore: {
     [index]: explore.nestedRoute({}),
     [agencyId.$]: explore.nestedRoute({ agencyId })
@@ -43,5 +44,4 @@ export const sitemap = root({
   // journeys: journeys.nest(subRoute => ({
   //   [journeyId.$]: 
   // })),
-  account: route({})
 });

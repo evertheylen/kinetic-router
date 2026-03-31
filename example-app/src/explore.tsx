@@ -40,7 +40,6 @@ router.implement(sitemap.explore[index], {
 });
 
 
-// @ts-ignore TODO fixme :(
 router.implement(sitemap.explore[agencyId.$], {
   untrackedKeys: [],
   // TODO: viewAs no longer important for nested routes?

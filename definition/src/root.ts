@@ -36,6 +36,9 @@ export function root<Sm extends SubRoutes>(sitemap: Sm, serde?: Serde<any>): Roo
       const keys = Reflect.ownKeys(subRoutes);
 
       if (indexRoute !== undefined) {
+        if (!(indexRoute instanceof Route)) {
+          throw new Error(`Expected a Route for "" at ${slugPathToString(slugPath)}`);
+        }
         registerRoute(indexRoute, slugPath, activePathParams);
       }
 
