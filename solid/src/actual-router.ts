@@ -9,6 +9,8 @@ import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
 import { createParamStorage, mapParamObjectToParamInitMap, ParamStorage } from "./params";
 import { RouteInstance, transitions } from "./route-instance";
 import { SolidImplementationMap } from "./implementation-map";
+import { StateTransition, transition } from "./state-transition";
+import { createEffect, runWithOwner } from "solid-js";
 
 
 
@@ -26,7 +28,7 @@ export class ActualRouter<
   /** AppState of which ALL RouteInstance's are rendered */
   loadedAppState: AppState | undefined;
   /** AppState of which at least one RouteInstance has state Initial or ImplLoaded */
-  loadingAppState: AppState | undefined;
+  //loadingAppState: AppState | undefined;
 
   rootFrame!: FrameDelegate;
 
@@ -36,10 +38,10 @@ export class ActualRouter<
   }
 
   async init() {
-    // TODO register with Navigation API
+    this.setupNavigationApi();
 
     const locator = urlToLocator(this.sitemap, window.location);
-    // url may be rewritten by navigate call window.location may point to Alias
+    // url may be later rewritten by navigate call as window.location may point to Alias
 
     const rootFrameElement = document.getElementById(rootFrameId);
     if (rootFrameElement === null) {
@@ -53,6 +55,21 @@ export class ActualRouter<
     }
 
     await this.navigate(locator, { updateCurrent: true });
+  }
+
+  setupNavigationApi() {
+    const router = this;
+    window.navigation.addEventListener("navigate", (event) => {
+      const url = new URL(event.destination.url);
+      const locator = urlToLocator(this.sitemap, url);
+
+      event.intercept({
+        async handler() {
+          console.debug('Intercepting navigation', {url, locator});
+          await router.navigate(locator, {});
+        },
+      });
+    });
   }
 
   createPageState(): PageState {
@@ -70,7 +87,7 @@ export class ActualRouter<
     options: { updateCurrent?: boolean, forceNewInstance?: boolean }
   ) {
     // TODO dont just ignore old RI's duuude
-    // TODO use Navigation API and respect options
+    // TODO respect options
 
     if (locator.route instanceof Alias) {
       console.warn(`Shouldnt navigate to an alias!`);
@@ -90,9 +107,11 @@ export class ActualRouter<
     );
 
     let parentParamStorage: Promise<ParamStorage> | undefined = undefined;
-    const renderedRIs: Promise<RouteInstance<'rendered'>>[] = [];
+    // we will transition all the way in one go
+    const renderedRiTransitions: StateTransition<RouteInstance<'initial'>, RouteInstance<'rendered'>>[] = [];
 
     for (let i=0; i<routeStack.length; i++) {
+      const initial = initialRIs[i];
       const implLoaded = implLoadedRIs[i];
 
       const paramStorage: Promise<ParamStorage> = Promise.all([implLoaded, parentParamStorage]).then(
@@ -108,24 +127,38 @@ export class ActualRouter<
         })
       );
 
-      renderedRIs.push(renderedRI);
+      renderedRiTransitions.push(transition(initial, renderedRI));
     }
 
-    // Now actually put them on the page!
-    let frame: FrameDelegate | undefined = this.rootFrame;
-    for (const renderedRIPromise of renderedRIs) {
-      const renderedRI = await renderedRIPromise;
+    const state = new AppState(renderedRiTransitions, locator.values);
+    await this.putElementsInDocument(state);
 
+    // TODO: enable graceful degradation without the window.navigation API (iOS 26.1 and lower!)
+    window.navigation.updateCurrentEntry({
+      state: locator.values,
+    })
+  }
+
+  async putElementsInDocument(appState: AppState) {
+    let frame: FrameDelegate | undefined = this.rootFrame;
+    for (const transition of appState.routeInstances) {
       if (frame === undefined) {
-        const slugPath = getSlugPath(this.sitemap, renderedRI.route)!;
+        const slugPath = getSlugPath(this.sitemap, transition.from.route)!;
         const slugPathStr = slugPathToString(slugPath);
         throw new Error(`Cant render ${slugPathStr}: no frame!`);
       }
 
+      const renderedRI = await transition.to;
+
       frame.setElement(renderedRI.renderOutput!.html);
       frame = renderedRI.subFrame;
-    }
 
-    document.title = (await renderedRIs[last]).renderOutput!.title;
+      if (transition === appState.mostSpecificRi) {
+        runWithOwner(renderedRI.owner, () => createEffect(
+          () => renderedRI.renderOutput!.title,
+          (title) => { document.title = title }
+        ));
+      }
+    }
   }
 }

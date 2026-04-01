@@ -1,28 +1,34 @@
 import { Json } from "@kinetic-router/definition";
 import { RouteInstance } from "./route-instance";
+import { StateTransition } from "./state-transition";
 
 
 function getRandomId(): string {
   return (new Date().toISOString()) + '/' + Math.random().toString(16).slice(2);
 }
 
+type RiTrans = StateTransition<RouteInstance<'initial'>, RouteInstance<'rendered'>>;
 
 export class AppState {
   readonly id: string;
-  readonly routeInstances: RouteInstance[];
+  readonly routeInstances: RiTrans[];
   readonly paramSnapshot: object;
 
-  constructor(routeInstances: RouteInstance[], paramSnapshot: object) {
+  constructor(routeInstances: RiTrans[], paramSnapshot: object) {
     this.id = getRandomId();
     this.routeInstances = routeInstances;
     this.paramSnapshot = paramSnapshot;
 
     console.assert(
-      routeInstances[routeInstances.length-1].route.nestedInRoutes.every(
-        (r, i) => r === routeInstances[i].route
+      routeInstances[routeInstances.length-1].from.route.nestedInRoutes.every(
+        (r, i) => r === routeInstances[i].from.route
       ),
       'routeInstances stack differs from route specification'
     );
+  }
+
+  get mostSpecificRi() {
+    return this.routeInstances[this.routeInstances.length-1];
   }
 
   serialize(): Json {

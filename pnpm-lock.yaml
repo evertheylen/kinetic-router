@@ -9,6 +9,9 @@ catalogs:
     '@solidjs/web':
       specifier: 2.0.0-beta.4
       version: 2.0.0-beta.4
+    '@types/dom-navigation':
+      specifier: ^1.0.7
+      version: 1.0.7
     '@types/node':
       specifier: ^25.5.0
       version: 25.5.0
@@ -103,6 +106,9 @@ importers:
         specifier: 'catalog:'
         version: 2.0.0-beta.4
     devDependencies:
+      '@types/dom-navigation':
+        specifier: 'catalog:'
+        version: 1.0.7
       '@types/node':
         specifier: 'catalog:'
         version: 25.5.0
@@ -527,6 +533,9 @@ packages:
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
+
+  '@types/dom-navigation@1.0.7':
+    resolution: {integrity: sha512-Di4W+i2faYquHUnyWUg3bBQp5pTNvjDDA7mIYfD/1WlLgan6sKkeVjGbdL78K0CuNEk5Pfc/c0rfelwkz10mnQ==}
 
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
@@ -1300,6 +1309,8 @@ snapshots:
       assertion-error: 2.0.1
 
   '@types/deep-eql@4.0.2': {}
+
+  '@types/dom-navigation@1.0.7': {}
 
   '@types/estree@1.0.8': {}
 

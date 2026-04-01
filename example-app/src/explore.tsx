@@ -15,7 +15,7 @@ router.implement(explore, {
         <Frame component="div" style={{ padding: '10px', margin: '10px', border: '1px solid red' }}/>
       </div>;
 
-      return { html, title: 'agencies', description: 'List of agencies' };
+      return { html, title: 'agencies', description: 'Agency wrapper' };
     }
   }
 });

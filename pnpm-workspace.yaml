@@ -6,6 +6,7 @@ packages:
 
 catalog:
   '@solidjs/web': 2.0.0-beta.4
+  '@types/dom-navigation': ^1.0.7
   '@types/node': ^25.5.0
   solid-js: 2.0.0-beta.4
   typescript: ^6.0.2
