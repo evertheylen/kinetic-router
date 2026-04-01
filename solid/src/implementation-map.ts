@@ -1,8 +1,7 @@
 import { ImplementationMap } from "@kinetic-router/definition/implementation-map.js";
-import { Page, PageState, StaticPage } from "./page";
+import { Page, StaticPage } from "./page";
 import { Route } from "@kinetic-router/definition/routes.js";
 import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
-import { JSX } from "solid-js/jsx-runtime";
 
 export class SolidImplementationMap<
   out ExtraStaticData extends object = {},

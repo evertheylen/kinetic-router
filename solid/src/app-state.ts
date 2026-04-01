@@ -1,48 +1,67 @@
-import { Json } from "@kinetic-router/definition";
-import { RouteInstance } from "./route-instance";
+import { index, Json, JsonObject } from "@kinetic-router/definition";
+import { RenderedRoute } from "./rendered-route";
 import { StateTransition } from "./state-transition";
+import { Route } from "@kinetic-router/definition/routes.js";
+import { defaultSerde, RootSitemap, slugLookup } from "@kinetic-router/definition/root.js";
+import { Sitemap } from "@kinetic-router/definition/sitemap.js";
 
 
 function getRandomId(): string {
   return (new Date().toISOString()) + '/' + Math.random().toString(16).slice(2);
 }
 
-type RiTrans = StateTransition<RouteInstance<'initial'>, RouteInstance<'rendered'>>;
-
 export class AppState {
-  readonly id: string;
-  readonly routeInstances: RiTrans[];
+  readonly route: Route<any>;
   readonly paramSnapshot: object;
+  readonly id: string;
 
-  constructor(routeInstances: RiTrans[], paramSnapshot: object) {
-    this.id = getRandomId();
-    this.routeInstances = routeInstances;
+  constructor(route: Route<any>, paramSnapshot: object, id?: string) {
+    this.route = route;
     this.paramSnapshot = paramSnapshot;
-
-    console.assert(
-      routeInstances[routeInstances.length-1].from.route.nestedInRoutes.every(
-        (r, i) => r === routeInstances[i].from.route
-      ),
-      'routeInstances stack differs from route specification'
-    );
+    this.id = id ?? getRandomId();
   }
 
-  get mostSpecificRi() {
-    return this.routeInstances[this.routeInstances.length-1];
-  }
-
-  serialize(): Json {
+  serialize(root: RootSitemap) {
     // TODO implement serialize
-    throw new Error('serialize not implemented');
+    const slugs = root[slugLookup].get(this.route);
+    if (slugs === undefined) {
+      throw new Error(`Couldnt serialize route`);
+    }
+    // turn PathParamDef into null, it should be unique
+    const serializedSlugs = slugs.map(s => typeof s === 'object' ? null : s);
+    return { id: this.id, slugs: serializedSlugs, paramSnapshot: this.paramSnapshot as JsonObject } satisfies Json;
   }
 
-  static deserialize(data: Json): AppState {
-    // TODO implement deserialize
-    throw new Error('deserialize not implemented');
-  }
+  static deserialize(root: RootSitemap, data: ReturnType<AppState['serialize']>): AppState {
+    let node = root as Sitemap;
+    for (const slug of data.slugs) {
+      if (node instanceof Route) {
+        throw new Error(`Didnt exhaust slugs yet, trying to get slug ${slug} of a Route`);
+      }
 
-  static fromLocator(path: string, search: string): AppState {
-    // TODO implement fromUrl
-    throw new Error('fromUrl not implemented');
+      const { [index]: indexRoute, ...subRoutes } = node;
+      const keys = Reflect.ownKeys(subRoutes);
+
+      if (slug === null) {
+        if (typeof keys[0] !== 'symbol') {
+          throw new Error("Expected path param / symbol");
+        }
+
+        node = (subRoutes as { [key in symbol]: Sitemap })[keys[0]];
+      } else {
+        if (typeof keys[0] !== 'string') {
+          throw new Error("Expected string slug");
+        }
+
+        node = (subRoutes as { [key in string]: Sitemap })[slug];
+      }
+    }
+
+    const route = node instanceof Route ? node : node[index];
+    if (route === undefined) {
+      throw new Error(`Couldnt find route`);
+    }
+
+    return new AppState(route, data.paramSnapshot, data.id);
   }
 }

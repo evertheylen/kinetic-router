@@ -1,6 +1,6 @@
 import { JSX } from "solid-js/jsx-runtime";
 
-export type PageState = {
+export type PageStatus = {
   /** Should the page fetch resources? False when the page is somewhere in the
    * history stack and not currently being viewed. True when preloading a new page 
    * or currently visible. */
@@ -26,7 +26,7 @@ export type Page<
   UntrackedKeys extends (keyof Input & string) = any,
 > = {
   readonly render: (untrackedParams: {[K in UntrackedKeys]: Input[K]}) => Promise<(
-    (reactiveParams: {[K in Exclude<keyof Input, UntrackedKeys>]: Input[K]}, pageState: PageState) => (
+    (reactiveParams: {[K in Exclude<keyof Input, UntrackedKeys>]: Input[K]}, pageStatus: PageStatus) => (
       {html: JSX.Element, title: string } & Output
     )
   )>

@@ -1,7 +1,9 @@
 import { Accessor, createOwner, createSignal, runWithOwner, Setter } from "solid-js";
 import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
-import { RouteInstance } from "./route-instance";
+import { RenderedRoute } from "./rendered-route";
 import { SolidRoot } from "./utils";
+import { Page } from "./page";
+import { Route } from "@kinetic-router/definition/routes.js";
 
 
 export type ParamInit = Map<ParamDef<any>, { reactive: boolean, initValue: any }>;
@@ -25,13 +27,14 @@ export function mapParamObjectToParamInitMap<ParamDefs extends AnyParamDefs>(
 }
 
 
-export function createParamStorage(
-  parent: ParamStorage | undefined,
-  routeInstance: RouteInstance<'impl-loaded'>,
+export function createParamStorage({parent, route, implementation, allParamInits}: {
+  parent?: ParamStorage,
+  route: Route<any>,
+  implementation: Page<any, any, any>,
   allParamInits: ParamInit,
-): ParamStorage {
+}): ParamStorage {
   const routeParamDefs: Set<ParamDef<any>> = new Set<ParamDef<any>>(
-    Object.values(routeInstance.route.paramDefs)
+    Object.values(route.paramDefs)
   )
 
   const owner = parent?.owner !== undefined ? runWithOwner(parent.owner, createOwner) : createOwner();
@@ -58,7 +61,7 @@ export function createParamStorage(
   }
 
   // Step 3: make a proxy object to track reads and writes
-  const relevantValuesByKey = Object.entries(routeInstance.route.paramDefs as AnyParamDefs).map(
+  const relevantValuesByKey = Object.entries(route.paramDefs as AnyParamDefs).map(
     ([key, pd]) => {
       let value = allValues.get(pd);
       

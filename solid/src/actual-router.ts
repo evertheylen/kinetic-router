@@ -1,17 +1,32 @@
 import { getSlugPath, RootSitemap, slugPathToString } from "@kinetic-router/definition/root.js";
-import { AnyParamDefs } from "@kinetic-router/definition/params.js";
-import { Alias, Locator, resolveAliases } from "@kinetic-router/definition/routes.js";
+import { AnyParamDefs, ParamMap } from "@kinetic-router/definition/params.js";
+import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
 import { urlToLocator } from "@kinetic-router/url";
 
-import { PageState } from "./page";
+import { Page, PageStatus, StaticPage } from "./page";
 import { AppState } from "./app-state";
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
-import { createParamStorage, mapParamObjectToParamInitMap, ParamStorage } from "./params";
-import { RouteInstance, transitions } from "./route-instance";
+import { createParamStorage, mapParamObjectToParamInitMap, ParamInit, ParamStorage } from "./params";
+import { renderRoute, RenderedRoute } from "./rendered-route";
 import { SolidImplementationMap } from "./implementation-map";
 import { StateTransition, transition } from "./state-transition";
 import { createEffect, runWithOwner } from "solid-js";
 
+
+type RenderedRouteCache = {
+  /** How many AppStates refer to it? */
+  refCount: number,
+
+  /** The actual rendered route */
+  rendered: RenderedRoute,
+};
+
+
+type RequiredRouteChange = (
+  | 'render'  // different route entirely OR same route but untracked params changed, so rerender (or explicitly asked in navigate call)
+  | 'set-params'  // same route, can change without rerender
+  | 'none'  // the routes are equal and so are the params
+);
 
 
 export class ActualRouter<
@@ -20,6 +35,8 @@ export class ActualRouter<
 > {
   readonly sitemap: RootSitemap;
   readonly implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>;
+  readonly implCache = new Map<Route<any>, Page<ExtraOutput, any, any> & StaticPage<any> & ExtraStaticData>();
+  readonly rrCache = new Map<string, Map<Route<any>, RenderedRouteCache>>();
 
   // TODO keep cache of RouteInstance!
   // TODO use Backstage!
@@ -27,6 +44,7 @@ export class ActualRouter<
 
   /** AppState of which ALL RouteInstance's are rendered */
   loadedAppState: AppState | undefined;
+  activeRenderedRoutes: RenderedRoute[] = [];
   /** AppState of which at least one RouteInstance has state Initial or ImplLoaded */
   //loadingAppState: AppState | undefined;
 
@@ -72,14 +90,35 @@ export class ActualRouter<
     });
   }
 
-  createPageState(): PageState {
-    // TODO implement PageState properly
+  createPageStatus(): PageStatus {
+    // TODO implement PageStatus properly
     return {
       shouldFetch: () => true,
       isVisible: () => true,
       isAnimating: () => false,
       hasFocus: () => true
     };
+  }
+
+  /** Returns an array of required route changes of the same size as routes.new */
+  protected requiredRouteChanges(
+    routes: {old: Route<any>[], new: Route<any>[]},
+    params: {old: ParamMap, new: ParamInit}
+  ): RequiredRouteChange[] {
+    return [...Array(routes.new.length-1).keys()].map(i => {
+      if (routes.old[i] !== routes.new[i]) {
+        // also covers when routes.old is shorter than routes.new
+        return 'render'
+      }
+
+      const route = routes.new[i];
+
+      for (const pd of Object.values(route.paramDefs as AnyParamDefs)) {
+        if (params.old.get(pd) !== params.new.get(pd)) {
+          return i
+        }
+      }
+    });
   }
 
   async navigate<ParamDefs extends AnyParamDefs>(
@@ -90,14 +129,11 @@ export class ActualRouter<
     // TODO respect options
 
     if (locator.route instanceof Alias) {
-      console.warn(`Shouldnt navigate to an alias!`);
+      console.warn(`Shouldnt navigate to an Alias!`);
       locator = resolveAliases(locator);
     }
 
     const routeStack = [...locator.route.nestedInRoutes, locator.route];
-    const last = routeStack.length - 1;
-    const initialRIs = routeStack.map(route => transitions.makeInitial({ route }))
-    const implLoadedRIs = initialRIs.map(ri => transitions.implLoaded(ri, this.implMap))
 
     const allParamInits = mapParamObjectToParamInitMap(
       locator.route.paramDefs,
@@ -106,56 +142,63 @@ export class ActualRouter<
       locator.values
     );
 
+    // compare current state with new requested state
+
+
     let parentParamStorage: Promise<ParamStorage> | undefined = undefined;
-    // we will transition all the way in one go
-    const renderedRiTransitions: StateTransition<RouteInstance<'initial'>, RouteInstance<'rendered'>>[] = [];
+    const renderingRoutes: { route: Route<any>, promise: Promise<RenderedRoute> }[] = [];
 
-    for (let i=0; i<routeStack.length; i++) {
-      const initial = initialRIs[i];
-      const implLoaded = implLoadedRIs[i];
+    for (const route of routeStack) {
+      const implementationPromise = (
+        this.implCache.get(route) ?? this.implMap.loadImplementation(route).then((impl) => {
+          this.implCache.set(route, impl);
+          return impl;
+        })
+      );
 
-      const paramStorage: Promise<ParamStorage> = Promise.all([implLoaded, parentParamStorage]).then(
-        ([il, pps]) => createParamStorage(pps, il, allParamInits)
+      const paramStorage: Promise<ParamStorage> = Promise.all([implementationPromise, parentParamStorage]).then(
+        ([implementation, parent]) => createParamStorage({route, implementation, allParamInits, parent})
       );
 
       parentParamStorage = paramStorage;
       
-      const renderedRI = Promise.all([implLoaded, parentParamStorage]).then(
-        ([il, ps]) => transitions.rendered(il, {
-          renderArgs: { params: ps, pageState: this.createPageState() },
-          owner: ps.owner,
+      const promise = Promise.all([implementationPromise, parentParamStorage]).then(
+        ([implementation, params]) => renderRoute({
+          renderArgs: { params, pageStatus: this.createPageStatus() },
+          implementation,
+          route
         })
       );
 
-      renderedRiTransitions.push(transition(initial, renderedRI));
+      renderingRoutes.push({ route, promise });
     }
 
-    const state = new AppState(renderedRiTransitions, locator.values);
-    await this.putElementsInDocument(state);
+    await this.putElementsInDocument(renderingRoutes);
 
-    // TODO: enable graceful degradation without the window.navigation API (iOS 26.1 and lower!)
     window.navigation.updateCurrentEntry({
       state: locator.values,
     })
   }
 
-  async putElementsInDocument(appState: AppState) {
+  async putElementsInDocument(renderingRoutes: { route: Route<any>, promise: Promise<RenderedRoute> }[]) {
     let frame: FrameDelegate | undefined = this.rootFrame;
-    for (const transition of appState.routeInstances) {
+
+    const lastRendering = renderingRoutes[renderingRoutes.length-1];
+    for (const rendering of renderingRoutes) {
       if (frame === undefined) {
-        const slugPath = getSlugPath(this.sitemap, transition.from.route)!;
+        const slugPath = getSlugPath(this.sitemap, rendering.route)!;
         const slugPathStr = slugPathToString(slugPath);
         throw new Error(`Cant render ${slugPathStr}: no frame!`);
       }
 
-      const renderedRI = await transition.to;
+      const rendered = await rendering.promise;
 
-      frame.setElement(renderedRI.renderOutput!.html);
-      frame = renderedRI.subFrame;
+      frame.setElement(rendered.renderOutput!.html);
+      frame = rendered.subFrame;
 
-      if (transition === appState.mostSpecificRi) {
-        runWithOwner(renderedRI.owner, () => createEffect(
-          () => renderedRI.renderOutput!.title,
+      if (rendering === lastRendering) {
+        runWithOwner(rendered.owner, () => createEffect(
+          () => rendered.renderOutput!.title,
           (title) => { document.title = title }
         ));
       }
