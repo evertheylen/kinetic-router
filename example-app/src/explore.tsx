@@ -3,6 +3,7 @@ import { index } from "@kinetic-router/definition";
 
 import { router } from "./routing";
 import { agencyId, explore, sitemap } from "./sitemap";
+import { Counter } from "./counter";
 
 // top page
 router.implement(explore, {
@@ -11,7 +12,7 @@ router.implement(explore, {
   async render(untrackedParams) {
     return (params) => {
       const html = <div>
-        <h1>Agencies</h1>
+        <h1>Agencies <Counter/></h1>
         <Frame component="div" style={{ padding: '10px', margin: '10px', border: '1px solid red' }}/>
       </div>;
 
@@ -28,6 +29,7 @@ router.implement(sitemap.explore[index], {
     return (params) => {
       const html = (
         <ul>
+          <li>count <Counter/></li>
           <li><a href={router.toUrl(sitemap.explore[agencyId.$].locate({ agencyId: 'NMBS' }))}>NMBS</a></li>
           <li><a href={router.toUrl(sitemap.explore[agencyId.$].locate({ agencyId: 'DB' }))}>DB</a></li>
           <li><a href={router.toUrl(sitemap.explore[agencyId.$].locate({ agencyId: 'OBB' }))}>OBB</a></li>
@@ -46,6 +48,8 @@ router.implement(sitemap.explore[agencyId.$], {
   viewAs: 'mainpage',
   async render(untrackedParams) {
     return (params) => {
+      console.debug("GOT", params);
+
       const html = (
         <h2>This is {params.agencyId}</h2>
       );

@@ -1,5 +1,5 @@
 import { Accessor, createOwner, createSignal, runWithOwner, Setter } from "solid-js";
-import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, ParamDef, ParamMap, ParamValues } from "@kinetic-router/definition/params.js";
 import { RenderedRoute } from "./rendered-route";
 import { SolidRoot } from "./utils";
 import { Page } from "./page";
@@ -27,16 +27,17 @@ export function mapParamObjectToParamInitMap<ParamDefs extends AnyParamDefs>(
 }
 
 
-export function createParamStorage({parent, route, implementation, allParamInits}: {
+export function createParamStorage({parent, route, implementation, paramMap}: {
   parent?: ParamStorage,
   route: Route<any>,
   implementation: Page<any, any, any>,
-  allParamInits: ParamInit,
+  paramMap: ParamMap,
 }): ParamStorage {
   const routeParamDefs: Set<ParamDef<any>> = new Set<ParamDef<any>>(
     Object.values(route.paramDefs)
   )
 
+  const untrackedParamDefs = new Set(implementation.untrackedKeys.map(k => route.paramDefs[k]));
   const owner = parent?.owner !== undefined ? runWithOwner(parent.owner, createOwner) : createOwner();
   
   const ownedParamDefs = (
@@ -48,13 +49,12 @@ export function createParamStorage({parent, route, implementation, allParamInits
   const allValues = new Map(parent?.allValues);
   const ownedValues = new Map<ParamDef<any>, Value<any>>();
   for (const pd of ownedParamDefs) {
-    const paramInit = allParamInits.get(pd)!;
     let value: Value<any>;
-    if (paramInit.reactive) {
-      const [ read, write ] = runWithOwner(owner, () => createSignal(paramInit.initValue));
+    if (!untrackedParamDefs.has(pd)) {
+      const [ read, write ] = runWithOwner(owner, () => createSignal(paramMap.get(pd)!));
       value = { reactive: true, read, write };
     } else {
-      value = { reactive: false, value: paramInit.initValue };
+      value = { reactive: false, value: paramMap.get(pd)! };
     }
     allValues.set(pd, value);
     ownedValues.set(pd, value);
@@ -87,6 +87,7 @@ export function createParamStorage({parent, route, implementation, allParamInits
       }
     },
   });
+  console.debug("Made reactiveProxyObject with target", { relevantValuesByKey, relevantReactiveValuesByKey });
 
   // Step 4: Also make a simple object to store untracked values
   const untrackedObject = Object.fromEntries(
@@ -106,11 +107,11 @@ export function createParamStorage({parent, route, implementation, allParamInits
   };
 }
 
-type ReactiveValue<T> = { reactive: true, read: Accessor<T>, write: Setter<T> };
+export type ReactiveValue<T> = { reactive: true, read: Accessor<T>, write: Setter<T> };
 // untracked = also constant!
-type UntrackedValue<T> = { reactive: false, readonly value: T }
+export type UntrackedValue<T> = { reactive: false, readonly value: T }
 
-type Value<T> = ReactiveValue<T> | UntrackedValue<T>;
+export type Value<T> = ReactiveValue<T> | UntrackedValue<T>;
 
 // ParamStorage actually creates the owner so it can create signals.
 // This owner is reused to render!

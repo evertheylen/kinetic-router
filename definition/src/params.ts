@@ -1,4 +1,5 @@
 import { Json } from "./json.js";
+import { Route } from "./routes.js";
 
 export type Serde<T> = {
   serialize(obj: T): Json,
@@ -126,9 +127,16 @@ export function paramsByDefinition<ParamDefs extends AnyParamDefs>(
   params: ParamValues<ParamDefs>,
   definitions: ParamDefs,
 ): ParamMap {
-  const res: ParamMap = new Map();
-  for (const [key, paramDef] of Object.entries(definitions)) {
-    res.set(paramDef, (params as any)[key]);
-  }
-  return res;
+  return new Map(Object.entries(definitions).map(
+    ([key, paramDef]) => [paramDef, (params as any)[key]]
+  ))
+}
+
+export function paramsByKey<ParamDefs extends AnyParamDefs>(
+  params: ParamMap,
+  definitions: ParamDefs
+): ParamValues<ParamDefs> {
+  return Object.fromEntries(Object.entries(definitions).map(
+    ([key, paramDef]) => [key, params.get(paramDef)!]
+  )) as any;
 }

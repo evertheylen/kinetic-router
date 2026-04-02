@@ -1,38 +1,44 @@
-import { index, Json, JsonObject } from "@kinetic-router/definition";
-import { RenderedRoute } from "./rendered-route";
-import { StateTransition } from "./state-transition";
-import { Route } from "@kinetic-router/definition/routes.js";
+import { index, Json, JsonObject, Locator, Route } from "@kinetic-router/definition";
 import { defaultSerde, RootSitemap, slugLookup } from "@kinetic-router/definition/root.js";
 import { Sitemap } from "@kinetic-router/definition/sitemap.js";
 
+import { AnyParamDefs, ParamMap, paramsByDefinition, paramsByKey } from "@kinetic-router/definition/params.js";
 
-function getRandomId(): string {
+
+export function getRandomId(): string {
   return (new Date().toISOString()) + '/' + Math.random().toString(16).slice(2);
 }
 
 export class AppState {
   readonly route: Route<any>;
-  readonly paramSnapshot: object;
-  readonly id: string;
+  readonly paramSnapshot: ParamMap;
+  temporaryId: string | undefined;
 
-  constructor(route: Route<any>, paramSnapshot: object, id?: string) {
+  constructor(route: Route<any>, paramSnapshot: ParamMap, temporaryId?: string) {
     this.route = route;
     this.paramSnapshot = paramSnapshot;
-    this.id = id ?? getRandomId();
+    this.temporaryId = temporaryId;
   }
 
   serialize(root: RootSitemap) {
-    // TODO implement serialize
-    const slugs = root[slugLookup].get(this.route);
-    if (slugs === undefined) {
+    const abstractSlugs = root[slugLookup].get(this.route);
+    if (abstractSlugs === undefined) {
       throw new Error(`Couldnt serialize route`);
     }
     // turn PathParamDef into null, it should be unique
-    const serializedSlugs = slugs.map(s => typeof s === 'object' ? null : s);
-    return { id: this.id, slugs: serializedSlugs, paramSnapshot: this.paramSnapshot as JsonObject } satisfies Json;
+    const slugs = abstractSlugs.map(s => typeof s === 'object' ? null : s);
+
+    const snapShotByKey = paramsByKey(this.paramSnapshot, this.route.paramDefs) as JsonObject;
+
+    return { temporaryId: this.temporaryId, slugs, snapShotByKey } satisfies Json;
   }
 
-  static deserialize(root: RootSitemap, data: ReturnType<AppState['serialize']>): AppState {
+  static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>) {
+    const params = paramsByDefinition(locator.values, locator.route.paramDefs);
+    return new AppState(locator.route, params);
+  }
+
+  static deserialize(root: RootSitemap, data: SerializedAppState): AppState {
     let node = root as Sitemap;
     for (const slug of data.slugs) {
       if (node instanceof Route) {
@@ -62,6 +68,10 @@ export class AppState {
       throw new Error(`Couldnt find route`);
     }
 
-    return new AppState(route, data.paramSnapshot, data.id);
+    const snapShotByDef = paramsByDefinition(data.snapShotByKey, route.paramDefs);
+
+    return new AppState(route, snapShotByDef, data.temporaryId);
   }
 }
+
+export type SerializedAppState = ReturnType<AppState['serialize']>;

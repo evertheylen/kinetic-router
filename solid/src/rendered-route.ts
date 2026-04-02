@@ -17,6 +17,7 @@ export type RenderedRoute = {
   }
   renderOutput?: {html: Node, title: string },
   owner: SolidRoot,
+  navigationEntryId?: string,
   subFrame: FrameDelegate | undefined;
 };
 
