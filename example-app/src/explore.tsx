@@ -48,8 +48,6 @@ router.implement(sitemap.explore[agencyId.$], {
   viewAs: 'mainpage',
   async render(untrackedParams) {
     return (params) => {
-      console.debug("GOT", params);
-
       const html = (
         <h2>This is {params.agencyId}</h2>
       );

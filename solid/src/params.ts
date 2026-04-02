@@ -87,7 +87,6 @@ export function createParamStorage({parent, route, implementation, paramMap}: {
       }
     },
   });
-  console.debug("Made reactiveProxyObject with target", { relevantValuesByKey, relevantReactiveValuesByKey });
 
   // Step 4: Also make a simple object to store untracked values
   const untrackedObject = Object.fromEntries(

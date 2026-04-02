@@ -13,26 +13,21 @@ export type RenderedRouteCacheEntry = {
 export class RenderedRouteCache {
   cache = new Map<string, Map<Route<any>, RenderedRouteCacheEntry>>();
 
-  markUsedFor(newId: string, renderedRoutes: RenderedRoute[]) {
-    if (this.cache.has(newId)) {
-      throw new Error(`Cannot redefine which routes are used for id ${newId}`);
-    }
-
-    const subMap = new Map<Route<any>, RenderedRouteCacheEntry>();
+  markUsedFor(id: string, renderedRoutes: RenderedRoute[]) {
+    const subMap = this.getSubmap(id);
     
     for (const rendered of renderedRoutes) {
+      // Still on old navigationEntryId which may be another id in case of reuse!
       const entry = this.getEntry(rendered.navigationEntryId!, rendered.route) ?? {
         usedIn: new Set<string>(),
         rendered
       };
 
-      entry.usedIn.add(newId);
-      rendered.navigationEntryId = newId;
+      entry.usedIn.add(id);
+      rendered.navigationEntryId = id;
 
       subMap.set(rendered.route, entry);
     }
-
-    this.cache.set(newId, subMap);
   }
 
   getEntry(id: string, route: Route<any>) {

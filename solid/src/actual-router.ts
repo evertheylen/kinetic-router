@@ -1,10 +1,10 @@
 import { getSlugPath, RootSitemap, slugPathToString } from "@kinetic-router/definition/root.js";
-import { AnyParamDefs, ParamDef, ParamMap, paramsByDefinition } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, paramsByKey } from "@kinetic-router/definition/params.js";
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 
-import { Page, PageStatus, StaticPage } from "./page";
-import { AppState, getRandomId, SerializedAppState } from "./app-state";
+import { Page, PageStatus } from "./page";
+import { AppState, SerializedAppState } from "./app-state";
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
 import { createParamStorage, mapParamObjectToParamInitMap, ParamInit, ParamStorage, ReactiveValue } from "./params";
 import { renderRoute, RenderedRoute } from "./rendered-route";
@@ -12,11 +12,13 @@ import { SolidImplementationMap } from "./implementation-map";
 import { createEffect, runWithOwner } from "solid-js";
 import { calculateRouteChanges, RouteChange } from "./diff";
 import { RenderedRouteCache } from "./rendered-route-cache";
+import { printNavigationState } from "./debug";
 
 
 
 type NavigationInfo = {
-  forceNewInstance?: boolean
+  forceNewInstance?: boolean,
+  ignore?: boolean
 };
 
 
@@ -37,7 +39,7 @@ export class ActualRouter<
   // Cache for HistoryStates, just to avoid deserializing when possible.
   // Keys are given by either:
   //   - the UA as the `id` of a NavigationEntry
-  //   - a tempid-XYZ made by navigate calls we control that avoids serializing the AppState (should be very shortlived, has temporaryId)
+  //   - a temporary ID made by navigate calls we control that avoids serializing the AppState (should be very shortlived, .isTemporary())
   readonly stateCache = new Map<string, AppState>();
 
   // TODO use Backstage!
@@ -57,8 +59,6 @@ export class ActualRouter<
     //@ts-ignore
     window.__router = this;
 
-    this.setupNavigationApi();
-
     const rootFrameElement = document.getElementById(rootFrameId);
     if (rootFrameElement === null) {
       throw new Error('No root frame found');
@@ -70,16 +70,28 @@ export class ActualRouter<
       throw new Error('No delegate on root frame found');
     }
 
-    const state = this.getState({
-      id: window.navigation.currentEntry?.id, 
-      rawState: window.navigation.currentEntry?.getState() as any,
-      url: window.location
-    })!;
+    // setup after initial navigation stuff to avoid weird unwanted behaviour
+    this.setupNavigationApi();
+
+    const state = this.getState(window.navigation.currentEntry!)!;
     
-    // url may be later rewritten by navigate call as window.location may point to Alias
-    await this.renderNavigation(state, { replace: true });
-    window.navigation.updateCurrentEntry({ state: state.serialize(this.sitemap) });
-    this.commitNavigationEntry(window.navigation.currentEntry!, state);
+    const newLocator: Locator<any> = {
+      route: state.route, values: paramsByKey(state.paramSnapshot, state.route.paramDefs)
+    };
+
+    const newUrl = locatorToUrl(this.sitemap, newLocator);
+    const serializedState = state.serialize(this.sitemap);
+
+    await this.renderNavigation(state, undefined, {});
+    if (window.navigation.currentEntry?.url !== newUrl) {
+      const res = window.navigation.navigate(newUrl, {
+        // set ignore=true to avoid weird behaviour not aligned with "first load"
+        state: serializedState, history: 'replace', info: { ignore: true }
+      });
+      await res.committed;
+    } else {
+      window.navigation.updateCurrentEntry({ state: serializedState });
+    }
   }
 
   navigate<ParamDefs extends AnyParamDefs>(
@@ -92,8 +104,8 @@ export class ActualRouter<
     }
 
     const state = AppState.fromLocator(locator);
-    state.temporaryId = `tempid-${Math.random().toString(16).slice(2)}`;
-    this.stateCache.set(state.temporaryId, state);
+    // note that at this point, it is a temporary ID
+    this.stateCache.set(state.id, state);
 
     console.debug('navigate to ', state);
     
@@ -104,30 +116,18 @@ export class ActualRouter<
       info: { forceNewInstance: options?.forceNewInstance }
     });
 
-    res.committed?.then(entry => this.commitNavigationEntry(entry, state));
+    res.committed?.then(entry => {
+      entry.addEventListener('dispose', () => {
+        this.rrCache.unreference(entry.id);
+      });
+    });
 
     return res;
   }
 
-  protected commitNavigationEntry(entry: NavigationHistoryEntry, state: AppState) {
-    console.debug('commitNavigationEntry runs');
-    console.assert(state.temporaryId === undefined, 'expected temporaryId to be unset by this point');
-    this.stateCache.set(entry.id, state);
-
-    // will also update .navigationEntryId
-    this.rrCache.markUsedFor(entry.id, this.currentRenderedRoutes);
-
-    entry.addEventListener('dispose', () => {
-      this.rrCache.unreference(entry.id);
-    });
-  }
-
   protected setupNavigationApi() {
-    setInterval(() => {
-      console.debug('current id is', window.navigation.currentEntry?.id);
-    }, 2000);
-
     const router = this;
+
     window.navigation.addEventListener("navigate", (event) => {
       if (!event.canIntercept) {
         console.debug('Cannot intercept navigation', event);
@@ -139,103 +139,88 @@ export class ActualRouter<
         return;
       }
 
-      const info = event.info as NavigationInfo;
-      const rawState = event.destination.getState() as SerializedAppState | undefined;
-      let state: AppState | undefined;
-
-      // lazy as there are other more efficient ways in which we can get an AppState
-      const deserialize = () => (
-        rawState !== undefined
-        ? AppState.deserialize(this.sitemap, rawState)
-        : AppState.fromLocator(urlToLocator(this.sitemap, new URL(event.destination.url)))
-      );
-
-      if (event.navigationType === 'traverse') {
-        const id = event.destination.id;
-        if (id === null) {
-          throw new Error('Expected a non-null id');
-        }
-
-        state = this.stateCache.get(id) ?? deserialize();
-      } else {
-        if (rawState?.temporaryId !== undefined) {
-          state = this.stateCache.get(rawState.temporaryId);
-
-          if (state !== undefined) {
-            // temporary state cache, replaced later with correct id
-            this.stateCache.delete(rawState.temporaryId);
-            state.temporaryId = undefined;
-          }
-        }
-
-        if (state === undefined) {
-          state = deserialize();
-        }
+      const info = (event.info ?? {}) as NavigationInfo;
+      if (info.ignore) {
+        event.intercept();
+        return;
       }
-      
-      // Important note: we're unsure about how browsers deal with currentEntry during intercept.
-      // Firefox seems to already set the new ID but this is not how I would read the spec.
-      const currentId = window.navigation.currentEntry?.id;
+
+      printNavigationState();
+
+      const currentId = window.navigation.currentEntry!.id;
+
       event.intercept({
         handler() {
-          console.debug(`Intercepting ${event.navigationType} navigation`, event);
-          const promise = router.renderNavigation(state, { currentId, replace: event.navigationType === 'replace', ...info })
-          promise.then(() => {
-            // TODO also here, is this the correct navigationEntry?
-            // necessary to update rrCache!
-            router.commitNavigationEntry(window.navigation.currentEntry!, state)
-          }).catch(console.error);
+          // could be an existing state! (note: event)
+          // major WTF: event.destination is different before the handler!
+          const newState = router.getState(event.destination)!;
+          console.debug(`Intercepting ${event.navigationType} navigation `, event);
 
-          return promise;
+          if (event.navigationType === 'traverse') {
+            return router.renderNavigation(newState, newState.id, info);
+          } else {
+            // TODO handle 'replace' better if needed?
+            const newId = window.navigation.currentEntry!.id;
+            if (newState?.isTemporary()) {
+              router.stateCache.delete(newState.id);
+            }
+            newState.id = newId;
+            return router.renderNavigation(newState, currentId, info);
+          }
         },
       });
     });
 
+    window.navigation.addEventListener('navigateerror', (event) => {
+      console.error("NAVIGATION ERROR");
+      console.error(event.error);
+    })
+
     window.navigation.addEventListener('navigatesuccess', (event) => {
-      // console.debug('navigatesuccess runs');
-      
-      // this.stateCache.set(entry.id, state);
-
-      // // will also update .navigationEntryId
-      // this.rrCache.markUsedFor(entry.id, this.currentRenderedRoutes);
-
-      // entry.addEventListener('dispose', () => {
-      //   this.rrCache.unreference(entry.id);
-      // });
+      //console.debug('navigate success...');
     });
   }
 
   /** Make an AppState based on the best source of information */
-  protected getState({ id, rawState, url }: {id?: string, rawState?: SerializedAppState, url?: { pathname: string, search: string }}) {
-    return (
-      (id === undefined ? undefined : this.stateCache.get(id))
-      ?? (rawState && AppState.deserialize(this.sitemap, rawState))
-      ?? (url && AppState.fromLocator(urlToLocator(this.sitemap, url)))
-    );
+  protected getState(entry: {
+    id?: string | null,
+    getState?: () => unknown | undefined,
+    url?: { pathname: string, search: string } | string | null
+  }) {
+    if (entry.id) {
+      const state = this.stateCache.get(entry.id);
+      if (state !== undefined) return state;
+    }
+
+    if (entry.getState !== undefined) {
+      const rawState = entry.getState();
+      if (rawState !== undefined) {
+        return AppState.deserialize(this.sitemap, rawState as SerializedAppState)
+      }
+    }
+
+    if (entry.url) {
+      return AppState.fromLocator(
+        urlToLocator(this.sitemap, typeof entry.url === 'string' ? new URL(entry.url) : entry.url),
+        entry.id ?? undefined
+      );
+    }
   }
 
   protected async renderNavigation(
     newState: AppState,
-    options: { currentId?: string, replace?: boolean } & NavigationInfo
+    cacheId: string | undefined,
+    navInfo: NavigationInfo & { forceNewInstance?: boolean }
   ) {
-    const currentId = options.currentId;
-
-    const log = (...args: any[]) => {
-      console.debug(`[renderNavigation ${currentId}]`, ...args);
-    }
-
-    log('rendering', { newState, options });
-
     const newRouteStack = [...newState.route.nestedInRoutes, newState.route];
     const staticImpl = this.implMap.getStaticPartOfImplementation(newState.route); // sync!
     const untrackedParamDefs = new Set(staticImpl.untrackedKeys.map(k => newState.route.paramDefs[k]));
 
-    log('rendering part 2', { newRouteStack, staticImpl, untrackedParamDefs });
-
     const potentialReusedRoutes: RenderedRoute[] = [];
-    if (currentId !== undefined) {
+    if (cacheId !== undefined) {
       for (const route of newRouteStack) {
-        const rendered = this.rrCache.getEntry(currentId, route)?.rendered
+        const rendered = this.rrCache.getEntry(cacheId, route)?.rendered;
+
         if (rendered === undefined) {
           break;
         } else {
@@ -244,20 +229,19 @@ export class ActualRouter<
       }
     }
 
-    log('rendering part 3', { potentialReusedRoutes });
-    
     // compare current state with new requested state
     const routeChanges = calculateRouteChanges(
       untrackedParamDefs,
-      { routes: potentialReusedRoutes, state: this.getState({ id: currentId }) },
+      potentialReusedRoutes,
       { routes: newRouteStack, state: newState }
     );
 
-    if (options.forceNewInstance) {
+    if (navInfo.forceNewInstance) {
       routeChanges[routeChanges.length-1] = 'render';
     }
 
-    log('rendering part 4', { routeChanges });
+    console.debug(`renderNavigation ${cacheId} > ${newState.id}: ${routeChanges.join(' | ')}`);
+    console.debug(`  -> pot. reuse:`, potentialReusedRoutes);
 
     let i=0;
     let frame: FrameDelegate | undefined = this.rootFrame;
@@ -269,11 +253,11 @@ export class ActualRouter<
       if (routeChange === 'render') {
         break;
       } else {
-        const existingRenderedRoute = potentialReusedRoutes[i]!;
+        const reuseRoute = potentialReusedRoutes[i]!;
 
         if (routeChange === 'set-params') {
           // TODO check if rest of code uses ownedValues correctly? (i.e. we're not updating needlessly here)
-          const paramValues = existingRenderedRoute.renderArgs.params.ownedValues;
+          const paramValues = reuseRoute.renderArgs.params.ownedValues;
           for (const [pd, value] of paramValues.entries()) {
             // TODO should these be memos? if so, can we simplify the rest of the code?
             // should be reactive!
@@ -281,17 +265,17 @@ export class ActualRouter<
           }
         }
 
-        frame = existingRenderedRoute.subFrame;
-      }
+        this.assertFrame(frame, reuseRoute.route);
+        // even if nothing changes, still have to adjust frames!
+        frame.setElement(reuseRoute.renderOutput!.html);
 
-      log(`  - reuse ${i} (${routeChange})`);
+        frame = reuseRoute.subFrame;
+      }
     }
 
     let parentParamStorage: Promise<ParamStorage> | undefined = undefined;
     let framePromise = Promise.resolve(frame);
     this.currentRenderedRoutes = potentialReusedRoutes.slice(0, i);
-
-    log('rendering part 5, still doing ', newRouteStack.slice(i));
 
     for (; i<routeChanges.length; i++) {
       const route = newRouteStack[i];
@@ -335,8 +319,11 @@ export class ActualRouter<
       });
     }
 
+    this.stateCache.set(newState.id, newState);
     // await final promise that ties all the others together (they form a DAG normally)
     await framePromise;
+
+    this.rrCache.markUsedFor(newState.id, this.currentRenderedRoutes);
   }
 
   protected assertFrame(frame: FrameDelegate | undefined, route: Route<any>): asserts frame is FrameDelegate {

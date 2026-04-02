@@ -5,19 +5,23 @@ import { Sitemap } from "@kinetic-router/definition/sitemap.js";
 import { AnyParamDefs, ParamMap, paramsByDefinition, paramsByKey } from "@kinetic-router/definition/params.js";
 
 
-export function getRandomId(): string {
-  return (new Date().toISOString()) + '/' + Math.random().toString(16).slice(2);
+function getTemporaryId(): string {
+  return '__temp__' + Math.random().toString(16).slice(2)
 }
 
 export class AppState {
   readonly route: Route<any>;
   readonly paramSnapshot: ParamMap;
-  temporaryId: string | undefined;
+  id: string;
 
-  constructor(route: Route<any>, paramSnapshot: ParamMap, temporaryId?: string) {
+  constructor(route: Route<any>, paramSnapshot: ParamMap, id?: string) {
     this.route = route;
     this.paramSnapshot = paramSnapshot;
-    this.temporaryId = temporaryId;
+    this.id = id ?? getTemporaryId();
+  }
+
+  isTemporary() {
+    return this.id.startsWith('__temp__');
   }
 
   serialize(root: RootSitemap) {
@@ -30,12 +34,12 @@ export class AppState {
 
     const snapShotByKey = paramsByKey(this.paramSnapshot, this.route.paramDefs) as JsonObject;
 
-    return { temporaryId: this.temporaryId, slugs, snapShotByKey } satisfies Json;
+    return { id: this.id, slugs, snapShotByKey } satisfies Json;
   }
 
-  static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>) {
+  static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, id?: string) {
     const params = paramsByDefinition(locator.values, locator.route.paramDefs);
-    return new AppState(locator.route, params);
+    return new AppState(locator.route, params, id);
   }
 
   static deserialize(root: RootSitemap, data: SerializedAppState): AppState {
@@ -70,7 +74,7 @@ export class AppState {
 
     const snapShotByDef = paramsByDefinition(data.snapShotByKey, route.paramDefs);
 
-    return new AppState(route, snapShotByDef, data.temporaryId);
+    return new AppState(route, snapShotByDef, data.id);
   }
 }
 

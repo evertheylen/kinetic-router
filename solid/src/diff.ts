@@ -28,24 +28,24 @@ export type RouteChange = 'render' | 'set-params' | 'nothing';
 /** Returns an array of required route changes of the same size as routes.new */
 export function calculateRouteChanges(
   untrackedParamDefs: Set<ParamDef<any>>,
-  old: {routes: RenderedRoute[], state?: AppState},
-  new_: {routes: Route<any>[], state: AppState},
+  from: RenderedRoute[],
+  to: {routes: Route<any>[], state: AppState},
 ): RouteChange[] {
   const result: RouteChange[] = [];
   let i = 0;
 
-  for (; i < new_.routes.length; i++) {
-    if (old.routes[i]?.route !== new_.routes[i]) {
+  for (; i < to.routes.length; i++) {
+    if (from[i]?.route !== to.routes[i]) {
       // also covers when old.routes is shorter than new_.routes
       break;
     }
 
-    const route = new_.routes[i];
+    const route = to.routes[i];
 
     let paramChanged = false;
     for (const pd of Object.values(route.paramDefs as AnyParamDefs)) {
       // TODO use deepEquals of some sort?
-      if (old.state === undefined || old.state.paramSnapshot.get(pd) !== new_.state.paramSnapshot.get(pd)) {
+      if (from[i].renderArgs.params.ownedValues.get(pd) !== to.state.paramSnapshot.get(pd)) {
         if (untrackedParamDefs.has(pd)) {
           // worst case scenario, we're certain that we have to rerender so return that
           result.push('render');
@@ -60,7 +60,7 @@ export function calculateRouteChanges(
   }
 
   // an ancestor had to rerender, so make sure that all children also rerender
-  for (; i < new_.routes.length; i++) {
+  for (; i < to.routes.length; i++) {
     result.push('render');
   }
 
