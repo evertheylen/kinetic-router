@@ -2,6 +2,7 @@
   "name": "@kinetic-router/example-app",
   "version": "0.1.0",
   "type": "module",
+  "private": true,
   "scripts": {
     "dev": "vite dev"
   },
