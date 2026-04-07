@@ -8,6 +8,9 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+pnpm -r clean
+pnpm -r build
+
 # 2. Ensure 'published' branch exists (creates it if it doesn't)
 if ! git show-ref --verify --quiet refs/heads/published; then
   echo "?? 'published' branch not found. Creating it from current HEAD..."
