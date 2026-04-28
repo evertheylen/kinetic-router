@@ -47,7 +47,11 @@ export async function renderRoute({ route, implementation, renderArgs }: {
     // manually setting Context here (yeah I'm kinda abusing solid here, dont care)
     owner._context[(InRenderedRoute as any).id] = res;
     runWithOwner(owner, () => {
-      res.renderOutput = renderFunc(renderArgs.params.reactiveProxyObject, renderArgs.pageStatus);
+      let output = renderFunc(renderArgs.params.reactiveProxyObject, renderArgs.pageStatus);
+      while (typeof output === 'function') {
+        output = output();
+      }
+      res.renderOutput = output;
     });
 
     return res;
