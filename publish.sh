@@ -21,7 +21,8 @@ fi
 # The filter "...[published]" finds everything changed since that branch
 # plus any packages that depend on the changed ones.
 FILTER="...[published]"
-CHANGED=$(pnpm ls --filter "$FILTER" --depth -1 --json)
+EXCLUSIONS="--filter !example-app"
+CHANGED=$(pnpm ls --filter "$FILTER" $EXCLUSIONS --depth -1 --json)
 
 if [ "$CHANGED" == "[]" ] || [ -z "$CHANGED" ]; then
   echo "✅ No changes detected since the last publish."
@@ -32,7 +33,7 @@ echo "📦 Changes detected. Bumping versions and publishing..."
 
 # 4. Bump versions only for the affected scope
 # This will update package.json files locally
-pnpm --filter "$FILTER" -r exec pnpm version patch
+pnpm --filter "$FILTER" $EXCLUSIONS -r exec pnpm version patch
 
 # 5. Commit the version bumps to your current branch
 git add .
@@ -40,7 +41,7 @@ git commit -m "chore: version bump for release"
 
 # 6. Publish the changed packages
 # --no-git-checks is used because we just made a commit locally
-pnpm --filter "$FILTER" -r exec pnpm publish --no-git-checks --access public
+pnpm --filter "$FILTER" $EXCLUSIONS -r exec pnpm publish --no-git-checks --access public
 
 # 7. Update the 'published' branch to the current commit
 git branch -f published HEAD
