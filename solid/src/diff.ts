@@ -45,7 +45,7 @@ export function calculateRouteChanges(
     let paramChanged = false;
     for (const pd of Object.values(route.paramDefs as AnyParamDefs)) {
       // TODO use deepEquals of some sort?
-      if (from[i].renderArgs.params.ownedValues.get(pd) !== to.state.paramSnapshot.get(pd)) {
+      if (from[i].renderArgs.params.ownedValues.get(pd) !== to.state.paramsByDefinition.get(pd)) {
         if (untrackedParamDefs.has(pd)) {
           // worst case scenario, we're certain that we have to rerender so return that
           result.push('render');

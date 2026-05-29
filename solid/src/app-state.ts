@@ -2,7 +2,7 @@ import { index, Json, JsonObject, Locator, Route } from "@kinetic-router/definit
 import { defaultSerde, RootSitemap, slugLookup } from "@kinetic-router/definition/root.js";
 import { Sitemap } from "@kinetic-router/definition/sitemap.js";
 
-import { AnyParamDefs, ParamMap, paramsByDefinition, paramsByKey } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, ParamMap, convertParamsByDefinition, convertParamsByKey, ParamValues } from "@kinetic-router/definition/params.js";
 
 
 function getTemporaryId(): string {
@@ -11,13 +11,25 @@ function getTemporaryId(): string {
 
 export class AppState {
   readonly route: Route<any>;
-  readonly paramSnapshot: ParamMap;
+  readonly paramsByDefinition: ParamMap;
+  readonly paramsByKey: ParamValues<any>;
   id: string;
 
-  constructor(route: Route<any>, paramSnapshot: ParamMap, id?: string) {
+  constructor(route: Route<any>, paramsByDefinition: ParamMap, paramsByKey?: ParamValues<any>, id?: string) {
     this.route = route;
-    this.paramSnapshot = paramSnapshot;
+    this.paramsByDefinition = paramsByDefinition;
+
+    if (paramsByKey !== undefined) {
+      this.paramsByKey = paramsByKey;
+    } else {
+      this.paramsByKey = convertParamsByKey(paramsByDefinition, this.route.paramDefs)
+    }
+
     this.id = id ?? getTemporaryId();
+  }
+
+  get locator(): Locator<any> {
+    return { route: this.route, values: this.paramsByKey };
   }
 
   isTemporary() {
@@ -32,14 +44,12 @@ export class AppState {
     // turn PathParamDef into null, it should be unique
     const slugs = abstractSlugs.map(s => typeof s === 'object' ? null : s);
 
-    const snapShotByKey = paramsByKey(this.paramSnapshot, this.route.paramDefs) as JsonObject;
-
-    return { id: this.id, slugs, snapShotByKey } satisfies Json;
+    return { id: this.id, slugs, snapShotByKey: this.paramsByKey as JsonObject } satisfies Json;
   }
 
   static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, id?: string) {
-    const params = paramsByDefinition(locator.values, locator.route.paramDefs);
-    return new AppState(locator.route, params, id);
+    const paramsByDefinition = convertParamsByDefinition(locator.values, locator.route.paramDefs);
+    return new AppState(locator.route, paramsByDefinition, locator.values, id);
   }
 
   static deserialize(root: RootSitemap, data: SerializedAppState): AppState {
@@ -72,9 +82,9 @@ export class AppState {
       throw new Error(`Couldnt find route`);
     }
 
-    const snapShotByDef = paramsByDefinition(data.snapShotByKey, route.paramDefs);
+    const snapShotByDef = convertParamsByDefinition(data.snapShotByKey, route.paramDefs);
 
-    return new AppState(route, snapShotByDef, data.id);
+    return new AppState(route, snapShotByDef, data.snapShotByKey, data.id);
   }
 }
 

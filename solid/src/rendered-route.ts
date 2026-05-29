@@ -51,6 +51,9 @@ export async function renderRoute({ route, implementation, renderArgs }: {
       while (typeof output === 'function') {
         output = output();
       }
+      while (typeof output.html === 'function') {
+        output.html = output.html();
+      }
       res.renderOutput = output;
     });
 

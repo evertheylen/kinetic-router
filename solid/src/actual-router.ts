@@ -1,5 +1,5 @@
 import { getSlugPath, RootSitemap, slugPathToString } from "@kinetic-router/definition/root.js";
-import { AnyParamDefs, paramsByKey } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, convertParamsByKey } from "@kinetic-router/definition/params.js";
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 
@@ -9,7 +9,7 @@ import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
 import { createParamStorage, mapParamObjectToParamInitMap, ParamInit, ParamStorage, ReactiveValue } from "./params";
 import { renderRoute, RenderedRoute } from "./rendered-route";
 import { SolidImplementationMap } from "./implementation-map";
-import { createEffect, runWithOwner } from "solid-js";
+import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
 import { calculateRouteChanges, RouteChange } from "./diff";
 import { RenderedRouteCache } from "./rendered-route-cache";
 import { printNavigationState } from "./debug";
@@ -48,11 +48,20 @@ export class ActualRouter<
   // currentAppStateId: string | undefined;
   currentRenderedRoutes: RenderedRoute[] = [];
 
+  protected _currentLocator: Accessor<Locator<any> | undefined>;
+  protected _setCurrentLocator: Setter<Locator<any> | undefined>;
+
   rootFrame!: FrameDelegate;
 
   constructor(sitemap: RootSitemap, implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>) {
     this.sitemap = sitemap;
     this.implMap = implMap;
+
+    [this._currentLocator, this._setCurrentLocator] = createSignal();
+  }
+
+  currentLocator() {
+    return this._currentLocator();
   }
 
   async init() {
@@ -76,7 +85,7 @@ export class ActualRouter<
     const state = this.getState(window.navigation.currentEntry!)!;
     
     const newLocator: Locator<any> = {
-      route: state.route, values: paramsByKey(state.paramSnapshot, state.route.paramDefs)
+      route: state.route, values: convertParamsByKey(state.paramsByDefinition, state.route.paramDefs)
     };
 
     const newUrl = locatorToUrl(this.sitemap, newLocator);
@@ -107,7 +116,7 @@ export class ActualRouter<
     // note that at this point, it is a temporary ID
     this.stateCache.set(state.id, state);
 
-    console.debug('navigate to ', state);
+    //console.debug('navigate to ', state);
     
     const url = locatorToUrl(this.sitemap, locator);
     const res = window.navigation.navigate(url, {
@@ -130,12 +139,12 @@ export class ActualRouter<
 
     window.navigation.addEventListener("navigate", (event) => {
       if (!event.canIntercept) {
-        console.debug('Cannot intercept navigation', event);
+        console.warn('Cannot intercept navigation', event);
         return;
       }
 
       if (event.navigationType === 'reload') {
-        console.debug('Reloads not currently handled', event);
+        console.warn('Reloads not currently handled', event);
         return;
       }
 
@@ -145,7 +154,7 @@ export class ActualRouter<
         return;
       }
 
-      printNavigationState();
+      //printNavigationState();
 
       const currentId = window.navigation.currentEntry!.id;
 
@@ -154,7 +163,7 @@ export class ActualRouter<
           // could be an existing state! (note: event)
           // major WTF: event.destination is different before the handler!
           const newState = router.getState(event.destination)!;
-          console.debug(`Intercepting ${event.navigationType} navigation `, event);
+          //console.debug(`Intercepting ${event.navigationType} navigation `, event);
 
           if (event.navigationType === 'traverse') {
             return router.renderNavigation(newState, newState.id, info);
@@ -240,8 +249,8 @@ export class ActualRouter<
       routeChanges[routeChanges.length-1] = 'render';
     }
 
-    console.debug(`renderNavigation ${cacheId} > ${newState.id}: ${routeChanges.join(' | ')}`);
-    console.debug(`  -> pot. reuse:`, potentialReusedRoutes);
+    // console.debug(`renderNavigation ${cacheId} > ${newState.id}: ${routeChanges.join(' | ')}`);
+    // console.debug(`  -> potential reuse:`, potentialReusedRoutes);
 
     let i=0;
     let frame: FrameDelegate | undefined = this.rootFrame;
@@ -261,7 +270,7 @@ export class ActualRouter<
           for (const [pd, value] of paramValues.entries()) {
             // TODO should these be memos? if so, can we simplify the rest of the code?
             // should be reactive!
-            (value as ReactiveValue<any>).write(newState.paramSnapshot.get(pd)!);
+            (value as ReactiveValue<any>).write(newState.paramsByDefinition.get(pd)!);
           }
         }
 
@@ -288,7 +297,7 @@ export class ActualRouter<
       );
 
       const paramStorage: Promise<ParamStorage> = Promise.all([implementationPromise, parentParamStorage]).then(
-        ([implementation, parent]) => createParamStorage({route, implementation, paramMap: newState.paramSnapshot, parent})
+        ([implementation, parent]) => createParamStorage({route, implementation, paramMap: newState.paramsByDefinition, parent})
       );
 
       parentParamStorage = paramStorage;
@@ -322,6 +331,9 @@ export class ActualRouter<
     this.stateCache.set(newState.id, newState);
     // await final promise that ties all the others together (they form a DAG normally)
     await framePromise;
+
+    // Update other state
+    this._setCurrentLocator(newState.locator);
 
     this.rrCache.markUsedFor(newState.id, this.currentRenderedRoutes);
   }

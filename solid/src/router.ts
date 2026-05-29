@@ -3,8 +3,7 @@ import { SolidImplementationMap } from "./implementation-map";
 import { ActualRouter } from "./actual-router";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator } from "@kinetic-router/definition";
-import { AnyParamDefs } from "@kinetic-router/definition/params.js";
-import { Route } from "@kinetic-router/definition/routes.js";
+import { Accessor, createSignal, Setter } from "solid-js";
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
@@ -22,6 +21,8 @@ export class Router<
   implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>;
   sitemap: RootSitemap;
   protected actualRouter: ActualRouter<ExtraStaticData, ExtraOutput> | undefined;
+  protected didInit: Accessor<boolean>;
+  protected setDidInit: Setter<boolean>;
 
   constructor(sitemap: RootSitemap) {
     this.sitemap = sitemap;
@@ -30,11 +31,14 @@ export class Router<
     this.implement = this.implMap.implement.bind(this.implMap);
     this.implementLazy = this.implMap.implementLazy.bind(this.implMap);
 
+    [this.didInit, this.setDidInit] = createSignal(false);
+
     queueMicrotask(async () => {
       this.implMap.check();
       const router = new ActualRouter(this.sitemap, this.implMap);
-      await router.init()
+      await router.init();
       this.actualRouter = router;
+      this.setDidInit(true);
     });
   }
 
@@ -61,5 +65,13 @@ export class Router<
 
   toLocator(url: URL) {
     return urlToLocator(this.sitemap, url);
+  }
+
+  currentLocator() {
+    if (this.didInit()) {
+      return this.actualRouter!.currentLocator();
+    } else {
+      return undefined;
+    }
   }
 }

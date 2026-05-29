@@ -22,8 +22,6 @@ interface ParamDefWithDefault<T> extends ParamDef<T> {
 
 // PATH PARAMS -------------------------------
 
-const pathParamSymbol: unique symbol = Symbol();
-
 export class PathParamDef<T> extends ParamDef<T> {
   readonly $: symbol;
   static symbolRegistry = new WeakMap<Symbol, PathParamDef<any>>();
@@ -123,7 +121,7 @@ export type ParamValues<ParamDefs extends AnyParamDefs> = (
   { [key in keyof ParamDefs as ParamDefs[key] extends ParamDefWithDefault<any> ? never : key]: ParamDefs[key] extends ParamDef<infer T> ? T : never }
 );
 
-export function paramsByDefinition<ParamDefs extends AnyParamDefs>(
+export function convertParamsByDefinition<ParamDefs extends AnyParamDefs>(
   params: ParamValues<ParamDefs>,
   definitions: ParamDefs,
 ): ParamMap {
@@ -132,7 +130,7 @@ export function paramsByDefinition<ParamDefs extends AnyParamDefs>(
   ))
 }
 
-export function paramsByKey<ParamDefs extends AnyParamDefs>(
+export function convertParamsByKey<ParamDefs extends AnyParamDefs>(
   params: ParamMap,
   definitions: ParamDefs
 ): ParamValues<ParamDefs> {
