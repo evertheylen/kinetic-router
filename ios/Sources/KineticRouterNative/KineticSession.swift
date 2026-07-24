@@ -17,9 +17,22 @@ public final class KineticSession: NSObject {
 
     private var isReady = false
     private var bundleVersion: String?
-    private var bundleLoadRequest: URLRequest?
     private var bundleURL: URL
     private var isRecovering = false
+
+    /// Entry id of the visit currently in flight (render requested, but
+    /// renderCompleted/renderFailed not received yet). While set, incoming
+    /// proposals are coalesced (dropped) — double-taps, taps mid-transition.
+    private var visitInFlightEntryId: String?
+
+    /// The modally presented entry, if any. Lives outside `entryStore` so the
+    /// main stack keeps mirroring the navigation controller exactly.
+    private(set) var modalEntry: KineticEntry?
+
+    /// The entry whose content the webview is currently showing (snapshots
+    /// must be stored on *this* entry — not necessarily the stack top, e.g.
+    /// while a modal is presented).
+    private var liveEntryId: String?
 
     public init(
         configuration: RouteConfiguration = RouteConfiguration(),
@@ -28,6 +41,9 @@ public final class KineticSession: NSObject {
         let wkConfig = WKWebViewConfiguration()
         wkConfig.allowsInlineMediaPlayback = true
         wkConfig.preferences.isElementFullscreenEnabled = true
+        // UA marker for shell detection & server-side bundle selection.
+        // (No KVC on private keys — this is the supported API.)
+        wkConfig.applicationNameForUserAgent = "KineticNative/1.0; protocol \(PROTOCOL_VERSION)"
 
         webView = WKWebView(frame: .zero, configuration: wkConfig)
         webView.allowsBackForwardNavigationGestures = false
@@ -35,19 +51,18 @@ public final class KineticSession: NSObject {
 
         self.configuration = configuration
         self.bundleURL = bundleURL
-        bridge = Bridge(webView: webView) { [weak self] msg in
+        bridge = Bridge(webView: webView)
+
+        super.init()
+
+        // self is fully initialized from here on; safe to capture
+        bridge.onMessage = { [weak self] msg in
             Task { @MainActor [weak self] in
                 await self?.handleMessage(msg)
             }
         }
-
-        super.init()
-
         bridge.register()
         webView.navigationDelegate = self
-
-        let ua = (WKWebView.value(forKey: "userAgent") as? String) ?? ""
-        webView.customUserAgent = "\(ua) KineticNative/1.0; protocol \(PROTOCOL_VERSION)"
 
         loadBundle()
     }
@@ -61,9 +76,9 @@ public final class KineticSession: NSObject {
         case .visitProposed(let m):
             await handleVisitProposed(m)
         case .renderCompleted(let m):
-            delegate?.renderCompleted(entryId: m.entryId, title: m.title)
+            handleRenderCompleted(m)
         case .renderFailed(let m):
-            delegate?.renderFailed(entryId: m.entryId, error: m.error)
+            handleRenderFailed(m)
         case .titleChanged(let m):
             handleTitleChanged(m)
         case .stateUpdated(let m):
@@ -75,67 +90,121 @@ public final class KineticSession: NSObject {
 
     private func handleReady(_ msg: ReadyMessage) async {
         guard msg.protocolVersion == PROTOCOL_VERSION else {
-            print("[KineticRouterNative] Protocol mismatch: JS=\(msg.protocolVersion), Swift=\(PROTOCOL_VERSION)")
+            isReady = false
+            let error = KineticError.protocolMismatch(
+                jsVersion: msg.protocolVersion, swiftVersion: PROTOCOL_VERSION)
+            print("[KineticRouterNative] \(error.localizedDescription)")
+            delegate?.handshakeFailed(error)
             return
         }
         bundleVersion = msg.bundleVersion
         isReady = true
+        visitInFlightEntryId = nil
+        liveEntryId = nil
 
         if isRecovering, !entryStore.entries.isEmpty {
-            // Process-death recovery: replay the full stack.
+            // Process-death recovery: replay the full stack into the fresh JS
+            // context (Swift owning the stack pays off here). The fresh
+            // context's own initial entry id is discarded.
             isRecovering = false
+            modalEntry = nil
             let entries = entryStore.entries.map {
                 SetStackEntry(entryId: $0.id, url: $0.url, state: $0.state)
             }
+            delegate?.restoreStack(entries: entryStore.entries, withWebView: webView)
             try? await bridge.setStack(entries)
-            if let delegate {
-                delegate.restoreStack(entries: entryStore.entries, withWebView: webView)
-            }
         } else {
-            let initialEntry = KineticEntry(id: UUID().uuidString, url: msg.url)
+            // Fresh page load (cold start, or a dev-server reload): reset to a
+            // single entry, adopting the id JS minted for it. The router
+            // renders the initial page on its own — no render call needed.
+            entryStore.removeAllEntries()
+            modalEntry = nil
+            let initialEntry = KineticEntry(id: msg.initialEntryId, url: msg.url)
             entryStore.append(initialEntry)
+            liveEntryId = initialEntry.id
 
-            if let delegate {
-                delegate.bridgeDidConnect(initialEntry: initialEntry, withWebView: webView)
-            }
+            delegate?.bridgeDidConnect(initialEntry: initialEntry, withWebView: webView)
         }
     }
 
     private func handleVisitProposed(_ msg: VisitProposedMessage) async {
         guard isReady, let delegate else { return }
 
-        let tag = msg.native?.tag
-        let behaviour = tag.map { configuration.behaviour(for: $0) } ?? .webPush
+        // Coalesce taps while a visit is in flight. JS rejects the stale
+        // proposal automatically when the next (unrelated) render arrives.
+        guard visitInFlightEntryId == nil else { return }
+
+        let behaviour = resolveBehaviour(for: msg)
 
         switch behaviour {
         case .native(let factory):
             let vc = factory(msg.url, msg.state.flatMap { $0.dictionaryValue })
-            pushNativeViewController(vc)
+            delegate.pushNativeViewController(vc)
+            // no render call: JS cleans the proposal up on the next render
 
         case .webPush:
             if msg.action == "replace" {
-                await performWebReplace(url: msg.url, state: msg.state, delegate: delegate)
+                await performWebReplace(msg, delegate: delegate)
             } else {
-                await performWebPush(url: msg.url, state: msg.state, delegate: delegate)
+                await performWebPush(msg, delegate: delegate)
             }
 
         case .webModal:
-            performWebModal(url: msg.url, state: msg.state, delegate: delegate)
+            await performWebModal(msg, delegate: delegate)
         }
+    }
+
+    /// App-supplied tag override wins; otherwise the JS-declared presentation
+    /// hint; otherwise a plain push.
+    private func resolveBehaviour(for msg: VisitProposedMessage) -> RouteBehaviour {
+        if let tag = msg.native?.tag, let override = configuration.override(for: tag) {
+            return override
+        }
+        if msg.native?.presentation == "modal" {
+            return .webModal
+        }
+        return .webPush
+    }
+
+    private func handleRenderCompleted(_ msg: RenderCompletedMessage) {
+        if visitInFlightEntryId == msg.entryId {
+            visitInFlightEntryId = nil
+        }
+        liveEntryId = msg.entryId
+        if modalEntry?.id == msg.entryId {
+            modalEntry?.title = msg.title
+        } else {
+            entryStore.updateTitle(msg.title, forId: msg.entryId)
+        }
+        delegate?.renderCompleted(entryId: msg.entryId, title: msg.title)
+    }
+
+    private func handleRenderFailed(_ msg: RenderFailedMessage) {
+        if visitInFlightEntryId == msg.entryId {
+            visitInFlightEntryId = nil
+        }
+        delegate?.renderFailed(entryId: msg.entryId, error: msg.error)
     }
 
     private func handleTitleChanged(_ msg: TitleChangedMessage) {
-        guard let idx = entryStore.entries.firstIndex(where: { $0.id == msg.entryId }) else {
-            return
+        if modalEntry?.id == msg.entryId {
+            modalEntry?.title = msg.title
+        } else {
+            entryStore.updateTitle(msg.title, forId: msg.entryId)
         }
-        entryStore.entries[idx].title = msg.title
+        delegate?.titleChanged(entryId: msg.entryId, title: msg.title)
     }
 
     private func handleStateUpdated(_ msg: StateUpdatedMessage) {
-        guard let idx = entryStore.entries.firstIndex(where: { $0.id == msg.entryId }) else {
+        if modalEntry?.id == msg.entryId {
+            modalEntry?.state = msg.state
+            if let url = msg.url { modalEntry?.url = url }
             return
         }
-        entryStore.entries[idx].state = msg.state
+        entryStore.updateState(msg.state, forId: msg.entryId)
+        if let url = msg.url {
+            entryStore.updateUrl(url, forId: msg.entryId)
+        }
     }
 
     private func handleExternalUrl(_ msg: ExternalUrlMessage) {
@@ -145,112 +214,151 @@ public final class KineticSession: NSObject {
 
     // ── Navigation choreography ──────────────────────────────────────
 
-    /// Snapshot the current webview content and assign it to the current entry.
+    /// Snapshot the current webview content (downscaled: full-resolution
+    /// screenshots at 3× dominate memory use for no visible benefit during
+    /// brief transitions).
     private func snapshotCurrent() async -> UIImage? {
+        let config = WKSnapshotConfiguration()
+        if webView.bounds.width > 0 {
+            config.snapshotWidth = NSNumber(value: Double(webView.bounds.width) * 2)
+        }
         do {
-            return try await webView.takeSnapshot(configuration: nil)
+            return try await webView.takeSnapshot(configuration: config)
         } catch {
             print("[KineticRouterNative] snapshot failed: \(error)")
             return nil
         }
     }
 
-    private func performWebPush(url: String, state: SendableJSON?, delegate: KineticSessionDelegate) async {
+    /// Snapshot the webview and store the image on the entry it is showing.
+    private func freezeLiveEntry() async {
+        guard let id = liveEntryId, let snapshot = await snapshotCurrent() else { return }
+        if modalEntry?.id == id {
+            modalEntry?.snapshot = snapshot
+        } else {
+            entryStore.setSnapshot(snapshot, forId: id)
+        }
+    }
+
+    /// Frozen pixels for an entry, wherever it lives (stack or modal).
+    func snapshot(forEntryId id: String) -> UIImage? {
+        if modalEntry?.id == id { return modalEntry?.snapshot }
+        return entryStore.entry(withId: id)?.snapshot
+    }
+
+    private func performWebPush(_ msg: VisitProposedMessage, delegate: KineticSessionDelegate) async {
         guard !entryStore.entries.isEmpty else { return }
 
-        // 1. Snapshot the current webview.
-        let snapshot = await snapshotCurrent()
+        // 1. Freeze the current page: snapshot it, stored on its entry.
+        await freezeLiveEntry()
 
-        if let lastIdx = entryStore.entries.indices.last {
-            entryStore.entries[lastIdx].snapshot = snapshot
-        }
-
-        // 2. Mint entry id and create new entry.
-        let entryId = UUID().uuidString
-        let entry = KineticEntry(id: entryId, url: url, state: state)
-
-        // 3. Create and configure the new VisitableViewController, move webview.
+        // 2. Mint entry id and create the new entry.
+        let entry = KineticEntry(id: UUID().uuidString, url: msg.url, state: msg.state)
         entryStore.append(entry)
+        visitInFlightEntryId = entry.id
 
-        // 4. Tell JS to render.
-        // 5. Push the new VC.
+        // 3. Push (snapshot over the old VC, placeholder over the new one;
+        //    the webview moves along but stays covered until renderCompleted).
         delegate.pushEntry(entry, withWebView: webView, configuration: configuration)
 
+        // 4. Tell JS to render.
         do {
-            try await bridge.render(entryId: entryId, url: url, state: state)
+            try await bridge.render(entryId: entry.id, url: msg.url, state: msg.state, proposalId: msg.proposalId)
         } catch {
             print("[KineticRouterNative] render call failed: \(error)")
-            delegate.renderFailed(entryId: entryId, error: error.localizedDescription)
+            visitInFlightEntryId = nil
+            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription)
         }
     }
 
-    private func performWebReplace(url: String, state: SendableJSON?, delegate: KineticSessionDelegate) async {
-        guard !entryStore.entries.isEmpty else { return }
+    private func performWebReplace(_ msg: VisitProposedMessage, delegate: KineticSessionDelegate) async {
+        guard entryStore.count() > 0 else { return }
 
-        // Replace does not trigger a VC transition, so we only update the history stack
-        // and render the new content in place.
-        let entryId = UUID().uuidString
-        let entry = KineticEntry(id: entryId, url: url, state: state)
+        // Freeze the outgoing page over the new VC while the replacement renders.
+        let frozen = await snapshotCurrent()
 
-        let replacedEntry = entryStore.replace(at: entryStore.count() - 1, with: entry)
+        let entry = KineticEntry(id: UUID().uuidString, url: msg.url, state: msg.state)
+        _ = entryStore.replace(at: entryStore.count() - 1, with: entry)
+        visitInFlightEntryId = entry.id
 
-        delegate.replaceTopEntry(entry, withWebView: webView)
+        delegate.replaceTopEntry(entry, withWebView: webView, frozen: frozen)
 
         do {
-            try await bridge.render(entryId: entryId, url: url, state: state)
-            if let oldId = replacedEntry?.id {
-                try? await bridge.dispose(entryId: oldId)
-            }
+            // JS disposes the replaced entry itself, *after* rendering
+            // finished (so rendered subtrees can be reused) — no dispose here.
+            try await bridge.render(entryId: entry.id, url: msg.url, state: msg.state, proposalId: msg.proposalId)
         } catch {
             print("[KineticRouterNative] replace render call failed: \(error)")
-            delegate.renderFailed(entryId: entryId, error: error.localizedDescription)
+            visitInFlightEntryId = nil
+            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription)
         }
     }
 
-    private func performWebModal(url: String, state: SendableJSON?, delegate: KineticSessionDelegate) {
-        guard !entryStore.entries.isEmpty else { return }
+    private func performWebModal(_ msg: VisitProposedMessage, delegate: KineticSessionDelegate) async {
+        guard !entryStore.entries.isEmpty, modalEntry == nil else { return }
 
-        let entryId = UUID().uuidString
-        let entry = KineticEntry(id: entryId, url: url, state: state)
-        entryStore.append(entry)
+        // Freeze the page behind the sheet — it loses the webview.
+        await freezeLiveEntry()
+
+        let entry = KineticEntry(id: UUID().uuidString, url: msg.url, state: msg.state)
+        modalEntry = entry
+        visitInFlightEntryId = entry.id
 
         delegate.presentModalEntry(entry, withWebView: webView, configuration: configuration)
 
-        Task {
-            try? await bridge.render(entryId: entryId, url: url, state: state ?? .null)
+        do {
+            try await bridge.render(entryId: entry.id, url: msg.url, state: msg.state, proposalId: msg.proposalId)
+        } catch {
+            print("[KineticRouterNative] modal render call failed: \(error)")
+            visitInFlightEntryId = nil
+            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription)
         }
     }
 
-    private func pushNativeViewController(_ vc: UIViewController) {
-        guard let delegate else { return }
-        delegate.pushNativeViewController(vc)
+    /// Called by the navigation controller when the modal was dismissed
+    /// (interactively or programmatically). Returns the entry that should be
+    /// restored at the top of the stack.
+    func modalWasDismissed() -> KineticEntry? {
+        if let modal = modalEntry {
+            modalEntry = nil
+            if visitInFlightEntryId == modal.id {
+                visitInFlightEntryId = nil
+            }
+            Task { @MainActor [bridge] in
+                try? await bridge.dispose(entryId: modal.id)
+            }
+        }
+        return entryStore.last
     }
 
     // ── Cold start / deep links ──────────────────────────────────────
 
-    func restoreStack(entries: [(entryId: String, url: String, state: SendableJSON?)]) async {
+    /// Replace the whole stack (universal links). The delegate rebuilds the
+    /// view controllers; JS renders the leaf.
+    public func restoreStack(entries: [(entryId: String, url: String, state: SendableJSON?)]) async {
         guard isReady, let delegate else { return }
 
-        entryStore.entries.removeAll()
+        entryStore.removeAllEntries()
+        modalEntry = nil
+        visitInFlightEntryId = nil
+        liveEntryId = nil
         for e in entries {
             entryStore.append(KineticEntry(id: e.entryId, url: e.url, state: e.state))
         }
 
-        // Push all intermediate entries without animation.
-        // Then render the leaf by calling setStack on JS.
+        delegate.restoreStack(entries: entryStore.entries, withWebView: webView)
+
         let setStackEntries = entries.map { SetStackEntry(entryId: $0.entryId, url: $0.url, state: $0.state) }
         try? await bridge.setStack(setStackEntries)
     }
 
-    // ── Webview process-death recovery ───────────────────────────────
+    // ── Bundle loading / process-death recovery ──────────────────────
 
     private func loadBundle() {
         if bundleURL.isFileURL {
-            bundleLoadRequest = URLRequest(url: bundleURL)
             webView.loadFileURL(bundleURL, allowingReadAccessTo: bundleURL.deletingLastPathComponent())
         } else {
-            bundleLoadRequest = URLRequest(url: bundleURL)
-            webView.load(bundleLoadRequest!)
+            webView.load(URLRequest(url: bundleURL))
         }
     }
 
@@ -258,9 +366,10 @@ public final class KineticSession: NSObject {
         loadBundle()
     }
 
-    deinit {
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "kineticRouter")
-    }
+    // Note: no deinit needed. WebKit retains the Bridge (via the user content
+    // controller), but the Bridge only references the session weakly and the
+    // webview unowned — everything is released with the webview, which the
+    // session owns.
 }
 
 // MARK: - WKNavigationDelegate

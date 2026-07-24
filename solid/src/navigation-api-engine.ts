@@ -12,8 +12,16 @@ import {
 export class NavigationApiEngine implements NavigationEngine {
   protected handlers: EngineHandlers | undefined;
 
+  /** Entries we already attached a `dispose` listener to. */
+  protected watchedEntries = new WeakSet<NavigationHistoryEntry>();
+
   attach(handlers: EngineHandlers) {
     this.handlers = handlers;
+
+    // watch pre-existing entries (session restore) for disposal
+    for (const entry of window.navigation.entries()) {
+      this.watchDispose(entry);
+    }
 
     window.navigation.addEventListener("navigate", (event) => {
       if (!event.canIntercept) {
@@ -34,18 +42,26 @@ export class NavigationApiEngine implements NavigationEngine {
 
       //printNavigationState();
 
+      // the listener runs pre-commit: the outgoing entry is still current
+      handlers.handleBeforeCommit?.();
+
       const fromId = window.navigation.currentEntry!.id;
+      const watchDispose = (entry: NavigationHistoryEntry) => this.watchDispose(entry);
 
       event.intercept({
         handler() {
           // major WTF: event.destination is different before the handler!
           //console.debug(`Intercepting ${event.navigationType} navigation `, event);
-          const committedId = window.navigation.currentEntry!.id;
+          const committedEntry = window.navigation.currentEntry!;
+
+          // entries minted by link clicks / traversals never pass through
+          // navigate(); watch them here so handleDispose fires for them too
+          watchDispose(committedEntry);
 
           return handlers.handleNavigate({
             navigationType: event.navigationType as 'push' | 'replace' | 'traverse',
             fromId,
-            committedId,
+            committedId: committedEntry.id,
             destination: event.destination,
             info,
           });
@@ -78,12 +94,18 @@ export class NavigationApiEngine implements NavigationEngine {
       info: intent.info,
     });
 
-    res.committed?.then(entry => {
-      entry.addEventListener('dispose', () => {
-        this.handlers?.handleDispose(entry.id);
-      });
-    });
+    // covers `ignore` navigations, which bypass the intercept handler
+    res.committed?.then(entry => this.watchDispose(entry));
 
     return res;
+  }
+
+  protected watchDispose(entry: NavigationHistoryEntry) {
+    if (this.watchedEntries.has(entry)) return;
+    this.watchedEntries.add(entry);
+
+    entry.addEventListener('dispose', () => {
+      this.handlers?.handleDispose(entry.id);
+    });
   }
 }

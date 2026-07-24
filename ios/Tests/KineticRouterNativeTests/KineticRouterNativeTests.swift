@@ -1,6 +1,8 @@
+import Foundation
 import Testing
 @testable import KineticRouterNative
 
+@MainActor
 struct EntryStoreTests {
     @Test func appendAndAccess() async {
         let store = EntryStore()
@@ -9,6 +11,8 @@ struct EntryStoreTests {
         #expect(store.count() == 1)
         #expect(store[0]?.id == "a")
         #expect(store[0]?.url == "/home")
+        #expect(store.entry(withId: "a")?.url == "/home")
+        #expect(store.last?.id == "a")
     }
 
     @Test func removeLast() async {
@@ -40,6 +44,31 @@ struct EntryStoreTests {
         #expect(store.count() == 1)
     }
 
+    @Test func removeEntriesWhere() async {
+        let store = EntryStore()
+        store.append(KineticEntry(id: "a", url: "/a"))
+        store.append(KineticEntry(id: "b", url: "/b"))
+        store.append(KineticEntry(id: "c", url: "/c"))
+        let live: Set<String> = ["a", "c"]
+        let removed = store.removeEntries { !live.contains($0.id) }
+        #expect(removed.map(\.id) == ["b"])
+        #expect(store.entries.map(\.id) == ["a", "c"])
+    }
+
+    @Test func updateHelpers() async {
+        let store = EntryStore()
+        store.append(KineticEntry(id: "a", url: "/a"))
+        store.updateTitle("Title", forId: "a")
+        store.updateUrl("/a2", forId: "a")
+        store.updateState(.bool(true), forId: "a")
+        #expect(store.entry(withId: "a")?.title == "Title")
+        #expect(store.entry(withId: "a")?.url == "/a2")
+
+        // unknown ids are ignored
+        store.updateTitle("X", forId: "nope")
+        #expect(store.entry(withId: "a")?.title == "Title")
+    }
+
     @Test func subscriptOutOfBounds() async {
         let store = EntryStore()
         #expect(store[-1] == nil)
@@ -52,23 +81,26 @@ struct MessagesTests {
     @Test func decodeReadyMessage() throws {
         let raw: [String: Any] = [
             "type": "ready",
-            "protocolVersion": 1,
+            "protocolVersion": 2,
             "url": "https://example.com",
-            "bundleVersion": "1.0"
+            "bundleVersion": "1.0",
+            "initialEntryId": "__native_local_0"
         ]
         let msg = try decodeJsMessage(raw)
         guard case .ready(let ready) = msg else {
             Issue.record("Expected .ready, got \(msg)")
             return
         }
-        #expect(ready.protocolVersion == 1)
+        #expect(ready.protocolVersion == 2)
         #expect(ready.url == "https://example.com")
         #expect(ready.bundleVersion == "1.0")
+        #expect(ready.initialEntryId == "__native_local_0")
     }
 
     @Test func decodeVisitProposedMessage() throws {
         let raw: [String: Any] = [
             "type": "visitProposed",
+            "proposalId": "__proposal_3",
             "url": "/users/alice",
             "state": ["slugs": ["users", NSNull()]] as [String: Any],
             "action": "push",
@@ -80,10 +112,27 @@ struct MessagesTests {
             Issue.record("Expected .visitProposed")
             return
         }
+        #expect(visit.proposalId == "__proposal_3")
         #expect(visit.url == "/users/alice")
         #expect(visit.action == "push")
         #expect(visit.routePattern == "users/<param>")
         #expect(visit.native?.presentation == "push")
+    }
+
+    @Test func decodeStateUpdatedWithUrl() throws {
+        let raw: [String: Any] = [
+            "type": "stateUpdated",
+            "entryId": "__native_local_0",
+            "state": NSNull(),
+            "url": "/home"
+        ]
+        let msg = try decodeJsMessage(raw)
+        guard case .stateUpdated(let update) = msg else {
+            Issue.record("Expected .stateUpdated")
+            return
+        }
+        #expect(update.entryId == "__native_local_0")
+        #expect(update.url == "/home")
     }
 
     @Test func decodeUnrecognizedMessage() {

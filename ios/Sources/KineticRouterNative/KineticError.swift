@@ -1,17 +1,21 @@
 import Foundation
 
-enum KineticError: Error, LocalizedError {
+public enum KineticError: Error, LocalizedError, Sendable {
     case unrecognizedMessage(String)
     case protocolMismatch(jsVersion: Int, swiftVersion: Int)
     case notReady
     case renderInProgress
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
-        case .unrecognizedMessage(let msg): return "Unrecognized JS message: \(msg)"
-        case .protocolMismatch(let js, let swift): return "Protocol version mismatch: JS=\(js), Swift=\(PROTOCOL_VERSION)"
-        case .notReady: return "KineticSession is not ready"
-        case .renderInProgress: return "A render is already in progress"
+        case .unrecognizedMessage(let msg):
+            return "Unrecognized JS message: \(msg)"
+        case .protocolMismatch(let js, let swift):
+            return "Protocol version mismatch: JS=\(js), Swift=\(swift)"
+        case .notReady:
+            return "KineticSession is not ready"
+        case .renderInProgress:
+            return "A render is already in progress"
         }
     }
 }

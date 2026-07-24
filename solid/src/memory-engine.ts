@@ -54,6 +54,11 @@ export class MemoryEngine implements NavigationEngine {
     const from = this.stack[this.index];
     const entry: MemoryEntry = { id: this.mintId(), url: intent.url, state: intent.state };
 
+    if (!intent.info?.ignore) {
+      // pre-commit: the outgoing entry is still current
+      handlers.handleBeforeCommit?.();
+    }
+
     const pruned: MemoryEntry[] = [];
     if (intent.history === 'replace') {
       pruned.push(this.stack[this.index]);
@@ -96,6 +101,9 @@ export class MemoryEngine implements NavigationEngine {
     if (target === undefined) {
       throw new Error(`Cannot traverse by ${delta}: no entry at index ${targetIndex}`);
     }
+
+    // pre-commit: the outgoing entry is still current
+    handlers.handleBeforeCommit?.();
 
     this.index = targetIndex;
 

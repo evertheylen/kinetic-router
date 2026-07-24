@@ -1,6 +1,6 @@
 import Foundation
 
-let PROTOCOL_VERSION = 1
+let PROTOCOL_VERSION = 2
 
 // ── JS → Swift messages ──────────────────────────────────────────────
 
@@ -27,10 +27,18 @@ struct ReadyMessage: Codable, Sendable {
     let protocolVersion: Int
     let bundleVersion: String?
     let url: String
+    /// JS-minted id of the entry that is current at handshake time. The shell
+    /// adopts it for its initial entry — the router renders the initial page
+    /// on its own; no render round-trip is needed.
+    let initialEntryId: String
 }
 
 struct VisitProposedMessage: Codable, Sendable {
     let type: JsMessageType
+    /// Echo this as the `proposalId` argument of the `render` call that
+    /// answers this proposal. Renders unrelated to the proposal (pops, deep
+    /// links) must omit it, so JS can clean up proposals the shell ignored.
+    let proposalId: String
     let url: String
     let state: SendableJSON?
     let action: String // "push" | "replace"
@@ -60,6 +68,9 @@ struct StateUpdatedMessage: Codable, Sendable {
     let type: JsMessageType
     let entryId: String
     let state: SendableJSON?
+    /// Present when the entry's URL also changed (the router's initial URL
+    /// normalization replaces in place).
+    let url: String?
 }
 
 struct ExternalUrlMessage: Codable, Sendable {
@@ -91,7 +102,7 @@ struct SetStackEntry: Codable, Sendable {
 
 /// Encodes as an opaque JSON value, decoded as `[String: SendableJSON]`.
 /// Use to tunnel `state` payloads without knowing their structure.
-enum SendableJSON: Codable, Sendable {
+public enum SendableJSON: Codable, Sendable {
     case string(String)
     case number(Double)
     case integer(Int)
@@ -100,7 +111,7 @@ enum SendableJSON: Codable, Sendable {
     case array([SendableJSON])
     case null
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null; return }
         if let obj = try? container.decode([String: SendableJSON].self) { self = .object(obj); return }
@@ -112,7 +123,7 @@ enum SendableJSON: Codable, Sendable {
         self = .string(str)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .string(let v): try container.encode(v)
@@ -155,17 +166,4 @@ func decodeJsMessage(_ raw: [String: Any]) throws -> JsToSwiftMessage {
     case .externalUrl:
         return .externalUrl(try decoder.decode(ExternalUrlMessage.self, from: data))
     }
-}
-
-/// Encode a Swift → JS command to a JSON string for evaluateJavaScript.
-func encodeCommand(_ name: String, args: [Any]) -> String {
-    let jsonArgs = args.map { arg -> String in
-        if let str = arg as? String { return "\"\(str.replacingOccurrences(of: "\"", with: "\\\""))\"" }
-        if let data = try? JSONSerialization.data(withJSONObject: arg, options: []),
-           let json = String(data: data, encoding: .utf8) {
-            return json
-        }
-        return "null"
-    }
-    return "window.__kineticNative.\(name)(\(jsonArgs.joined(separator: ", ")))"
 }

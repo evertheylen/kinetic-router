@@ -427,17 +427,52 @@ Two deliberate behavior fixes made along the way (both latent bugs, also in brow
   removeAllAfter, bounds), `Messages` (decode ready/visitProposed/unrecognized), `KineticEntry`
   properties. Requires Xcode/macOS to compile.
 
-**Next up: Milestone 4** — Polish: scroll restoration, replace action, modal push,
-  deep-link animation, process-death recovery replay, snapshot memory cap.
+**Review & fix pass (2026-07-24, protocol v2).** A full review of milestones 1–3 found
+and fixed a set of integration bugs; the message protocol was bumped to **2**:
 
-### Polish Recommendations (Milestone 4 Details)
+- **Handshake redesign**: JS now mints the initial entry id itself (before router
+  init runs) and ships it in `ready { initialEntryId }`. The shell adopts it — no
+  initial render round-trip, no id mismatch, and `ActualRouter.init` no longer races
+  the bridge (previously it crashed on `currentEntry() === undefined`). The router's
+  init-time URL normalization replaces the entry *in place* (same id) and syncs the
+  shell via `stateUpdated { url }`.
+- **Proposal correlation**: `visitProposed` carries a `proposalId`; the shell echoes
+  it as the 4th argument of `render`. Stale proposals (ignored/coalesced by the
+  shell) are rejected when an unrelated render arrives, instead of corrupting it.
+- **`window.__kineticNative` wrappers return `undefined`** (and Swift wraps calls in
+  `void`): `evaluateJavaScript` fails with `WKErrorJavaScriptResultTypeIsUnsupported`
+  if the script's result is a Promise — previously every render "failed".
+- **Pre-commit scroll capture** (`EngineHandlers.handleBeforeCommit`, all engines):
+  scroll state used to be persisted post-commit via `updateCurrentEntry`, which
+  targets the *new* entry — writing the old page's state (route included!) onto the
+  wrong history entry, in browsers too.
+- **`NavigationApiEngine` dispose leak fixed**: entries minted by link clicks never
+  got a `dispose` listener; the rendered-route cache grew unboundedly.
+- Replace navigations dispose the old entry *after* rendering (reference
+  `MemoryEngine` semantics), so subtrees can be reused; Swift's redundant
+  double-dispose removed. `null` states (Swift's JSON tunnel) are normalized.
+- `titleChanged` is actually emitted now (`NavigationEngine.titleChanged` hook wired
+  through the leaf-title effect); engine URLs are normalized to `{pathname, search}`.
+- **Engine auto-detection shipped**: `detectNativeEngine({ sitemap })` +
+  `createWebKitBridge()` + `isNativeShell()` in `@kinetic-router/native-bridge`.
+- **Swift shell fixes**: several never-compiled errors (external mutation of
+  `private(set)` entries → accessor methods, `self` captured before init completed,
+  MainActor-isolated calls in `deinit` → removed, KVC on `WKWebView.userAgent` →
+  `applicationNameForUserAgent`, non-Sendable `Any?` through a continuation in
+  `evaluateJavaScript` → result-discarding variant). Pop detection is id-based
+  (robust against modals & native VCs) instead of count-based; modal dismissal is
+  detected and restores the webview; JS `presentation: "modal"` hints are honored;
+  deep-link `restoreStack` builds view controllers; recovery reuses stored
+  snapshots; snapshots are downscaled (2×); protocol mismatch surfaces through
+  `handshakeFailed`.
+- **Visual choreography fixed**: `VisitableViewController` now separates *attaching*
+  the webview from *revealing* it (overlay state machine). The overlay (snapshot or
+  placeholder) stays up until `renderCompleted` — previously the old page's live
+  content was visible sliding in during every push, and stale content flashed on pop.
 
-1. **Avoid Handoff Flashes during Push/Modal transitions (Applied):** Before moving the live `WKWebView` into the new view controller, freeze the current view controller's visual state by showing its captured snapshot (using `lastVC.show(snapshot:)`). This ensures the transition from old VC to new VC doesn't reveal a blank background.
-2. **Robust JSON Script Encoding (Applied):** Use `JSONEncoder` to properly serialize individual string arguments (like `url` and `entryId`) when evaluating JavaScript, eliminating any vulnerability or script execution failures due to unescaped query parameter characters or quote variations.
-3. **Handle Webview Process-Death Recovery Replay:** In `webViewWebContentProcessDidTerminate`, reset `isReady = false` and reload the bundle. When the handshake returns, check if `entryStore.entries` is non-empty. If so, reconstruct and replay the entire navigation history stack to JS using `bridge.setStack(...)` to preserve the user's stack seamlessly across crashes.
-4. **Avoid userContentController Retain Cycles:** Add a `deinit` block to `KineticSession` to cleanly call `webView.configuration.userContentController.removeScriptMessageHandler(forName: "kineticRouter")`. This breaks potential memory leaks where WebKit retains the session message handler indefinitely.
-5. **Layout & Scaling on Snapshots:** Use `.scaleToFill` or `.scaleAspectFill` instead of `.scaleAspectFit` for the snapshot image view, as the snapshot represents a pixel-to-pixel identical representation of the webview and shouldn't have any letterbox bars.
-6. **Complete Support for Native View Controllers:** Implement full integration for pushing native view controllers from the router stack via the `UINavigationController` push methods.
+**Next up: Milestone 4 (remaining)** — compile & run the Swift package against a demo
+app (`example-ios/`), handoff-flash polish on device, per-frame scroll restoration
+beyond `window`, snapshot re-capture on eviction, remote-bundle versioning story.
 
 ## Open questions
 

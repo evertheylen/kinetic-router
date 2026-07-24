@@ -17,6 +17,8 @@ public enum RouteBehaviour: Sendable {
 
 /// Tag-based route lookup (no URL matching).  Supply an instance to
 /// `KineticSession` if your app has native screens mixed into the stack.
+/// Routes without an override follow the `presentation` hint declared in
+/// their JS-side native metadata (defaulting to a push).
 public struct RouteConfiguration: Sendable {
     let behaviours: [String: RouteBehaviour]
 
@@ -24,7 +26,8 @@ public struct RouteConfiguration: Sendable {
         self.behaviours = behaviours
     }
 
-    func behaviour(for tag: String) -> RouteBehaviour {
-        behaviours[tag] ?? .webPush
+    /// The explicit override for this tag, if the app supplied one.
+    func override(for tag: String) -> RouteBehaviour? {
+        behaviours[tag]
     }
 }

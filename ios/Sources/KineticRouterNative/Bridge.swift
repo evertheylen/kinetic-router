@@ -3,14 +3,21 @@ import WebKit
 /// Sends JS messages to Swift and dispatches Swift commands to JS.
 /// Wraps `WKScriptMessageHandler` — the bridge is registered as
 /// `window.webkit.messageHandlers.kineticRouter` on the webview.
+///
+/// Ownership: the `WKUserContentController` retains the bridge, which is fine
+/// because the bridge only holds the session weakly (via `onMessage`) and the
+/// webview unowned; everything is released when the webview goes away.
 @MainActor
-final class Bridge: NSObject, WKScriptMessageHandler {
+public final class Bridge: NSObject, WKScriptMessageHandler {
     private unowned let webView: WKWebView
-    private let onMessage: (JsToSwiftMessage) -> Void
 
-    init(webView: WKWebView, onMessage: @escaping (JsToSwiftMessage) -> Void) {
+    /// Assigned by the session right after construction (it cannot be an init
+    /// parameter: the closure captures the session, which is not fully
+    /// initialized while its `bridge` property is being assigned).
+    var onMessage: ((JsToSwiftMessage) -> Void)?
+
+    init(webView: WKWebView) {
         self.webView = webView
-        self.onMessage = onMessage
         super.init()
     }
 
@@ -20,14 +27,14 @@ final class Bridge: NSObject, WKScriptMessageHandler {
 
     // ── Incoming (JS → Swift) ────────────────────────────────────────
 
-    func userContentController(
+    public func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
         guard let body = message.body as? [String: Any] else { return }
         do {
             let msg = try decodeJsMessage(body)
-            onMessage(msg)
+            onMessage?(msg)
         } catch {
             print("[KineticRouterNative] failed to decode message: \(error)")
         }
@@ -35,46 +42,60 @@ final class Bridge: NSObject, WKScriptMessageHandler {
 
     // ── Outgoing (Swift → JS) ────────────────────────────────────────
 
-    func render(entryId: String, url: String, state: SendableJSON?) async throws {
-        let json: String
-        if let state, let data = try? JSONEncoder().encode(state),
-           let str = String(data: data, encoding: .utf8) {
-            json = str
-        } else {
-            json = "null"
+    func render(entryId: String, url: String, state: SendableJSON?, proposalId: String? = nil) async throws {
+        var args = [jsonLiteral(entryId), jsonLiteral(url), jsonLiteral(state)]
+        if let proposalId {
+            args.append(jsonLiteral(proposalId))
         }
-        let entryIdJson = (try? String(data: JSONEncoder().encode(entryId), encoding: .utf8)) ?? "\"\""
-        let urlJson = (try? String(data: JSONEncoder().encode(url), encoding: .utf8)) ?? "\"\""
-        let script = "window.__kineticNative.render(\(entryIdJson), \(urlJson), \(json))"
-        try await webView.evaluateJavaScript(script)
+        try await evaluate(command: "render", args: args)
     }
 
     func dispose(entryId: String) async throws {
-        let entryIdJson = (try? String(data: JSONEncoder().encode(entryId), encoding: .utf8)) ?? "\"\""
-        let script = "window.__kineticNative.dispose(\(entryIdJson))"
-        try await webView.evaluateJavaScript(script)
+        try await evaluate(command: "dispose", args: [jsonLiteral(entryId)])
     }
 
     func setStack(_ entries: [SetStackEntry]) async throws {
-        guard let jsonData = try? JSONEncoder().encode(entries),
-              let jsonStr = String(data: jsonData, encoding: .utf8) else { return }
-        let script = "window.__kineticNative.setStack(\(jsonStr))"
-        try await webView.evaluateJavaScript(script)
+        try await evaluate(command: "setStack", args: [jsonLiteral(entries)])
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    /// `void` so the script's result is always `undefined`: WKWebView's
+    /// `evaluateJavaScript` fails with `WKErrorJavaScriptResultTypeIsUnsupported`
+    /// when the result is not serializable (e.g. a Promise).
+    private func evaluate(command: String, args: [String]) async throws {
+        let script = "void window.__kineticNative.\(command)(\(args.joined(separator: ", ")))"
+        try await webView.evaluateJavaScriptDiscardingResult(script)
+    }
+
+    /// Serializes any Encodable value (including bare strings) to a JSON
+    /// literal that is safe to splice into a script — proper escaping of
+    /// quotes, backslashes, newlines, and U+2028/U+2029.
+    private func jsonLiteral<T: Encodable>(_ value: T?) -> String {
+        guard let value,
+              let data = try? JSONEncoder().encode(value),
+              let str = String(data: data, encoding: .utf8) else {
+            return "null"
+        }
+        return str
     }
 }
 
 // ── Async evaluateJavaScript helper ──────────────────────────────────
 
 extension WKWebView {
+    /// Result-discarding variant: the built-in async `evaluateJavaScript`
+    /// returns `Any?`, which is not `Sendable` and trips strict concurrency
+    /// when resumed through a continuation. Our bridge commands never produce
+    /// a result, so drop it inside the completion handler.
     @MainActor
-    @discardableResult
-    func evaluateJavaScript(_ script: String) async throws -> Any? {
-        try await withCheckedThrowingContinuation { continuation in
-            evaluateJavaScript(script) { result, error in
+    func evaluateJavaScriptDiscardingResult(_ script: String) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            evaluateJavaScript(script) { _, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume(returning: result)
+                    continuation.resume()
                 }
             }
         }

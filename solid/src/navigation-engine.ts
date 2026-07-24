@@ -68,6 +68,14 @@ export type EngineHandlers = {
   /** An entry left the history stack permanently; the router disposes any
    * rendered routes cached under this id. */
   handleDispose(entryId: string): void,
+
+  /** Called right *before* a navigation commits, while the outgoing entry is
+   * still the engine's current entry. The router uses this to persist
+   * transient page state (scroll positions) onto the outgoing entry via
+   * `updateCurrentEntry` — the only moment this is possible, since the
+   * Navigation API can only update the *current* entry. Engines must not
+   * call this for `ignore` navigations. */
+  handleBeforeCommit?(): void,
 };
 
 /** What `NavigationEngine.navigate` returns. The Navigation API's
@@ -87,4 +95,9 @@ export interface NavigationEngine {
   updateCurrentEntry(state: unknown): void;
 
   navigate(intent: NavigationIntent): EngineNavigationResult;
+
+  /** Optional: notified whenever the leaf page's title changes (reactively or
+   * on render). Used by engines that mirror the title to a host environment
+   * (e.g. the native shell's navigation bar). */
+  titleChanged?(title: string): void;
 }

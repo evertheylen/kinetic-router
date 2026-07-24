@@ -4,7 +4,7 @@ import WebKit
 /// `UINavigationController` subclass that owns the native navigation stack.
 /// One instance per `KineticSession`.  Implements the push/pop choreography
 /// with snapshotting so transitions are 100% native.
-final class KineticNavigationController: UINavigationController {
+public final class KineticNavigationController: UINavigationController {
     unowned let session: KineticSession
 
     init(session: KineticSession) {
@@ -18,10 +18,63 @@ final class KineticNavigationController: UINavigationController {
 
     // ── Lifecycle ────────────────────────────────────────────────────
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         // Keep the default interactive pop gesture enabled.
         interactivePopGestureRecognizer?.isEnabled = true
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    /// The navigation controller new pushes should target: the modal stack
+    /// while a modal is presented, otherwise this one.
+    private var activeNavigationController: UINavigationController {
+        (presentedViewController as? UINavigationController) ?? self
+    }
+
+    /// Entry ids of every VisitableViewController currently alive (base
+    /// stack + presented modal stack).
+    private func allLiveEntryIds() -> Set<String> {
+        var vcs = viewControllers
+        if let modalNav = presentedViewController as? UINavigationController {
+            vcs += modalNav.viewControllers
+        }
+        return Set(vcs.compactMap { ($0 as? VisitableViewController)?.entryId })
+    }
+
+    /// Removes (and disposes JS-side) entries whose view controllers are no
+    /// longer part of any stack. Id-based, so native view controllers and
+    /// modals never confuse it.
+    private func disposeOrphanedEntries() {
+        let liveIds = allLiveEntryIds()
+        let removed = session.entryStore.removeEntries { !liveIds.contains($0.id) }
+        guard !removed.isEmpty else { return }
+
+        Task { @MainActor [session] in
+            for entry in removed {
+                try? await session.bridge.dispose(entryId: entry.id)
+            }
+        }
+    }
+
+    /// Freeze the given screen with its entry's snapshot before the webview
+    /// leaves it (falls back to a placeholder if the snapshot was evicted).
+    private func freeze(_ vc: VisitableViewController) {
+        if let snapshot = session.snapshot(forEntryId: vc.entryId) {
+            vc.show(snapshot: snapshot)
+        } else {
+            vc.showPlaceholder()
+        }
+    }
+
+    private func visitableController(for entryId: String) -> VisitableViewController? {
+        var vcs = viewControllers
+        if let modalNav = presentedViewController as? UINavigationController {
+            vcs += modalNav.viewControllers
+        }
+        return vcs
+            .compactMap { $0 as? VisitableViewController }
+            .first { $0.entryId == entryId }
     }
 }
 
@@ -31,147 +84,193 @@ extension KineticNavigationController: KineticSessionDelegate {
     var entryStore: EntryStore { session.entryStore }
 
     func bridgeDidConnect(initialEntry: KineticEntry, withWebView webView: WKWebView) {
+        // a dev-reload may leave a stale stack/modal behind
+        if presentedViewController != nil {
+            dismiss(animated: false)
+        }
+
         let vc = VisitableViewController(entry: initialEntry)
-        vc.showWebView(webView)
+        vc.attachWebView(webView)
+        vc.reveal() // the page is already live; nothing to wait for
         setViewControllers([vc], animated: false)
     }
 
     func pushEntry(_ entry: KineticEntry, withWebView webView: WKWebView, configuration: RouteConfiguration) {
-        if let lastVC = viewControllers.last as? VisitableViewController,
-           let lastEntry = session.entryStore.entries.first(where: { $0.id == lastVC.entryId }) {
-            lastVC.show(snapshot: lastEntry.snapshot)
+        let nav = activeNavigationController
+
+        // freeze the outgoing screen: it keeps showing its page as pixels
+        if let lastVC = nav.viewControllers.last as? VisitableViewController {
+            freeze(lastVC)
         }
 
+        // the new screen holds the webview but stays covered by a placeholder
+        // until renderCompleted — otherwise the *old* page would be visible
+        // sliding in during the push animation
         let vc = VisitableViewController(entry: entry)
         vc.showPlaceholder()
-        vc.showWebView(webView)
-        pushViewController(vc, animated: true)
+        vc.attachWebView(webView)
+        nav.pushViewController(vc, animated: true)
     }
 
-    func replaceTopEntry(_ entry: KineticEntry, withWebView webView: WKWebView) {
-        guard !viewControllers.isEmpty else { return }
+    func replaceTopEntry(_ entry: KineticEntry, withWebView webView: WKWebView, frozen: UIImage?) {
+        let nav = activeNavigationController
+        guard !nav.viewControllers.isEmpty else { return }
 
         let vc = VisitableViewController(entry: entry)
-        vc.showWebView(webView)
+        if let frozen {
+            vc.show(snapshot: frozen) // outgoing page covers the swap
+        } else {
+            vc.showPlaceholder()
+        }
+        vc.attachWebView(webView)
 
-        var stack = viewControllers
+        var stack = nav.viewControllers
         stack[stack.count - 1] = vc
-        setViewControllers(stack, animated: false)
+        nav.setViewControllers(stack, animated: false)
     }
 
     func presentModalEntry(_ entry: KineticEntry, withWebView webView: WKWebView, configuration: RouteConfiguration) {
-        if let lastVC = viewControllers.last as? VisitableViewController,
-           let lastEntry = session.entryStore.entries.first(where: { $0.id == lastVC.entryId }) {
-            lastVC.show(snapshot: lastEntry.snapshot)
+        // the screen behind the sheet was frozen by the session (snapshot)
+        if let lastVC = viewControllers.last as? VisitableViewController {
+            freeze(lastVC)
         }
 
         let vc = VisitableViewController(entry: entry)
         vc.showPlaceholder()
-        vc.showWebView(webView)
+        vc.attachWebView(webView)
 
         let modalNav = UINavigationController(rootViewController: vc)
         modalNav.modalPresentationStyle = .pageSheet
+        modalNav.delegate = self // didShow for pushes/pops inside the modal
+        modalNav.presentationController?.delegate = self // dismissal detection
         present(modalNav, animated: true)
     }
 
-    func renderCompleted(entryId: String, title: String) {
-        if let idx = session.entryStore.entries.firstIndex(where: { $0.id == entryId }) {
-            session.entryStore.entries[idx].title = title
-        }
-
-        for vc in viewControllers {
-            guard let visitable = vc as? VisitableViewController,
-                  visitable.entryId == entryId else { continue }
-            visitable.removeSnapshot()
-            visitable.navigationItem.title = title
-        }
-    }
-
-    func renderFailed(entryId: String, error: String) {
-        guard let topVC = viewControllers.last as? VisitableViewController,
-              topVC.entryId == entryId else { return }
-
-        if viewControllers.count > 1 {
-            popViewController(animated: false)
-        }
-    }
-
     func pushNativeViewController(_ viewController: UIViewController) {
-        if let lastVC = viewControllers.last as? VisitableViewController,
-           let lastEntry = session.entryStore.entries.first(where: { $0.id == lastVC.entryId }) {
-            lastVC.show(snapshot: lastEntry.snapshot)
-        }
-        pushViewController(viewController, animated: true)
-        let entryId = UUID().uuidString
-        let nativeEntry = KineticEntry(id: entryId, url: "")
-        session.entryStore.append(nativeEntry)
+        // The webview stays live on the previous screen (it is covered by the
+        // native screen); no snapshot or entry bookkeeping is needed.
+        activeNavigationController.pushViewController(viewController, animated: true)
     }
 
     func restoreStack(entries: [KineticEntry], withWebView webView: WKWebView) {
+        if presentedViewController != nil {
+            dismiss(animated: false)
+        }
+
         var vcs: [UIViewController] = []
-        for entry in entries {
+        for (i, entry) in entries.enumerated() {
             let vc = VisitableViewController(entry: entry)
-            vc.showPlaceholder()
+            if let snapshot = entry.snapshot {
+                vc.show(snapshot: snapshot)
+            } else {
+                vc.showPlaceholder()
+            }
+            if i == entries.count - 1 {
+                // the leaf holds the webview; revealed on renderCompleted
+                vc.attachWebView(webView)
+            }
             vcs.append(vc)
         }
-        // The leaf VC gets the live webview.
-        if let leafVC = vcs.last {
-            leafVC.showWebView(webView)
-        }
         setViewControllers(vcs, animated: false)
+    }
+
+    func renderCompleted(entryId: String, title: String) {
+        guard let vc = visitableController(for: entryId) else { return }
+        vc.reveal()
+        vc.navigationItem.title = title
+    }
+
+    func renderFailed(entryId: String, error: String) {
+        // failed modal: dismiss it and restore the webview to the stack top
+        if let modalNav = presentedViewController as? UINavigationController,
+           let modalRoot = modalNav.viewControllers.first as? VisitableViewController,
+           modalRoot.entryId == entryId {
+            dismiss(animated: true) { [weak self] in
+                self?.handleModalDismissed()
+            }
+            return
+        }
+
+        let nav = activeNavigationController
+        guard let topVC = nav.viewControllers.last as? VisitableViewController,
+              topVC.entryId == entryId else { return }
+
+        if nav.viewControllers.count > 1 {
+            // didShow trims the store, disposes the failed entry, and
+            // re-renders the revealed screen
+            nav.popViewController(animated: false)
+        } else {
+            topVC.reveal()
+        }
+    }
+
+    func titleChanged(entryId: String, title: String) {
+        visitableController(for: entryId)?.navigationItem.title = title
     }
 }
 
 // MARK: - UINavigationControllerDelegate
 
 extension KineticNavigationController: UINavigationControllerDelegate {
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         didShow viewController: UIViewController,
         animated: Bool
     ) {
-        guard let visitableVC = viewController as? VisitableViewController else { return }
+        // Trim entries whose view controllers left the stack (pop committed;
+        // also covers renderFailed unwinds). Cancelled interactive pops fire
+        // didShow with the unchanged top — nothing gets trimmed then.
+        disposeOrphanedEntries()
 
-        // Check if we went back (pop committed).
-        let currentCount = viewControllers.count
-        let storeCount = session.entryStore.count()
-
-        if currentCount < storeCount {
-            // Pop committed: move webview to the revealed VC + re-render.
-            handlePopCommitted(revealedVC: visitableVC)
-        }
-    }
-
-    private func handlePopCommitted(revealedVC: VisitableViewController) {
-        let newCount = viewControllers.count
-        let storeCount = session.entryStore.count()
-
-        // Dispose entries that were popped (trim store to match VC count).
-        while session.entryStore.count() > newCount {
-            guard let removed = session.entryStore.removeLast() else { break }
-            Task { @MainActor [session] in
-                try? await session.bridge.dispose(entryId: removed.id)
-            }
+        guard let visitableVC = viewController as? VisitableViewController else {
+            // revealed a native screen; the webview stays wherever it is
+            return
         }
 
-        // Move webview from whatever held it to the revealed VC.
-        // If a snapshot exists on the revealed entry, show it first.
-        let entryId = revealedVC.entryId
+        // If the revealed screen already holds the webview this was a push
+        // (or a cancelled pop) — nothing to restore.
+        guard !visitableVC.holdsWebView(session.webView) else { return }
 
-        if let snapshot = session.entryStore.entries.first(where: { $0.id == entryId })?.snapshot {
-            revealedVC.show(snapshot: snapshot)
-        }
+        // Pop committed: keep frozen pixels up, move the webview under them,
+        // re-render (a RenderedRouteCache hit — effectively instant), and
+        // reveal on renderCompleted.
+        freeze(visitableVC)
+        visitableVC.attachWebView(session.webView)
 
-        revealedVC.showWebView(session.webView)
-
-        // Call render — cache hit, so effectively instant.
-        let entry = session.entryStore.entries.first { $0.id == entryId }
+        let entry = session.entryStore.entry(withId: visitableVC.entryId)
         Task { @MainActor [session] in
             try? await session.bridge.render(
-                entryId: entryId,
-                url: entry?.url ?? revealedVC.url,
+                entryId: visitableVC.entryId,
+                url: entry?.url ?? visitableVC.url,
                 state: entry?.state
             )
+        }
+    }
+}
+
+// MARK: - UIAdaptivePresentationControllerDelegate
+
+extension KineticNavigationController: UIAdaptivePresentationControllerDelegate {
+    public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        handleModalDismissed()
+    }
+
+    /// Interactive or programmatic modal dismissal: dispose the modal entry
+    /// (and anything pushed inside the modal), then restore the webview to
+    /// the top of the base stack.
+    private func handleModalDismissed() {
+        _ = session.modalWasDismissed()
+        disposeOrphanedEntries()
+
+        guard let topVC = viewControllers.last as? VisitableViewController,
+              let entry = session.entryStore.entry(withId: topVC.entryId) else { return }
+
+        // frozen snapshot is still up from presentModalEntry
+        freeze(topVC)
+        topVC.attachWebView(session.webView)
+
+        Task { @MainActor [session] in
+            try? await session.bridge.render(entryId: entry.id, url: entry.url, state: entry.state)
         }
     }
 }

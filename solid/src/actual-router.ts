@@ -42,6 +42,10 @@ export class ActualRouter<
   // currentAppStateId: string | undefined;
   currentRenderedRoutes: RenderedRoute[] = [];
 
+  /** The AppState currently on screen; the target for pre-commit
+   * scroll-position capture (see handleBeforeCommit). */
+  protected currentState: AppState | undefined;
+
   protected _currentLocator: Accessor<Locator<any> | undefined>;
   protected _setCurrentLocator: Setter<Locator<any> | undefined>;
 
@@ -82,6 +86,7 @@ export class ActualRouter<
     this.engine.attach({
       handleNavigate: (event) => this.handleNavigateEvent(event),
       handleDispose: (entryId) => this.rrCache.unreference(entryId),
+      handleBeforeCommit: () => this.handleBeforeCommit(),
     });
 
     const state = this.getState(this.engine.currentEntry()!)!;
@@ -136,6 +141,17 @@ export class ActualRouter<
     });
   }
 
+  /** Called by the engine right before a navigation commits, while the
+   * outgoing entry is still current. Persists transient page state (scroll
+   * positions) onto that entry — after commit, `updateCurrentEntry` would
+   * target the *new* entry and corrupt its state. */
+  protected handleBeforeCommit(): void {
+    if (this.currentState === undefined) return;
+
+    this.currentState.scrollTops = this.captureScrollPositions();
+    this.engine.updateCurrentEntry(this.currentState.serialize(this.sitemap));
+  }
+
   /** Called by the engine for every navigation it observes. */
   protected handleNavigateEvent(event: EngineNavigateEvent): Promise<void> {
     // could be an existing state!
@@ -162,7 +178,9 @@ export class ActualRouter<
 
       if (entry.getState !== undefined) {
         const rawState = entry.getState();
-        if (rawState !== undefined) {
+        // null happens for entries created without state (e.g. native link
+        // clicks); treat it like a missing state and fall back to the URL
+        if (rawState !== undefined && rawState !== null) {
           return AppState.deserialize(this.sitemap, rawState as SerializedAppState)
         }
       }
@@ -292,7 +310,10 @@ export class ActualRouter<
           // TODO gate this behind some check if this route is active and most-specific (via PageStatus?)
           runWithOwner(rendered.owner, () => createEffect(
             () => rendered.renderOutput!.title,
-            (title) => { document.title = title }
+            (title) => {
+              document.title = title;
+              this.engine.titleChanged?.(title);
+            }
           ));
         }
 
@@ -303,15 +324,9 @@ export class ActualRouter<
       });
     }
 
-    // Capture scroll positions of the current page before rendering the new one,
-    // and persist them to the old entry's state so they survive back navigation.
-    if (this.currentRenderedRoutes.length > 0 && cacheId !== undefined && cacheId !== newState.id) {
-      const oldState = this.stateCache.get(cacheId);
-      if (oldState !== undefined) {
-        oldState.scrollTops = this.captureScrollPositions();
-        this.engine.updateCurrentEntry(oldState.serialize(this.sitemap));
-      }
-    }
+    // (Scroll positions of the outgoing page are captured in
+    // handleBeforeCommit, pre-commit — the only moment the outgoing entry is
+    // still the engine's current entry.)
 
     this.stateCache.set(newState.id, newState);
     // await final promise that ties all the others together (they form a DAG normally)
@@ -321,6 +336,7 @@ export class ActualRouter<
     this.restoreScrollPositions(newState);
 
     // Update other state
+    this.currentState = newState;
     this._setCurrentLocator(newState.locator);
 
     this.rrCache.markUsedFor(newState.id, this.currentRenderedRoutes);
