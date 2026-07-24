@@ -1,0 +1,36 @@
+{
+  "name": "@kinetic-router/native-bridge",
+  "version": "0.1.0",
+  "description": "Native shell bridge for kinetic-router — enables iOS/Android shells to own the navigation stack",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*.js": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kinetic-router/definition": "workspace:*",
+    "@kinetic-router/solid": "workspace:*",
+    "@kinetic-router/url": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "happy-dom": "catalog:"
+  }
+}

@@ -14,8 +14,9 @@ export class AppState {
   readonly paramsByDefinition: ParamMap;
   readonly paramsByKey: ParamValues<any>;
   id: string;
+  scrollTops = new Map<string, number>();
 
-  constructor(route: Route<any>, paramsByDefinition: ParamMap, paramsByKey?: ParamValues<any>, id?: string) {
+  constructor(route: Route<any>, paramsByDefinition: ParamMap, paramsByKey?: ParamValues<any>, id?: string, scrollTops?: Map<string, number>) {
     this.route = route;
     this.paramsByDefinition = paramsByDefinition;
 
@@ -26,6 +27,9 @@ export class AppState {
     }
 
     this.id = id ?? getTemporaryId();
+    if (scrollTops !== undefined) {
+      this.scrollTops = scrollTops;
+    }
   }
 
   get locator(): Locator<any> {
@@ -44,7 +48,8 @@ export class AppState {
     // turn PathParamDef into null, it should be unique
     const slugs = abstractSlugs.map(s => typeof s === 'object' ? null : s);
 
-    return { id: this.id, slugs, snapShotByKey: this.paramsByKey as JsonObject } satisfies Json;
+    const scrollTopsObj: JsonObject = Object.fromEntries(this.scrollTops) as JsonObject;
+    return { id: this.id, slugs, snapShotByKey: this.paramsByKey as JsonObject, $scrollTops: scrollTopsObj } satisfies Json;
   }
 
   static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, id?: string) {
@@ -84,7 +89,14 @@ export class AppState {
 
     const snapShotByDef = convertParamsByDefinition(data.snapShotByKey, route.paramDefs);
 
-    return new AppState(route, snapShotByDef, data.snapShotByKey, data.id);
+    const scrollTops = new Map<string, number>();
+    if (data.$scrollTops && typeof data.$scrollTops === 'object') {
+      for (const [key, value] of Object.entries(data.$scrollTops as Record<string, unknown>)) {
+        if (typeof value === 'number') scrollTops.set(key, value);
+      }
+    }
+
+    return new AppState(route, snapShotByDef, data.snapShotByKey, data.id, scrollTops);
   }
 }
 

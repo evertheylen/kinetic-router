@@ -153,27 +153,41 @@ export class ActualRouter<
     }
   }
 
-  /** Make an AppState based on the best source of information */
-  protected getState(entry: EntrySource) {
-    if (entry.id) {
-      const state = this.stateCache.get(entry.id);
-      if (state !== undefined) return state;
-    }
+    /** Make an AppState based on the best source of information */
+    protected getState(entry: EntrySource) {
+      if (entry.id) {
+        const state = this.stateCache.get(entry.id);
+        if (state !== undefined) return state;
+      }
 
-    if (entry.getState !== undefined) {
-      const rawState = entry.getState();
-      if (rawState !== undefined) {
-        return AppState.deserialize(this.sitemap, rawState as SerializedAppState)
+      if (entry.getState !== undefined) {
+        const rawState = entry.getState();
+        if (rawState !== undefined) {
+          return AppState.deserialize(this.sitemap, rawState as SerializedAppState)
+        }
+      }
+
+      if (entry.url) {
+        return AppState.fromLocator(
+          urlToLocator(this.sitemap, typeof entry.url === 'string' ? new URL(entry.url) : entry.url),
+          entry.id ?? undefined
+        );
       }
     }
 
-    if (entry.url) {
-      return AppState.fromLocator(
-        urlToLocator(this.sitemap, typeof entry.url === 'string' ? new URL(entry.url) : entry.url),
-        entry.id ?? undefined
-      );
+    protected captureScrollPositions(): Map<string, number> {
+      return new Map([['window', window.scrollY]]);
     }
-  }
+
+    protected restoreScrollPositions(state: AppState): void {
+      if (state.scrollTops.size > 0) {
+        for (const [key, value] of state.scrollTops) {
+          if (key === 'window') {
+            window.scrollTo(0, value);
+          }
+        }
+      }
+    }
 
   protected async renderNavigation(
     newState: AppState,
@@ -289,9 +303,22 @@ export class ActualRouter<
       });
     }
 
+    // Capture scroll positions of the current page before rendering the new one,
+    // and persist them to the old entry's state so they survive back navigation.
+    if (this.currentRenderedRoutes.length > 0 && cacheId !== undefined && cacheId !== newState.id) {
+      const oldState = this.stateCache.get(cacheId);
+      if (oldState !== undefined) {
+        oldState.scrollTops = this.captureScrollPositions();
+        this.engine.updateCurrentEntry(oldState.serialize(this.sitemap));
+      }
+    }
+
     this.stateCache.set(newState.id, newState);
     // await final promise that ties all the others together (they form a DAG normally)
     await framePromise;
+
+    // Restore scroll positions from the new state (set during a previous navigate-away).
+    this.restoreScrollPositions(newState);
 
     // Update other state
     this._setCurrentLocator(newState.locator);
