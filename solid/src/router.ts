@@ -4,6 +4,8 @@ import { ActualRouter } from "./actual-router";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator } from "@kinetic-router/definition";
 import { Accessor, createSignal, Setter } from "solid-js";
+import { NavigationEngine } from "./navigation-engine";
+import { NavigationApiEngine } from "./navigation-api-engine";
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
@@ -24,7 +26,12 @@ export class Router<
   protected didInit: Accessor<boolean>;
   protected setDidInit: Setter<boolean>;
 
-  constructor(sitemap: RootSitemap) {
+  constructor(sitemap: RootSitemap, options?: {
+    /** The history layer to use. Defaults to the browser's Navigation API.
+     * Mostly useful for testing (MemoryEngine); library integrations (like
+     * the planned native shell) may provide their own engine. */
+    engine?: NavigationEngine
+  }) {
     this.sitemap = sitemap;
     this.implMap = new SolidImplementationMap(this.sitemap);
 
@@ -35,7 +42,8 @@ export class Router<
 
     queueMicrotask(async () => {
       this.implMap.check();
-      const router = new ActualRouter(this.sitemap, this.implMap);
+      const engine = options?.engine ?? new NavigationApiEngine();
+      const router = new ActualRouter(this.sitemap, this.implMap, engine);
       await router.init();
       this.actualRouter = router;
       this.setDidInit(true);

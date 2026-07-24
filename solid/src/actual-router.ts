@@ -12,14 +12,7 @@ import { SolidImplementationMap } from "./implementation-map";
 import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
 import { calculateRouteChanges, RouteChange } from "./diff";
 import { RenderedRouteCache } from "./rendered-route-cache";
-import { printNavigationState } from "./debug";
-
-
-
-type NavigationInfo = {
-  forceNewInstance?: boolean,
-  ignore?: boolean
-};
+import { EngineNavigateEvent, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine";
 
 
 export class ActualRouter<
@@ -28,6 +21,7 @@ export class ActualRouter<
 > {
   readonly sitemap: RootSitemap;
   readonly implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>;
+  readonly engine: NavigationEngine;
 
   // Simple cache for implementation, never cleaned (and no plans to do so)
   readonly implCache = new Map<Route<any>, Page<ExtraOutput, any, any>>();
@@ -53,9 +47,14 @@ export class ActualRouter<
 
   rootFrame!: FrameDelegate;
 
-  constructor(sitemap: RootSitemap, implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>) {
+  constructor(
+    sitemap: RootSitemap,
+    implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>,
+    engine: NavigationEngine
+  ) {
     this.sitemap = sitemap;
     this.implMap = implMap;
+    this.engine = engine;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
   }
@@ -80,9 +79,12 @@ export class ActualRouter<
     }
 
     // setup after initial navigation stuff to avoid weird unwanted behaviour
-    this.setupNavigationApi();
+    this.engine.attach({
+      handleNavigate: (event) => this.handleNavigateEvent(event),
+      handleDispose: (entryId) => this.rrCache.unreference(entryId),
+    });
 
-    const state = this.getState(window.navigation.currentEntry!)!;
+    const state = this.getState(this.engine.currentEntry()!)!;
     
     const newLocator: Locator<any> = {
       route: state.route, values: convertParamsByKey(state.paramsByDefinition, state.route.paramDefs)
@@ -91,16 +93,23 @@ export class ActualRouter<
     const newUrl = locatorToUrl(this.sitemap, newLocator);
     const serializedState = state.serialize(this.sitemap);
 
-    await this.renderNavigation(state, undefined, {});
-    if (window.navigation.currentEntry?.url !== newUrl) {
-      const res = window.navigation.navigate(newUrl, {
+    if (this.engine.currentEntry()?.url !== newUrl) {
+      const res = this.engine.navigate({
         // set ignore=true to avoid weird behaviour not aligned with "first load"
-        state: serializedState, history: 'replace', info: { ignore: true }
+        url: newUrl, state: serializedState, history: 'replace', info: { ignore: true }
       });
-      await res.committed;
+      const committedEntry = await res.committed;
+
+      // replacing mints a new entry id: adopt it *before* rendering, so the
+      // initial render is cached under the entry id it actually lives in
+      if (committedEntry !== undefined) {
+        state.id = committedEntry.id;
+      }
     } else {
-      window.navigation.updateCurrentEntry({ state: serializedState });
+      this.engine.updateCurrentEntry(serializedState);
     }
+
+    await this.renderNavigation(state, undefined, {});
   }
 
   navigate<ParamDefs extends AnyParamDefs>(
@@ -119,83 +128,33 @@ export class ActualRouter<
     //console.debug('navigate to ', state);
     
     const url = locatorToUrl(this.sitemap, locator);
-    const res = window.navigation.navigate(url, {
+    return this.engine.navigate({
+      url,
       state: state.serialize(this.sitemap),
       history: options?.replace ? 'replace' : 'push',
       info: { forceNewInstance: options?.forceNewInstance }
     });
-
-    res.committed?.then(entry => {
-      entry.addEventListener('dispose', () => {
-        this.rrCache.unreference(entry.id);
-      });
-    });
-
-    return res;
   }
 
-  protected setupNavigationApi() {
-    const router = this;
+  /** Called by the engine for every navigation it observes. */
+  protected handleNavigateEvent(event: EngineNavigateEvent): Promise<void> {
+    // could be an existing state!
+    const newState = this.getState(event.destination)!;
 
-    window.navigation.addEventListener("navigate", (event) => {
-      if (!event.canIntercept) {
-        console.warn('Cannot intercept navigation', event);
-        return;
+    if (event.navigationType === 'traverse') {
+      return this.renderNavigation(newState, newState.id, event.info);
+    } else {
+      // TODO handle 'replace' better if needed?
+      if (newState?.isTemporary()) {
+        this.stateCache.delete(newState.id);
       }
-
-      if (event.navigationType === 'reload') {
-        console.warn('Reloads not currently handled', event);
-        return;
-      }
-
-      const info = (event.info ?? {}) as NavigationInfo;
-      if (info.ignore) {
-        event.intercept();
-        return;
-      }
-
-      //printNavigationState();
-
-      const currentId = window.navigation.currentEntry!.id;
-
-      event.intercept({
-        handler() {
-          // could be an existing state! (note: event)
-          // major WTF: event.destination is different before the handler!
-          const newState = router.getState(event.destination)!;
-          //console.debug(`Intercepting ${event.navigationType} navigation `, event);
-
-          if (event.navigationType === 'traverse') {
-            return router.renderNavigation(newState, newState.id, info);
-          } else {
-            // TODO handle 'replace' better if needed?
-            const newId = window.navigation.currentEntry!.id;
-            if (newState?.isTemporary()) {
-              router.stateCache.delete(newState.id);
-            }
-            newState.id = newId;
-            return router.renderNavigation(newState, currentId, info);
-          }
-        },
-      });
-    });
-
-    window.navigation.addEventListener('navigateerror', (event) => {
-      console.error("NAVIGATION ERROR");
-      console.error(event.error);
-    })
-
-    window.navigation.addEventListener('navigatesuccess', (event) => {
-      //console.debug('navigate success...');
-    });
+      newState.id = event.committedId;
+      return this.renderNavigation(newState, event.fromId, event.info);
+    }
   }
 
   /** Make an AppState based on the best source of information */
-  protected getState(entry: {
-    id?: string | null,
-    getState?: () => unknown | undefined,
-    url?: { pathname: string, search: string } | string | null
-  }) {
+  protected getState(entry: EntrySource) {
     if (entry.id) {
       const state = this.stateCache.get(entry.id);
       if (state !== undefined) return state;
@@ -288,6 +247,8 @@ export class ActualRouter<
 
     for (; i<routeChanges.length; i++) {
       const route = newRouteStack[i];
+      // capture per iteration: `i` has moved on by the time the callbacks run
+      const isLeafRoute = i === routeChanges.length-1;
       // assume all changes are 'render' from here on out
       const implementationPromise = (
         this.implCache.get(route) ?? this.implMap.loadImplementation(route).then((impl) => {
@@ -313,7 +274,7 @@ export class ActualRouter<
       framePromise = Promise.all([renderPromise, framePromise]).then(([rendered, frame]) => {
         this.assertFrame(frame, route);
 
-        if (i === routeChanges.length-1) {
+        if (isLeafRoute) {
           // TODO gate this behind some check if this route is active and most-specific (via PageStatus?)
           runWithOwner(rendered.owner, () => createEffect(
             () => rendered.renderOutput!.title,
