@@ -2,6 +2,7 @@ packages:
   - definition
   - url
   - solid
+  - native-bridge
   - example-app
 
 allowBuilds:

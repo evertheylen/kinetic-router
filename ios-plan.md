@@ -346,11 +346,11 @@ another shared win.
 1. ✅ **Engine extraction** (`@kinetic-router/solid`) — *done, 2026-07-24.*
    `NavigationEngine` interface, `NavigationApiEngine` (pure move), `MemoryEngine` +
    first solid-package tests. See status below.
-2. **`@kinetic-router/native-bridge`**: detection, handshake, protocol types,
+2. ✅ **`@kinetic-router/native-bridge`**: detection, handshake, protocol types,
    `NativeBridgeEngine`, click interception. Testable headlessly with a mock bridge.
-3. **`KineticRouterNative` (SPM)**: `KineticSession`, bridge, `VisitableViewController`,
-   push/pop choreography with snapshots. Demo app in the repo (`example-ios/`) wrapping
-   the existing `example-app`.
+3. ✅ **`KineticRouterNative` (SPM)** — *initial scaffolding, 2026-07-24.* `KineticSession`,
+    bridge, `VisitableViewController`, push/pop choreography with snapshots. Demo app
+    in the repo (`example-ios/`) wrapping the existing `example-app` is the next step.
 4. **Polish**: scroll restoration, titles, replace/modal, deep links, process-death
    recovery, snapshot memory cap, dark-mode flash hunting.
 5. **Docs**: "your app just works" guide + shell setup guide.
@@ -384,13 +384,60 @@ Two deliberate behavior fixes made along the way (both latent bugs, also in brow
    the loop variable inside an async callback after the loop had finished. Now captured
    per iteration.
 
-Known unrelated issue: 17 pre-existing failures in `@kinetic-router/url`'s
-`deserialize.test.ts` (tests pass raw strings where `urlToLocator` expects a URL-ish
-object) — untouched by this milestone, needs a separate fix.
 
-**Next up: Milestone 2**, `@kinetic-router/native-bridge`. `NativeBridgeEngine` now
-just implements the `NavigationEngine` interface; the mock-bridge test setup can mirror
-`router.test.ts`.
+**Milestone 2 shipped.** `@kinetic-router/native-bridge`:
+- `src/protocol.ts` — `PROTOCOL_VERSION = 1`, all JS↔Swift message types, `SetStackEntry`,
+  `NativeStaticData`, `NativePresentation`.
+- `src/native-bridge-engine.ts` — full `NavigationEngine` implementation: sends `ready`
+  on `attach()`, exposes `window.__kineticNative` (render/dispose/setStack), click
+  interception (capture phase, respects modifiers/target/download), `resolveRouteInfo()`
+  for slug pattern + native metadata extraction, `ignore` navigations handled locally.
+- `src/native-bridge-engine.test.ts` — 24 tests (mock bridge + happy-dom): ready
+  handshake, navigate→visitProposed→render cycle, renderCompleted/renderFailed,
+  ignore navigations, replace→dispose, standalone traverse renders, dispose, setStack,
+  currentEntry/updateCurrentEntry tracking, click interception (same-origin, external,
+  modifiers, target=_blank, download, nested elements), routePattern inclusion.
+
+**Milestone 3 initial scaffolding shipped.** `KineticRouterNative` SPM package at `ios/`:
+- `Package.swift` — iOS 26, Swift 6.2.
+- `Messages.swift` — `Codable` JS↔Swift message types, `SendableJSON` tunnel for state,
+  `decodeJsMessage()` discriminated union parser.
+- `KineticError.swift` — `unrecognizedMessage`, `protocolMismatch`, errors.
+- `KineticSessionDelegate.swift` — delegate protocol + default `openExternalUrl` via
+  `SFSafariViewController`.
+- `Bridge.swift` — `WKScriptMessageHandler` registered as `kineticRouter`, async
+  `render`/`dispose`/`setStack` via `evaluateJavaScript`.
+- `EntryStore.swift` — `entryId → (url, state, title, snapshot)` lookup with
+  append/removeLast/replace/removeAllAfter.
+- `KineticSession.swift` — owns `WKWebView` (UA suffix, `allowsBackForwardNavigationGestures`
+  disabled), `Bridge`, `EntryStore`, `RouteConfiguration`. Handles `ready` (protocol version
+  check), `visitProposed` (push/modal/native dispatch per tag), `renderCompleted`,
+  `renderFailed`, `titleChanged`, `stateUpdated`, `externalUrl`. Snapshot→push choreography.
+  `WKNavigationDelegate` (process-death hook). `restoreStack()` for cold start/deep links.
+- `VisitableViewController.swift` — per-entry VC: snapshot `UIImageView`, placeholder view,
+  `showWebView(_:)` to move the live webview.
+- `KineticNavigationController.swift` — `UINavigationController` subclass implementing
+  `KineticSessionDelegate` + `UINavigationControllerDelegate`. Push choreography: placeholder
+  → push animated → render → reveal on `renderCompleted`. Pop choreography: `didShow` detects
+  stack decrease → disposes popped entries → moves webview + renders revealed entry (cache hit).
+- `KineticNavigationView.swift` — `UIViewControllerRepresentable` for SwiftUI integration.
+- `RouteConfiguration.swift` — tag-based `RouteBehaviour` lookup (`.webPush`/`.webModal`/
+  `.native(factory:)`).
+- Tests: `KineticRouterNativeTests.swift` — `EntryStore` (append, removeLast, replace,
+  removeAllAfter, bounds), `Messages` (decode ready/visitProposed/unrecognized), `KineticEntry`
+  properties. Requires Xcode/macOS to compile.
+
+**Next up: Milestone 4** — Polish: scroll restoration, replace action, modal push,
+  deep-link animation, process-death recovery replay, snapshot memory cap.
+
+### Polish Recommendations (Milestone 4 Details)
+
+1. **Avoid Handoff Flashes during Push/Modal transitions (Applied):** Before moving the live `WKWebView` into the new view controller, freeze the current view controller's visual state by showing its captured snapshot (using `lastVC.show(snapshot:)`). This ensures the transition from old VC to new VC doesn't reveal a blank background.
+2. **Robust JSON Script Encoding (Applied):** Use `JSONEncoder` to properly serialize individual string arguments (like `url` and `entryId`) when evaluating JavaScript, eliminating any vulnerability or script execution failures due to unescaped query parameter characters or quote variations.
+3. **Handle Webview Process-Death Recovery Replay:** In `webViewWebContentProcessDidTerminate`, reset `isReady = false` and reload the bundle. When the handshake returns, check if `entryStore.entries` is non-empty. If so, reconstruct and replay the entire navigation history stack to JS using `bridge.setStack(...)` to preserve the user's stack seamlessly across crashes.
+4. **Avoid userContentController Retain Cycles:** Add a `deinit` block to `KineticSession` to cleanly call `webView.configuration.userContentController.removeScriptMessageHandler(forName: "kineticRouter")`. This breaks potential memory leaks where WebKit retains the session message handler indefinitely.
+5. **Layout & Scaling on Snapshots:** Use `.scaleToFill` or `.scaleAspectFill` instead of `.scaleAspectFit` for the snapshot image view, as the snapshot represents a pixel-to-pixel identical representation of the webview and shouldn't have any letterbox bars.
+6. **Complete Support for Native View Controllers:** Implement full integration for pushing native view controllers from the router stack via the `UINavigationController` push methods.
 
 ## Open questions
 

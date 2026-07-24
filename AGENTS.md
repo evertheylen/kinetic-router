@@ -1,7 +1,8 @@
 # kinetic-router — project guide
 
 A type-safe, client-side router for SolidJS, built on the W3C Navigation API.
-pnpm monorepo with a version catalog (`pnpm-workspace.yaml`).
+pnpm monorepo with a version catalog (`pnpm-workspace.yaml`). Use `pnpx` over `npx`,
+and assume node is configured with `--enable-source-maps` so there's no need for `tsx`.
 
 ## Layout
 
@@ -26,6 +27,40 @@ CI=true pnpm --filter @kinetic-router/solid exec vitest run   # one package
 
 Publishing: `./publish.sh` — patch-bumps and publishes packages changed since the
 `published` git branch, then force-moves that branch. Don't run it casually.
+
+## Adding a new package
+
+Use `solid/package.json` and `solid/tsconfig.json` as templates. Reference the
+upstream packages in `tsconfig.build.json` (native-bridge→solid→url→definition).
+Add the package to `pnpm-workspace.yaml`. Use happy-dom for DOM-dependent tests.
+
+## Implementing a new NavigationEngine
+
+Read these files, in order:
+
+- `solid/src/navigation-engine.ts` — the `NavigationEngine` interface and shared
+  types (`EntrySource`, `EngineNavigateEvent`, `NavigationIntent`, etc.)
+- `solid/src/actual-router.ts` — how the router consumes engines: `attach()`
+  receives `{ handleNavigate, handleDispose }`, `currentEntry()` is polled during
+  init, `navigate()` returns `{ committed, finished }`, `updateCurrentEntry(state)`
+  persists state
+- `solid/src/memory-engine.ts` — reference implementation
+- `solid/src/router.ts` — engines are injected via `new Router(sitemap, { engine })`
+- `solid/src/app-state.ts` — `AppState.serialize()` / `AppState.deserialize()`
+  produce/consume the serialized state flowing through history entries
+- `solid/src/router.test.ts` — test patterns using `MemoryEngine` + happy-dom
+
+### Engine-specific gotchas
+
+- `urlToLocator` (from `@kinetic-router/url`) **throws** for unmatched URLs; it
+  does not return `undefined`. Wrap in try/catch when checking whether a URL is
+  on the sitemap.
+- `slugPathToString` renders dynamic segments as `'<param>'`, not `':name'`.
+- `anchor.click()` in happy-dom triggers a real navigation (causing
+  `NetworkError` in tests). Call the click handler directly instead.
+- `NavigationEngine.navigate()` with `info.ignore: true` must resolve `committed`
+  and `finished` locally without going through `handleNavigate` — the router uses
+  this during init to normalize the initial URL.
 
 ## Core concepts
 
