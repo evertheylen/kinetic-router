@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { MemoryEngine } from './memory-engine';
-import { EngineHandlers, EngineNavigateEvent } from './navigation-engine';
+import { MemoryEngine } from './memory-engine.js';
+import { EngineHandlers, EngineNavigateEvent } from './navigation-engine.js';
 
 function mockHandlers() {
   const events: EngineNavigateEvent[] = [];

@@ -5,7 +5,7 @@ import {
   NavigationEngine,
   NavigationInfo,
   NavigationIntent,
-} from "./navigation-engine";
+} from "./navigation-engine.js";
 
 /** The default browser engine, backed by the W3C Navigation API
  * (`window.navigation`). */

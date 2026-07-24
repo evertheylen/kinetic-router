@@ -5,7 +5,7 @@ import {
   NavigationEngine,
   NavigationInfo,
   NavigationIntent,
-} from "./navigation-engine";
+} from "./navigation-engine.js";
 
 export type MemoryEntry = {
   readonly id: string,

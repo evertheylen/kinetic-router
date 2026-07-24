@@ -66,6 +66,12 @@ There are no `<Route>`/`<Link>` components and no `useNavigate`. The model is:
 
 ## Conventions & gotchas
 
+- **All internal imports must use `.js` extensions**: relative imports between
+  source files within packages (e.g. `"./foo.js"`) and deep package imports
+  (e.g. `"@kinetic-router/definition/params.js"`) must end in `.js`. Bare
+  package specifiers (`"@kinetic-router/definition"`) are fine without it;
+  they resolve via the `exports` map. TypeScript understands these as ESM
+  output paths — no bundler rewrites them.
 - **Deep imports only for `@kinetic-router/solid`**: it declares `main: dist/index.js`
   but has no `src/index.ts`; consumers use `@kinetic-router/solid/router.js` etc.
   (wildcard export map). Same wildcard exists on `definition`.
@@ -85,8 +91,7 @@ There are no `<Route>`/`<Link>` components and no `useNavigate`. The model is:
   owners, see `rendered-route.ts`).
 - `Router` init is async (`queueMicrotask`): register all `implement()` calls
   synchronously after construction; in tests, wait until `currentLocator()` is defined.
-- **Known failing tests**: 17 pre-existing failures in `url/src/deserialize.test.ts`
-  (tests pass raw strings where `urlToLocator` expects `URL`/`{pathname, search}`).
-  Not related to router work; fix separately.
+- `urlToLocator` expects `{ pathname, search }` (or a `URL` object). Tests in
+  `url/src/deserialize.test.ts` use a `parseUrl` helper to convert raw strings.
 - Browser support: the default engine requires the Navigation API (Chrome 102+,
   Safari 26.2+, Firefox 147+). There is deliberately no History-API fallback.

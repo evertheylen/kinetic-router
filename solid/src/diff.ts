@@ -1,7 +1,7 @@
 import { Route } from "@kinetic-router/definition";
 import { AnyParamDefs, ParamDef, ParamMap } from "@kinetic-router/definition/params.js";
-import { RenderedRoute } from "./rendered-route";
-import { AppState } from "./app-state";
+import { RenderedRoute } from "./rendered-route.js";
+import { AppState } from "./app-state.js";
 
 
 /** Different route entirely OR same route but untracked params changed, so rerender (or explicitly asked in navigate call) */

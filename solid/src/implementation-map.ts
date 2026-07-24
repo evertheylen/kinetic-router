@@ -1,5 +1,5 @@
 import { ImplementationMap } from "@kinetic-router/definition/implementation-map.js";
-import { Page, StaticPage } from "./page";
+import { Page, StaticPage } from "./page.js";
 import { Route } from "@kinetic-router/definition/routes.js";
 import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
 

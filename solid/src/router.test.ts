@@ -6,9 +6,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { param, route, root } from '@kinetic-router/definition';
 
-import { Router } from './router';
-import { MemoryEngine } from './memory-engine';
-import { FrameDelegate, frameDelegateAttribute, rootFrameId } from './frame';
+import { Router } from './router.js';
+import { MemoryEngine } from './memory-engine.js';
+import { FrameDelegate, frameDelegateAttribute, rootFrameId } from './frame.js';
 
 function installRootFrame() {
   const el = document.createElement('div');

@@ -1,8 +1,8 @@
 import { Accessor, createOwner, createSignal, runWithOwner, Setter } from "solid-js";
 import { AnyParamDefs, ParamDef, ParamMap, ParamValues } from "@kinetic-router/definition/params.js";
-import { RenderedRoute } from "./rendered-route";
-import { SolidRoot } from "./utils";
-import { Page } from "./page";
+import { RenderedRoute } from "./rendered-route.js";
+import { SolidRoot } from "./utils.js";
+import { Page } from "./page.js";
 import { Route } from "@kinetic-router/definition/routes.js";
 
 

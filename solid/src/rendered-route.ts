@@ -2,10 +2,10 @@ import { createContext, runWithOwner } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
 
-import { Page, PageStatus } from "./page";
-import { ParamStorage } from "./params";
-import { SolidRoot } from "./utils";
-import type { FrameDelegate } from "./frame";
+import { Page, PageStatus } from "./page.js";
+import { ParamStorage } from "./params.js";
+import { SolidRoot } from "./utils.js";
+import type { FrameDelegate } from "./frame.js";
 
 
 export type RenderedRoute = {

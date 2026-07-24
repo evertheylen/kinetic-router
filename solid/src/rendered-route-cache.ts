@@ -1,5 +1,5 @@
 import { Route } from "@kinetic-router/definition";
-import { RenderedRoute } from "./rendered-route";
+import { RenderedRoute } from "./rendered-route.js";
 
 
 export type RenderedRouteCacheEntry = {

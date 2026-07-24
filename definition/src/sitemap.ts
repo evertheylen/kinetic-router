@@ -1,4 +1,4 @@
-import { Route } from "./routes";
+import { Route } from "./routes.js";
 
 // Not using a symbol even though that might be cleanest
 // BUT it collides with symbol usage for path params!

@@ -3,16 +3,16 @@ import { AnyParamDefs, convertParamsByKey } from "@kinetic-router/definition/par
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 
-import { Page, PageStatus } from "./page";
-import { AppState, SerializedAppState } from "./app-state";
-import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame";
-import { createParamStorage, mapParamObjectToParamInitMap, ParamInit, ParamStorage, ReactiveValue } from "./params";
-import { renderRoute, RenderedRoute } from "./rendered-route";
-import { SolidImplementationMap } from "./implementation-map";
+import { Page, PageStatus } from "./page.js";
+import { AppState, SerializedAppState } from "./app-state.js";
+import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame.js";
+import { createParamStorage, mapParamObjectToParamInitMap, ParamInit, ParamStorage, ReactiveValue } from "./params.js";
+import { renderRoute, RenderedRoute } from "./rendered-route.js";
+import { SolidImplementationMap } from "./implementation-map.js";
 import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
-import { calculateRouteChanges, RouteChange } from "./diff";
-import { RenderedRouteCache } from "./rendered-route-cache";
-import { EngineNavigateEvent, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine";
+import { calculateRouteChanges, RouteChange } from "./diff.js";
+import { RenderedRouteCache } from "./rendered-route-cache.js";
+import { EngineNavigateEvent, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
 
 
 export class ActualRouter<

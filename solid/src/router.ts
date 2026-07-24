@@ -1,11 +1,11 @@
 import { RootSitemap } from "@kinetic-router/definition/root.js";
-import { SolidImplementationMap } from "./implementation-map";
-import { ActualRouter } from "./actual-router";
+import { SolidImplementationMap } from "./implementation-map.js";
+import { ActualRouter } from "./actual-router.js";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator } from "@kinetic-router/definition";
 import { Accessor, createSignal, Setter } from "solid-js";
-import { NavigationEngine } from "./navigation-engine";
-import { NavigationApiEngine } from "./navigation-api-engine";
+import { NavigationEngine } from "./navigation-engine.js";
+import { NavigationApiEngine } from "./navigation-api-engine.js";
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
