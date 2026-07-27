@@ -48,6 +48,7 @@ public final class KineticSession: NSObject {
         webView = WKWebView(frame: .zero, configuration: wkConfig)
         webView.allowsBackForwardNavigationGestures = false
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        webView.scrollView.delaysContentTouches = false
 
         self.configuration = configuration
         self.bundleURL = bundleURL

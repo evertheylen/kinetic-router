@@ -1,0 +1,22 @@
+name: ExampleApp
+options:
+  bundleIdPrefix: com.kinetic-router
+  deploymentTarget:
+    iOS: "26.0"
+packages:
+  KineticRouterNative:
+    path: ../ios
+targets:
+  ExampleApp:
+    type: application
+    platform: iOS
+    sources:
+      - ExampleApp
+    dependencies:
+      - package: KineticRouterNative
+        product: KineticRouterNative
+    settings:
+      base:
+        INFOPLIST_FILE: ExampleApp/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.kinetic-router.example-app
+        SWIFT_VERSION: "6.0"

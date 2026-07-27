@@ -48,11 +48,13 @@ final class VisitableViewController: UIViewController {
         snapshotImageView.contentMode = .scaleToFill
         snapshotImageView.frame = view.bounds
         snapshotImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        snapshotImageView.isUserInteractionEnabled = false
         view.addSubview(snapshotImageView)
 
         placeholderView.backgroundColor = .systemBackground
         placeholderView.frame = view.bounds
         placeholderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        placeholderView.isUserInteractionEnabled = false
         view.addSubview(placeholderView)
 
         applyOverlay()
@@ -78,10 +80,12 @@ final class VisitableViewController: UIViewController {
         loadViewIfNeeded()
 
         if webView.superview !== view {
+            webView.scrollView.panGestureRecognizer.isEnabled = false
             webView.removeFromSuperview()
             webView.frame = view.bounds
             webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.insertSubview(webView, at: 0)
+            webView.scrollView.panGestureRecognizer.isEnabled = true
         }
     }
 

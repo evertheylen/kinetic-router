@@ -20,7 +20,7 @@ public final class KineticNavigationController: UINavigationController {
 
     public override func viewDidLoad() {
         super.viewDidLoad()
-        // Keep the default interactive pop gesture enabled.
+        interactivePopGestureRecognizer?.delegate = self
         interactivePopGestureRecognizer?.isEnabled = true
     }
 
@@ -245,6 +245,15 @@ extension KineticNavigationController: UINavigationControllerDelegate {
                 state: entry?.state
             )
         }
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension KineticNavigationController: UIGestureRecognizerDelegate {
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === interactivePopGestureRecognizer else { return true }
+        return viewControllers.count > 1
     }
 }
 
