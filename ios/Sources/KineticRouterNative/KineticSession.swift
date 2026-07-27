@@ -13,7 +13,11 @@ public final class KineticSession: NSObject {
     public let entryStore = EntryStore()
     public let configuration: RouteConfiguration
 
-    weak var delegate: KineticSessionDelegate?
+    weak var delegate: KineticSessionDelegate? {
+        didSet {
+            synchronizeDelegate()
+        }
+    }
 
     private var isReady = false
     private var bundleVersion: String?
@@ -24,6 +28,11 @@ public final class KineticSession: NSObject {
     /// renderCompleted/renderFailed not received yet). While set, incoming
     /// proposals are coalesced (dropped) — double-taps, taps mid-transition.
     private var visitInFlightEntryId: String?
+
+    /// The entry replaced by an in-flight replace navigation. Keep it until
+    /// rendering succeeds so a failed replacement can return to the prior page.
+    private var replacedEntry: KineticEntry?
+    private var replacementEntryId: String?
 
     /// The modally presented entry, if any. Lives outside `entryStore` so the
     /// main stack keeps mirroring the navigation controller exactly.
@@ -47,7 +56,12 @@ public final class KineticSession: NSObject {
 
         webView = WKWebView(frame: .zero, configuration: wkConfig)
         webView.allowsBackForwardNavigationGestures = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        // Native chrome overlays the page; web content owns its own safe-area
+        // treatment through viewport-fit and CSS env(safe-area-inset-*).
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.bounces = false
+        webView.scrollView.alwaysBounceVertical = false
+        webView.scrollView.alwaysBounceHorizontal = false
         webView.scrollView.delaysContentTouches = false
 
         self.configuration = configuration
@@ -120,11 +134,26 @@ public final class KineticSession: NSObject {
             // renders the initial page on its own — no render call needed.
             entryStore.removeAllEntries()
             modalEntry = nil
+            replacedEntry = nil
+            replacementEntryId = nil
             let initialEntry = KineticEntry(id: msg.initialEntryId, url: msg.url)
             entryStore.append(initialEntry)
             liveEntryId = initialEntry.id
 
             delegate?.bridgeDidConnect(initialEntry: initialEntry, withWebView: webView)
+        }
+    }
+
+    /// SwiftUI may construct the session before its representable creates the
+    /// navigation controller. Attach an already-ready session when its delegate
+    /// arrives instead of depending on timing between the page load and view
+    /// controller creation.
+    private func synchronizeDelegate() {
+        guard isReady, !isRecovering, let delegate else { return }
+        if entryStore.count() == 1, let initialEntry = entryStore.last {
+            delegate.bridgeDidConnect(initialEntry: initialEntry, withWebView: webView)
+        } else if !entryStore.entries.isEmpty {
+            delegate.restoreStack(entries: entryStore.entries, withWebView: webView)
         }
     }
 
@@ -172,6 +201,10 @@ public final class KineticSession: NSObject {
             visitInFlightEntryId = nil
         }
         liveEntryId = msg.entryId
+        if replacementEntryId == msg.entryId {
+            replacedEntry = nil
+            replacementEntryId = nil
+        }
         if modalEntry?.id == msg.entryId {
             modalEntry?.title = msg.title
         } else {
@@ -184,7 +217,8 @@ public final class KineticSession: NSObject {
         if visitInFlightEntryId == msg.entryId {
             visitInFlightEntryId = nil
         }
-        delegate?.renderFailed(entryId: msg.entryId, error: msg.error)
+        let previousEntry = rollbackReplacement(for: msg.entryId)
+        delegate?.renderFailed(entryId: msg.entryId, error: msg.error, replacedEntry: previousEntry)
     }
 
     private func handleTitleChanged(_ msg: TitleChangedMessage) {
@@ -268,7 +302,7 @@ public final class KineticSession: NSObject {
         } catch {
             print("[KineticRouterNative] render call failed: \(error)")
             visitInFlightEntryId = nil
-            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription)
+            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription, replacedEntry: nil)
         }
     }
 
@@ -279,7 +313,10 @@ public final class KineticSession: NSObject {
         let frozen = await snapshotCurrent()
 
         let entry = KineticEntry(id: UUID().uuidString, url: msg.url, state: msg.state)
-        _ = entryStore.replace(at: entryStore.count() - 1, with: entry)
+        guard var previousEntry = entryStore.replace(at: entryStore.count() - 1, with: entry) else { return }
+        previousEntry.snapshot = frozen
+        replacedEntry = previousEntry
+        replacementEntryId = entry.id
         visitInFlightEntryId = entry.id
 
         delegate.replaceTopEntry(entry, withWebView: webView, frozen: frozen)
@@ -291,7 +328,12 @@ public final class KineticSession: NSObject {
         } catch {
             print("[KineticRouterNative] replace render call failed: \(error)")
             visitInFlightEntryId = nil
-            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription)
+            let previousEntry = rollbackReplacement(for: entry.id)
+            delegate.renderFailed(
+                entryId: entry.id,
+                error: error.localizedDescription,
+                replacedEntry: previousEntry
+            )
         }
     }
 
@@ -312,7 +354,7 @@ public final class KineticSession: NSObject {
         } catch {
             print("[KineticRouterNative] modal render call failed: \(error)")
             visitInFlightEntryId = nil
-            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription)
+            delegate.renderFailed(entryId: entry.id, error: error.localizedDescription, replacedEntry: nil)
         }
     }
 
@@ -341,6 +383,8 @@ public final class KineticSession: NSObject {
 
         entryStore.removeAllEntries()
         modalEntry = nil
+        replacedEntry = nil
+        replacementEntryId = nil
         visitInFlightEntryId = nil
         liveEntryId = nil
         for e in entries {
@@ -351,6 +395,13 @@ public final class KineticSession: NSObject {
 
         let setStackEntries = entries.map { SetStackEntry(entryId: $0.entryId, url: $0.url, state: $0.state) }
         try? await bridge.setStack(setStackEntries)
+    }
+
+    /// Starts a visit from native chrome (for example, the persistent tab bar).
+    /// The bridge handles it exactly like an intercepted same-origin link.
+    public func visit(url: String) async throws {
+        guard isReady else { throw KineticError.notReady }
+        try await bridge.visit(url: url)
     }
 
     // ── Bundle loading / process-death recovery ──────────────────────
@@ -365,6 +416,16 @@ public final class KineticSession: NSObject {
 
     func reloadBundle() {
         loadBundle()
+    }
+
+    private func rollbackReplacement(for entryId: String) -> KineticEntry? {
+        guard replacementEntryId == entryId, let replacedEntry else { return nil }
+        self.replacedEntry = nil
+        replacementEntryId = nil
+        if let index = entryStore.entries.lastIndex(where: { $0.id == entryId }) {
+            _ = entryStore.replace(at: index, with: replacedEntry)
+        }
+        return replacedEntry
     }
 
     // Note: no deinit needed. WebKit retains the Bridge (via the user content

@@ -6,6 +6,10 @@ import WebKit
 /// with snapshotting so transitions are 100% native.
 public final class KineticNavigationController: UINavigationController {
     unowned let session: KineticSession
+    private var replacedViewControllers: [String: VisitableViewController] = [:]
+    private let menuBar = UITabBar()
+    private var menuBarHeightConstraint: NSLayoutConstraint!
+    private var selectedMenuItem: MenuItem?
 
     init(session: KineticSession) {
         self.session = session
@@ -22,6 +26,14 @@ public final class KineticNavigationController: UINavigationController {
         super.viewDidLoad()
         interactivePopGestureRecognizer?.delegate = self
         interactivePopGestureRecognizer?.isEnabled = true
+        configureMenuBar()
+    }
+
+    public override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        // Include the home-indicator area in the glass surface, like a system
+        // tab bar, rather than leaving a separate uncovered strip below it.
+        menuBarHeightConstraint?.constant = 49 + view.safeAreaInsets.bottom
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -76,6 +88,62 @@ public final class KineticNavigationController: UINavigationController {
             .compactMap { $0 as? VisitableViewController }
             .first { $0.entryId == entryId }
     }
+
+    private func configureMenuBar() {
+        let home = UITabBarItem(
+            title: "Home",
+            image: UIImage(systemName: "house"),
+            selectedImage: UIImage(systemName: "house.fill")
+        )
+        home.tag = MenuItem.home.rawValue
+        let account = UITabBarItem(
+            title: "Account",
+            image: UIImage(systemName: "person.crop.circle"),
+            selectedImage: UIImage(systemName: "person.crop.circle.fill")
+        )
+        account.tag = MenuItem.account.rawValue
+        let agencies = UITabBarItem(
+            title: "Agencies",
+            image: UIImage(systemName: "building.2"),
+            selectedImage: UIImage(systemName: "building.2.fill")
+        )
+        agencies.tag = MenuItem.agencies.rawValue
+
+        menuBar.delegate = self
+        menuBar.items = [home, account, agencies]
+        menuBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(menuBar)
+        menuBarHeightConstraint = menuBar.heightAnchor.constraint(equalToConstant: 49)
+        NSLayoutConstraint.activate([
+            menuBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            menuBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            menuBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            menuBarHeightConstraint,
+        ])
+        updateSelectedMenuItem()
+    }
+
+    private enum MenuItem: Int {
+        case home
+        case account
+        case agencies
+    }
+
+    private func menuItem(for url: String) -> MenuItem? {
+        let path = URL(string: url)?.path ?? url
+        if path == "/" || path == "/home" { return .home }
+        if path.hasPrefix("/account") { return .account }
+        if path.hasPrefix("/explore") { return .agencies }
+        return nil
+    }
+
+    private func updateSelectedMenuItem(for url: String? = nil) {
+        if let url {
+            selectedMenuItem = menuItem(for: url)
+        }
+        guard let selectedMenuItem else { return }
+        menuBar.selectedItem = menuBar.items?.first { $0.tag == selectedMenuItem.rawValue }
+    }
 }
 
 // MARK: - KineticSessionDelegate
@@ -93,6 +161,7 @@ extension KineticNavigationController: KineticSessionDelegate {
         vc.attachWebView(webView)
         vc.reveal() // the page is already live; nothing to wait for
         setViewControllers([vc], animated: false)
+        updateSelectedMenuItem(for: initialEntry.url)
     }
 
     func pushEntry(_ entry: KineticEntry, withWebView webView: WKWebView, configuration: RouteConfiguration) {
@@ -115,6 +184,10 @@ extension KineticNavigationController: KineticSessionDelegate {
     func replaceTopEntry(_ entry: KineticEntry, withWebView webView: WKWebView, frozen: UIImage?) {
         let nav = activeNavigationController
         guard !nav.viewControllers.isEmpty else { return }
+
+        if let previous = nav.viewControllers.last as? VisitableViewController {
+            replacedViewControllers[entry.id] = previous
+        }
 
         let vc = VisitableViewController(entry: entry)
         if let frozen {
@@ -142,8 +215,11 @@ extension KineticNavigationController: KineticSessionDelegate {
         let modalNav = UINavigationController(rootViewController: vc)
         modalNav.modalPresentationStyle = .pageSheet
         modalNav.delegate = self // didShow for pushes/pops inside the modal
-        modalNav.presentationController?.delegate = self // dismissal detection
-        present(modalNav, animated: true)
+        present(modalNav, animated: true) { [weak self, weak modalNav] in
+            // UIKit creates the presentation controller during presentation.
+            guard let self else { return }
+            modalNav?.presentationController?.delegate = self
+        }
     }
 
     func pushNativeViewController(_ viewController: UIViewController) {
@@ -175,12 +251,41 @@ extension KineticNavigationController: KineticSessionDelegate {
     }
 
     func renderCompleted(entryId: String, title: String) {
+        replacedViewControllers.removeValue(forKey: entryId)
         guard let vc = visitableController(for: entryId) else { return }
         vc.reveal()
         vc.navigationItem.title = title
+        updateSelectedMenuItem(for: vc.url)
     }
 
-    func renderFailed(entryId: String, error: String) {
+    func renderFailed(entryId: String, error: String, replacedEntry: KineticEntry?) {
+        if let replacedEntry,
+           let previousVC = replacedViewControllers.removeValue(forKey: entryId) {
+            let nav = activeNavigationController
+            guard !nav.viewControllers.isEmpty else { return }
+
+            if let snapshot = replacedEntry.snapshot {
+                previousVC.show(snapshot: snapshot)
+            } else {
+                previousVC.showPlaceholder()
+            }
+            previousVC.attachWebView(session.webView)
+
+            var stack = nav.viewControllers
+            stack[stack.count - 1] = previousVC
+            nav.setViewControllers(stack, animated: false)
+
+            Task { @MainActor [session] in
+                try? await session.bridge.dispose(entryId: entryId)
+                try? await session.bridge.render(
+                    entryId: replacedEntry.id,
+                    url: replacedEntry.url,
+                    state: replacedEntry.state
+                )
+            }
+            return
+        }
+
         // failed modal: dismiss it and restore the webview to the stack top
         if let modalNav = presentedViewController as? UINavigationController,
            let modalRoot = modalNav.viewControllers.first as? VisitableViewController,
@@ -244,6 +349,28 @@ extension KineticNavigationController: UINavigationControllerDelegate {
                 url: entry?.url ?? visitableVC.url,
                 state: entry?.state
             )
+        }
+    }
+}
+
+// MARK: - UITabBarDelegate
+
+extension KineticNavigationController: UITabBarDelegate {
+    public func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
+        let url: String
+        switch MenuItem(rawValue: item.tag) {
+        case .some(.home):
+            url = "/home"
+        case .some(.account):
+            url = "/account"
+        case .some(.agencies):
+            url = "/explore"
+        case nil:
+            return
+        }
+
+        Task { @MainActor [session] in
+            try? await session.visit(url: url)
         }
     }
 }

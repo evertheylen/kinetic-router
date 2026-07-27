@@ -58,6 +58,10 @@ public final class Bridge: NSObject, WKScriptMessageHandler {
         try await evaluate(command: "setStack", args: [jsonLiteral(entries)])
     }
 
+    func visit(url: String) async throws {
+        try await evaluate(command: "visit", args: [jsonLiteral(url)])
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     /// `void` so the script's result is always `undefined`: WKWebView's

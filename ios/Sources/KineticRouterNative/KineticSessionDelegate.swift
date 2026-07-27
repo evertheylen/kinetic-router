@@ -41,8 +41,9 @@ protocol KineticSessionDelegate: AnyObject {
     /// A render completed — reveal the live content for this entry.
     func renderCompleted(entryId: String, title: String)
 
-    /// A render failed — unwind and surface the error.
-    func renderFailed(entryId: String, error: String)
+    /// A render failed — unwind and surface the error. `replacedEntry` is the
+    /// prior top-level entry when a replace must be rolled back.
+    func renderFailed(entryId: String, error: String, replacedEntry: KineticEntry?)
 
     /// The leaf page's title changed reactively (drives the nav bar).
     func titleChanged(entryId: String, title: String)

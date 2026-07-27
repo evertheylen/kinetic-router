@@ -8,6 +8,7 @@ struct ExampleApp: App {
     var body: some Scene {
         WindowGroup {
             KineticNavigationView(session: session)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
         }
     }

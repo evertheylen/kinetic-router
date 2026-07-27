@@ -448,6 +448,11 @@ export class NativeBridgeEngine implements NavigationEngine {
       setStack: (entries: SetStackEntry[]) => {
         this.setStack(entries);
       },
+      visit: (url: string) => {
+        // Native chrome uses the same proposal path as an intercepted link.
+        // Swift still decides whether and how to render the destination.
+        this.navigate({ url, state: undefined, history: 'push' });
+      },
     };
   }
 

@@ -129,17 +129,27 @@ describe('NativeBridgeEngine', () => {
       expect(freshEngine.currentEntry()!.url).toEqual({ pathname: '/home', search: '' });
     });
 
-    it('exposes window.__kineticNative with render, dispose, and setStack', () => {
+    it('exposes window.__kineticNative with render, dispose, setStack, and visit', () => {
       expect(window.__kineticNative).toBeDefined();
       expect(typeof window.__kineticNative!.render).toBe('function');
       expect(typeof window.__kineticNative!.dispose).toBe('function');
       expect(typeof window.__kineticNative!.setStack).toBe('function');
+      expect(typeof window.__kineticNative!.visit).toBe('function');
     });
 
     it('__kineticNative wrappers never return a value (WKWebView chokes on promises)', () => {
       const result = window.__kineticNative!.render('e1', '/home', null);
       expect(result).toBeUndefined();
       mock.resolveNavigate();
+    });
+
+    it('proposes a visit requested by native chrome', () => {
+      window.__kineticNative!.visit('/home');
+
+      const message = bridge.messages[bridge.messages.length - 1]!;
+      expect(message.type).toBe('visitProposed');
+      expect(message.url).toBe('/home');
+      expect(message.action).toBe('push');
     });
   });
 

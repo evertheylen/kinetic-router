@@ -34,6 +34,8 @@ final class VisitableViewController: UIViewController {
         entryId = entry.id
         url = entry.url
         super.init(nibName: nil, bundle: nil)
+        edgesForExtendedLayout = .all
+        extendedLayoutIncludesOpaqueBars = true
     }
 
     required init?(coder: NSCoder) { nil }
