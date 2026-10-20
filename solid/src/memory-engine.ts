@@ -1,7 +1,7 @@
 import {
   EngineHandlers,
   EngineNavigationResult,
-  EntrySource,
+  EngineEntry,
   NavigationEngine,
   NavigationInfo,
   NavigationIntent,
@@ -9,6 +9,7 @@ import {
 
 export type MemoryEntry = {
   readonly id: string,
+  readonly key: string,
   url: string,
   state: unknown,
 };
@@ -22,12 +23,15 @@ export class MemoryEngine implements NavigationEngine {
   protected nextId = 0;
 
   constructor(initialUrl: string = '/') {
-    this.stack = [{ id: this.mintId(), url: initialUrl, state: undefined }];
+    const id = this.mintId();
+    this.stack = [{ id, key: `key:${id}`, url: initialUrl, state: undefined }];
   }
 
   /** The full history stack, for inspection in tests/tooling. */
-  entries(): ReadonlyArray<Readonly<MemoryEntry>> {
-    return this.stack;
+  entries(): ReadonlyArray<Readonly<MemoryEntry> & EngineEntry> {
+    return this.stack.map((entry, index) => ({
+      ...entry, index, getState: () => entry.state,
+    }));
   }
 
   currentIndex() {
@@ -41,7 +45,7 @@ export class MemoryEngine implements NavigationEngine {
     this.handlers = handlers;
   }
 
-  currentEntry(): EntrySource {
+  currentEntry(): EngineEntry {
     return this.toSource(this.stack[this.index]);
   }
 
@@ -52,7 +56,11 @@ export class MemoryEngine implements NavigationEngine {
   navigate(intent: NavigationIntent): EngineNavigationResult {
     const handlers = this.requireHandlers();
     const from = this.stack[this.index];
-    const entry: MemoryEntry = { id: this.mintId(), url: intent.url, state: intent.state };
+    const id = this.mintId();
+    const entry: MemoryEntry = {
+      id, key: intent.history === 'replace' ? from.key : `key:${id}`,
+      url: intent.url, state: intent.state,
+    };
 
     if (!intent.info?.ignore) {
       // pre-commit: the outgoing entry is still current
@@ -93,29 +101,39 @@ export class MemoryEngine implements NavigationEngine {
   /** Traverse the existing stack by delta (back: -1, forward: +1),
    * like the back/forward browser buttons or a native pop. */
   traverse(delta: number): EngineNavigationResult {
-    const handlers = this.requireHandlers();
-    const from = this.stack[this.index];
     const targetIndex = this.index + delta;
     const target = this.stack[targetIndex];
-
     if (target === undefined) {
       throw new Error(`Cannot traverse by ${delta}: no entry at index ${targetIndex}`);
     }
+    return this.traverseTo(target.key);
+  }
+
+  traverseTo(key: string, info: NavigationInfo = {}): EngineNavigationResult {
+    const handlers = this.requireHandlers();
+    const from = this.stack[this.index];
+    const targetIndex = this.stack.findIndex(entry => entry.key === key);
+    const target = this.stack[targetIndex];
+    if (target === undefined) throw new Error(`Cannot traverse to missing key ${key}`);
+    if (targetIndex === this.index) {
+      const committed = Promise.resolve(target);
+      return { committed, finished: committed };
+    }
 
     // pre-commit: the outgoing entry is still current
-    handlers.handleBeforeCommit?.();
+    if (!info.ignore) handlers.handleBeforeCommit?.();
 
     this.index = targetIndex;
-
-    const finished = handlers.handleNavigate({
+    const committed = Promise.resolve(target);
+    const finished = info.ignore ? committed : handlers.handleNavigate({
       navigationType: 'traverse',
       fromId: from.id,
       committedId: target.id,
       destination: this.toSource(target),
-      info: {},
+      info,
     });
 
-    return { committed: Promise.resolve(target), finished };
+    return { committed, finished };
   }
 
   back() {
@@ -130,12 +148,14 @@ export class MemoryEngine implements NavigationEngine {
     return `__memory__${this.nextId++}`;
   }
 
-  protected toSource(entry: MemoryEntry): EntrySource {
+  protected toSource(entry: MemoryEntry): EngineEntry {
     // urls are stored as given (usually relative); parse them against a
     // dummy base so consumers get a uniform { pathname, search } shape
     const parsed = new URL(entry.url, 'memory://app');
     return {
       id: entry.id,
+      key: entry.key,
+      index: this.stack.indexOf(entry),
       url: { pathname: parsed.pathname, search: parsed.search },
       getState: () => entry.state,
     };

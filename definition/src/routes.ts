@@ -6,6 +6,13 @@ export type Locator<ParamDefs extends Record<string, ParamDef<any>>> = {
   values: ParamValues<ParamDefs>
 }
 
+/** Contract for a future `route` prop: explicit values use a Locator; a bare
+ * Route is allowed only when no values are required. Convert a bare Route
+ * with locate({}); never infer values from the currently displayed page. */
+export type RouteTarget<ParamDefs extends AnyParamDefs> =
+  | Locator<ParamDefs>
+  | ({} extends ParamValues<ParamDefs> ? Route<ParamDefs> : never);
+
 export class Route<ParamDefs extends Record<string, ParamDef<any>> = any> {
   public paramDefs: ParamDefs;
   /** Ancestor nest routes, ordered from outermost to innermost (closest). `this` would come at the end. Empty for non-nested routes. */

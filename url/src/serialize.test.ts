@@ -1,7 +1,51 @@
 import { describe, it, expect } from 'vitest';
 import { index, param, route, root } from '@kinetic-router/definition';
-import { locatorToUrl } from './serialize.js';
+import { getSlugPath } from '@kinetic-router/definition/root.js';
+import { locatorToUrl, serializePathParams } from './serialize.js';
 import { userId, postId, numberSerde } from './test_fixtures.js';
+
+describe('serializePathParams', () => {
+  it('projects a prefix by definition identity despite renamed keys, excluding search and hidden params', () => {
+    const user = param.path<string>(), post = param.path<number>(numberSerde);
+    const userRoot = route({ user });
+    const detail = route({ author: user, post, q: param.search<string>(), draft: param.hidden<string>() });
+    const sm = root({ users: { [user.$]: { [index]: userRoot, posts: { [post.$]: detail } } } });
+    const values = { author: 'alice', post: 42, q: 'recent', draft: 'private' };
+    const locator = detail.locate(values);
+    const prefix = serializePathParams(sm, locator, getSlugPath(sm, userRoot)!);
+    expect([...prefix]).toEqual([[user, 'alice']]);
+    expect([...serializePathParams(sm, locator, getSlugPath(sm, detail)!)]).toEqual([[user, 'alice'], [post, '42']]);
+    expect(locatorToUrl(sm, locator)).toBe('/users/alice/posts/42?q=recent');
+    values.author = 'bob';
+    expect(prefix.get(user)).toBe('alice'); // The snapshot does not retain mutable values.
+  });
+
+  it('shares parameter and root serde precedence with URL generation', () => {
+    const custom = param.path<{ id: number }>({
+      serialize: value => `u-${value.id}`,
+      deserialize: value => ({ id: Number(String(value).slice(2)) }),
+    });
+    const fallback = param.path<number>();
+    const r = route({ custom, fallback });
+    const sm = root({ [custom.$]: { [fallback.$]: r } }, numberSerde);
+    const locator = r.locate({ custom: { id: 7 }, fallback: 42 });
+    const params = serializePathParams(sm, locator, getSlugPath(sm, r)!);
+    expect([...params]).toEqual([[custom, 'u-7'], [fallback, '42']]);
+    expect(locatorToUrl(sm, locator)).toBe('/u-7/42');
+  });
+
+  it('returns an empty snapshot for static and root-index paths', () => {
+    const r = route({ q: param.search<string>(), draft: param.hidden<string>() });
+    const sm = root({ [index]: r });
+    expect(serializePathParams(sm, r.locate({ q: 'recent', draft: 'private' }), [])).toEqual(new Map());
+  });
+
+  it('rejects a path parameter not present in the locator definitions', () => {
+    const r = route({}), missing = param.path<string>();
+    const sm = root({ home: r });
+    expect(() => serializePathParams(sm, r.locate({}), [missing])).toThrow(/no matching key/);
+  });
+});
 
 describe('locatorToUrl', () => {
   it('handles a simple SubPaths sitemap with no params', () => {
@@ -151,6 +195,32 @@ describe('locatorToUrl', () => {
     expect(locatorToUrl(sm, usersIndex.locate({}))).toBe('/users');
     expect(locatorToUrl(sm, quuzIndex.locate({ userId: 'bob' }))).toBe('/users/bob/foo/bar/quuz');
     expect(locatorToUrl(sm, postRoute.locate({ userId: 'bob', postId: 3 }))).toBe('/users/bob/posts/3');
+  });
+
+  it('resolves raw alias chains and transformed parameters without mutating the input', () => {
+    const id = param.path<number>(numberSerde);
+    const target = route({ id, q: param.search<string>(), token: param.hidden<string>() });
+    const middle = route({ value: param.hidden<number>() }).aliasTo(p =>
+      target.locate({ id: p.value, q: 'converted', token: 'private' }));
+    const alias = route({ raw: param.hidden<string>() }).aliasTo(p =>
+      middle.locate({ value: Number(p.raw) }));
+    const sm = root({ [index]: alias, users: { [id.$]: target } });
+    const locator = { route: alias, values: { raw: '42' } };
+    expect(locatorToUrl(sm, locator)).toBe('/users/42?q=converted');
+    expect(locator.route).toBe(alias);
+    expect(locator.values).toEqual({ raw: '42' });
+  });
+
+  it('does not require the alias itself to be registered', () => {
+    const target = route({});
+    const alias = route({}).aliasTo(() => target.locate({}));
+    expect(locatorToUrl(root({ target }), { route: alias, values: {} })).toBe('/target');
+  });
+
+  it('rejects an unregistered alias destination even when the alias is registered', () => {
+    const target = route({});
+    const alias = route({}).aliasTo(() => target.locate({}));
+    expect(() => locatorToUrl(root({ alias }), { route: alias, values: {} })).toThrow(/not registered/);
   });
 
   it('throws when route is not in the sitemap', () => {

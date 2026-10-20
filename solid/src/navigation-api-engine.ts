@@ -1,7 +1,7 @@
 import {
   EngineHandlers,
   EngineNavigationResult,
-  EntrySource,
+  EngineEntry,
   NavigationEngine,
   NavigationInfo,
   NavigationIntent,
@@ -16,6 +16,7 @@ export class NavigationApiEngine implements NavigationEngine {
   protected watchedEntries = new WeakSet<NavigationHistoryEntry>();
 
   attach(handlers: EngineHandlers) {
+    if (this.handlers !== undefined) throw new Error('NavigationApiEngine is already attached');
     this.handlers = handlers;
 
     // watch pre-existing entries (session restore) for disposal
@@ -40,29 +41,25 @@ export class NavigationApiEngine implements NavigationEngine {
         return;
       }
 
-      //printNavigationState();
-
       // the listener runs pre-commit: the outgoing entry is still current
       handlers.handleBeforeCommit?.();
 
       const fromId = window.navigation.currentEntry!.id;
-      const watchDispose = (entry: NavigationHistoryEntry) => this.watchDispose(entry);
 
       event.intercept({
-        handler() {
-          // major WTF: event.destination is different before the handler!
-          //console.debug(`Intercepting ${event.navigationType} navigation `, event);
+        handler: () => {
+          // Read the final identity after commit, not from the pre-commit destination.
           const committedEntry = window.navigation.currentEntry!;
 
           // entries minted by link clicks / traversals never pass through
           // navigate(); watch them here so handleDispose fires for them too
-          watchDispose(committedEntry);
+          this.watchDispose(committedEntry);
 
           return handlers.handleNavigate({
             navigationType: event.navigationType as 'push' | 'replace' | 'traverse',
             fromId,
             committedId: committedEntry.id,
-            destination: event.destination,
+            destination: committedEntry,
             info,
           });
         },
@@ -72,15 +69,19 @@ export class NavigationApiEngine implements NavigationEngine {
     window.navigation.addEventListener('navigateerror', (event) => {
       console.error("NAVIGATION ERROR");
       console.error(event.error);
-    })
-
-    window.navigation.addEventListener('navigatesuccess', (event) => {
-      //console.debug('navigate success...');
     });
   }
 
-  currentEntry(): EntrySource | undefined {
+  currentEntry(): EngineEntry | undefined {
     return window.navigation.currentEntry ?? undefined;
+  }
+
+  entries(): readonly EngineEntry[] {
+    return window.navigation.entries();
+  }
+
+  traverseTo(key: string, info?: NavigationInfo): EngineNavigationResult {
+    return window.navigation.traverseTo(key, { info });
   }
 
   updateCurrentEntry(state: unknown) {
@@ -94,8 +95,9 @@ export class NavigationApiEngine implements NavigationEngine {
       info: intent.info,
     });
 
-    // covers `ignore` navigations, which bypass the intercept handler
-    res.committed?.then(entry => this.watchDispose(entry));
+    // Covers `ignore` navigations, which bypass interception. Observe rejection
+    // too, so this listener cannot orphan a rejected promise; callers keep res.
+    void res.committed?.then(entry => this.watchDispose(entry), () => {});
 
     return res;
   }

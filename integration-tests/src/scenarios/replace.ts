@@ -9,7 +9,7 @@ export const replace: Scenario = {
     const home = route({}), login = route({}), account = route({});
     return { sitemap: root({ home, login, account }), pages: [
       [home, simplePage('Home', { Login: { to: login } })],
-      [login, simplePage('Login', { Continue: { to: account, replace: true } })],
+      [login, simplePage('Login', { Continue: { to: account, mode: 'replace' } })],
       [account, simplePage('Account')],
     ] };
   },

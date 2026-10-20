@@ -4,8 +4,8 @@
 // Solid rendering setup is needed.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { param, route, root } from '@kinetic-router/definition';
-import { onCleanup, useContext } from 'solid-js';
+import { index, param, route, root } from '@kinetic-router/definition';
+import { createSignal, onCleanup, useContext } from 'solid-js';
 
 import { Router } from './router.js';
 import { MemoryEngine, type MemoryEntry } from './memory-engine.js';
@@ -96,7 +96,7 @@ function createNestedApp(
   const outside = route({});
   const routes = { outer, layout, alpha, beta, outside };
   type Name = keyof typeof routes;
-  const sitemap = root({ nested: { alpha, beta }, outside });
+  const sitemap = root({ nested: { [index]: outer, alpha, beta }, outside });
   const router = new Router(sitemap, { engine, maxCachedPages });
   const counters = { outer: 0, layout: 0, alpha: 0, beta: 0, outside: 0 };
   const cleanups = { ...counters };
@@ -213,6 +213,7 @@ describe('Router on a MemoryEngine', () => {
     expect(app.frame.textContent).toBe('home page');
     expect(app.frame.firstChild).toBe(homeNode);
     expect(app.router.currentLocator()?.route).toBe(app.routes.home);
+    await vi.waitFor(() => expect(document.title).toBe('Home'));
 
     await app.engine.forward().finished;
     expect(app.frame.textContent).toBe('user alice');
@@ -220,6 +221,38 @@ describe('Router on a MemoryEngine', () => {
 
     // neither page was rendered again
     expect(app.counters).toEqual({ home: 1, user: 1 });
+    await vi.waitFor(() => expect(document.title).toBe('User'));
+  });
+
+  it('updates reactive params without writing unchanged untracked values', async () => {
+    const home = route({});
+    const detail = route({ constant: param.hidden<number>(), live: param.hidden<number>() });
+    const engine = new MemoryEngine('/home');
+    const router = new Router(root({ home, detail }), { engine });
+    router.implement(home, { untrackedKeys: [], async render() { return () => ({ html: document.createElement('div'), title: 'Home' }); } });
+    const [suffix, setSuffix] = createSignal('');
+    const render = vi.fn(async () => (params: { live: number }) => ({
+      html: document.createElement('div'), get title() { return `Live ${params.live}${suffix()}`; },
+    }));
+    router.implement(detail, { untrackedKeys: ['constant'], render });
+    const frame = installRootFrame();
+    await vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
+    await router.navigate(detail.locate({ constant: 1, live: 1 })).finished;
+    const node = frame.firstChild;
+    await router.navigate(detail.locate({ constant: 1, live: 2 })).finished;
+    expect(render).toHaveBeenCalledOnce();
+    expect(frame.firstChild).toBe(node);
+    await vi.waitFor(() => expect(document.title).toBe('Live 2'));
+    await router.navigate(detail.locate({ constant: 2, live: 2 })).finished;
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(frame.firstChild).not.toBe(node);
+    await router.navigate(home.locate({})).finished;
+    await vi.waitFor(() => expect(document.title).toBe('Home'));
+    setSuffix(' updated in background');
+    await new Promise(resolve => setTimeout(resolve));
+    expect(document.title).toBe('Home');
+    await engine.back().finished;
+    await vi.waitFor(() => expect(document.title).toBe('Live 2 updated in background'));
   });
 
   it('replace navigation does not grow the history stack', async () => {
@@ -228,7 +261,7 @@ describe('Router on a MemoryEngine', () => {
 
     await app.router.navigate(
       app.routes.user.locate({ userId: 'alice' }),
-      { replace: true }
+      { mode: 'replace' }
     ).finished;
 
     expect(app.engine.entries().map(e => e.url)).toEqual(['/users/alice']);
@@ -322,6 +355,26 @@ describe('bounded page caching', () => {
     }
   });
 
+  it('clears a reused root outlet in menu mode and restores its cached descendants on Back', async () => {
+    const app = createNestedApp(10);
+    await app.ready;
+    const outerNode = app.frame.firstChild;
+    const alphaNode = app.frame.querySelector('[data-page="alpha"]');
+    await app.router.navigate(app.routes.outer.locate({}), { mode: 'menu' }).finished;
+    expect(app.engine.entries()).toHaveLength(1); // No preceding root: replace.
+    expect(app.frame.firstChild).toBe(outerNode);
+    expect(app.frame.querySelector('[data-page="layout"]')).toBeNull();
+    await vi.waitFor(() => expect(document.title).toBe('outer'));
+    await app.router.navigate(app.routes.alpha.locate({})).finished;
+    const restoredAlpha = app.frame.querySelector('[data-page="alpha"]');
+    expect(restoredAlpha).not.toBe(alphaNode); // Its original entry was replaced.
+    await app.engine.back().finished;
+    expect(app.frame.querySelector('[data-page="layout"]')).toBeNull();
+    await app.engine.forward().finished;
+    expect(app.frame.querySelector('[data-page="alpha"]')).toBe(restoredAlpha);
+    await vi.waitFor(() => expect(document.title).toBe('alpha'));
+  });
+
   it('retains a cached child together with both ancestors while evicting its older sibling', async () => {
     const app = createNestedApp(4);
     await app.ready;
@@ -368,7 +421,7 @@ describe('bounded page caching', () => {
     const app = createNestedApp(4, new ImmediateDisposeEngine('/nested/alpha'), ready);
     await app.ready;
     const outerNode = app.frame.firstChild;
-    const navigation = app.router.navigate(app.routes.beta.locate({}), { replace: true });
+    const navigation = app.router.navigate(app.routes.beta.locate({}), { mode: 'replace' });
     await navigation.committed;
     expect(app.cleanups).toEqual({ outer: 0, layout: 0, alpha: 0, beta: 0, outside: 0 });
     expect(app.frame.querySelector('[data-page="alpha"]')).not.toBeNull();
@@ -377,8 +430,51 @@ describe('bounded page caching', () => {
     expect(app.frame.firstChild).toBe(outerNode);
     expect(app.frame.querySelector('[data-page="beta"]')).not.toBeNull();
     expect(app.cleanups).toEqual({ outer: 0, layout: 0, alpha: 1, beta: 0, outside: 0 });
-    await app.router.navigate(app.routes.outside.locate({}), { replace: true }).finished;
+    await app.router.navigate(app.routes.outside.locate({}), { mode: 'replace' }).finished;
     expect(app.cleanups).toEqual({ outer: 1, layout: 1, alpha: 1, beta: 1, outside: 0 });
+  });
+
+  it.each([false, true])('protects offscreen ancestors during rendering and releases them on completion/abort (abort %s)', async abort => {
+    class ImmediateDisposeEngine extends MemoryEngine {
+      protected override disposeAfter(_finished: Promise<unknown>, entries: MemoryEntry[]) {
+        for (const entry of entries) this.handlers?.handleDispose(entry.id);
+      }
+    }
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const app = createNestedApp(10, new ImmediateDisposeEngine('/nested/alpha'), gate);
+    await app.ready;
+    const alpha = app.engine.currentEntry();
+    await app.router.navigate(app.routes.outside.locate({})).finished;
+    // Return to the offscreen stack, but replace it before it finishes mounting.
+    const traversal = app.engine.traverseTo(alpha.key, { forceNewInstance: true });
+    const traversed = Promise.resolve(traversal.finished).catch((error: unknown) => error);
+    const navigation = app.router.navigate(app.routes.beta.locate({}), { mode: 'replace' });
+    const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(app.counters.beta).toBe(1));
+      expect(app.cleanups.outer).toBe(0);
+      expect(app.cleanups.layout).toBe(0);
+      if (abort) {
+        await app.router.navigate(app.routes.outside.locate({})).finished;
+        expect(app.cleanups.outer).toBe(1);
+        expect(app.cleanups.layout).toBe(1);
+      }
+      finish();
+      expect(await traversed).toMatchObject({ name: 'AbortError' });
+      if (abort) {
+        expect(await outcome).toMatchObject({ name: 'AbortError' });
+        expect(app.frame.textContent).toBe('outside');
+      } else {
+        expect(await outcome).toBeUndefined();
+        expect(app.frame.querySelector('[data-page="beta"]')).not.toBeNull();
+        expect(app.cleanups.outer).toBe(0);
+        expect(app.cleanups.layout).toBe(0);
+        await app.router.navigate(app.routes.outside.locate({}), { mode: 'replace' }).finished;
+        expect(app.cleanups.outer).toBe(1);
+        expect(app.cleanups.layout).toBe(1);
+      }
+    } finally { finish(); await traversed; await outcome; }
   });
 
   it.each([1, 10])('does not resume superseded renders under evicted or retained ancestors (budget %s)', async limit => {

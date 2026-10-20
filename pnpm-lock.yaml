@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@dovetail-js/utils':
+      specifier: ^0.8.0
+      version: 0.8.0
     '@playwright/test':
       specifier: ^1.64.1
       version: 1.64.1
@@ -133,6 +136,9 @@ importers:
 
   solid:
     dependencies:
+      '@dovetail-js/utils':
+        specifier: 'catalog:'
+        version: 0.8.0(temporal-polyfill@1.0.6)
       '@kinetic-router/definition':
         specifier: workspace:*
         version: link:../definition
@@ -260,6 +266,11 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
+
+  '@dovetail-js/utils@0.8.0':
+    resolution: {integrity: sha512-u5mdYlHTz9vIalAGUPwQIIvnRkFnJ9ifmu0/GY49+qg5XXZtppaRKZGUJkzdUhrlvAcsKYCngdXkXwpIrEgy9Q==}
+    peerDependencies:
+      temporal-polyfill: ^1.0.5
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -1064,6 +1075,15 @@ packages:
   std-env@4.0.0:
     resolution: {integrity: sha512-zUMPtQ/HBY3/50VbpkupYHbRroTRZJPRLvreamgErJVys0ceuzMkD44J/QjqhHjOzK42GQ3QZIeFG1OYfOtKqQ==}
 
+  temporal-polyfill@1.0.6:
+    resolution: {integrity: sha512-tYyEry1HLGUDbm2356W3iYD0OZdo7rlP7h98Zr/EnjqLZQwTAfcBDUvJnJbfA15v/vQad57hJZScG5O0W2oKEA==}
+
+  temporal-spec@1.0.1:
+    resolution: {integrity: sha512-wxVoanmDeavXie1vu2JaQ3WIc3JZnWAOYFBsJyATaVsXsycKYUflGsyBmrRSnoCpZJpwPyr38VpgSUlQ8CbFxg==}
+
+  temporal-utils@1.0.3:
+    resolution: {integrity: sha512-9jbTSX3HvkOWvDpNpFzwX/d1mkCrgQgwLmVTOEiuocZGKHsrQJtttGZFmybJ2zYP5zCSZuU5ZyeS8+eOEPABiQ==}
+
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
 
@@ -1385,6 +1405,10 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@dovetail-js/utils@0.8.0(temporal-polyfill@1.0.6)':
+    dependencies:
+      temporal-polyfill: 1.0.6
 
   '@emnapi/core@1.11.1':
     dependencies:
@@ -2051,6 +2075,15 @@ snapshots:
   stackback@0.0.2: {}
 
   std-env@4.0.0: {}
+
+  temporal-polyfill@1.0.6:
+    dependencies:
+      temporal-spec: 1.0.1
+      temporal-utils: 1.0.3
+
+  temporal-spec@1.0.1: {}
+
+  temporal-utils@1.0.3: {}
 
   tinybench@2.9.0: {}
 

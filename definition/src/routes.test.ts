@@ -1,6 +1,7 @@
 import { it, describe, expect } from 'vitest';
 import { param, route, root, index } from "./index.js";
 import { getSlugPath } from "./root.js";
+import type { Locator, RouteTarget } from './routes.js';
 
 const userId = param.path<string>();
 const postId = param.path<number>();
@@ -22,7 +23,19 @@ const _sitemap = {
 
 _sitemap.users[userId.$].posts[postId.$].locate({ postId: 1, userId: 'u', foo: 'x' });
 
-it('type-checks pass', () => {});
+it('keeps explicit Locator values typed and permits bare targets only without required values', () => {
+  const home = route({});
+  const optional = route({ q: param.search<string>().optional() });
+  const user = route({ userId });
+  const homeTarget: RouteTarget<typeof home.paramDefs> = home;
+  const optionalTarget: RouteTarget<typeof optional.paramDefs> = optional;
+  const explicitTarget: RouteTarget<typeof user.paramDefs> = user.locate({ userId: 'alice' });
+  // @ts-expect-error required path values cannot come from a bare Route
+  const missing: RouteTarget<typeof user.paramDefs> = user;
+  // @ts-expect-error typed Locator values cannot be changed to a different type
+  const wrong: Locator<typeof user.paramDefs> = { route: user, values: { userId: 42 } };
+  expect([homeTarget, optionalTarget, explicitTarget, missing, wrong]).toHaveLength(5);
+});
 
 describe('aliasTo', () => {
   it('locate resolves to the target route and its values', () => {

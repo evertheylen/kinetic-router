@@ -112,6 +112,12 @@ export function getSlugPath(rootSitemap: RootSitemap, r: Route): Slug[] | undefi
   return (rootSitemap as any)[slugLookup].get(r);
 }
 
+/** Compare URL-tree ancestry, including the same node. Dynamic slugs match
+ * by parameter-definition identity; their values are a separate concern. */
+export function isSlugPathPrefix(prefix: readonly Slug[], path: readonly Slug[]): boolean {
+  return prefix.length <= path.length && prefix.every((slug, i) => slug === path[i]);
+}
+
 export function slugPathToString(path: Slug[]): string {
   return path.map(s => s instanceof ParamDef ? '<param>' : s).join('/');
 }

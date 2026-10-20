@@ -23,11 +23,19 @@ export type NavigationInfo = {
 /** A structural view on a history entry, just enough for the router to
  * reconstruct an AppState from the best available source of information.
  * Both NavigationHistoryEntry and NavigationDestination satisfy this shape.
- * `url` is either an absolute URL string or an already-parsed path+search. */
+ * `url` is a URL string (absolute or document-relative) or parsed path+search. */
 export type EntrySource = {
   readonly id?: string | null,
   readonly url?: { pathname: string, search: string } | string | null,
   getState?(): unknown,
+};
+
+/** A surviving history entry. `id` owns cached output; `key` addresses a
+ * history slot for traversal. Replacement changes id but may preserve key. */
+export type EngineEntry = EntrySource & {
+  readonly id: string,
+  readonly key: string,
+  readonly index: number,
 };
 
 /** A programmatic navigation request from the router to the engine. */
@@ -87,7 +95,14 @@ export interface NavigationEngine {
   /** Called exactly once by the router, before any navigation is observed. */
   attach(handlers: EngineHandlers): void;
 
-  currentEntry(): EntrySource | undefined;
+  currentEntry(): EngineEntry | undefined;
+
+  /** The engine's actual surviving entries, in history order. No inferred or
+   * synthetic forward entries; indices need not be contiguous. */
+  entries(): readonly EngineEntry[];
+
+  /** Traverse to a surviving entry's key, without creating a history entry. */
+  traverseTo(key: string, info?: NavigationInfo): EngineNavigationResult;
 
   /** Attach a new serialized state to the current entry, without navigating. */
   updateCurrentEntry(state: unknown): void;

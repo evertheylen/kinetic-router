@@ -1,7 +1,8 @@
 import type { Locator, Serde } from '@kinetic-router/definition';
+import { resolveAliases } from '@kinetic-router/definition/routes.js';
 import { defaultSerde, getSlugPath } from '@kinetic-router/definition/root.js';
-import { HiddenParamDef, ParamDef, PathParamDef, SearchParamDef, SearchParamDefWithDefault } from '@kinetic-router/definition/params.js';
-import type { RootSitemap } from '@kinetic-router/definition/root.js';
+import { convertParamsByDefinition, ParamDef, PathParamDef, SearchParamDef, SearchParamDefWithDefault } from '@kinetic-router/definition/params.js';
+import type { RootSitemap, Slug } from '@kinetic-router/definition/root.js';
 
 
 /** Serialize a single value using a param's serde, falling back to the root's
@@ -15,17 +16,39 @@ export function serializeValue(value: unknown, paramSerde: Serde<any> | undefine
   return String(value);
 }
 
+export type SerializedPathParams = ReadonlyMap<PathParamDef<any>, string>;
+
+/** Snapshot the canonical URL values of parameters in a slug path or prefix.
+ * Keys use definition identity, not parameter names. Search/hidden values are
+ * excluded. The returned map is suitable for immutable structural cache keys. */
+export function serializePathParams(
+  rootSitemap: RootSitemap, locator: Locator<any>, path: readonly Slug[],
+): SerializedPathParams {
+  const values = convertParamsByDefinition(locator.values, locator.route.paramDefs);
+  const result = new Map<PathParamDef<any>, string>();
+  for (const slug of path) {
+    if (typeof slug === 'string') continue;
+    if (!values.has(slug)) {
+      throw new Error("Path param in slug path has no matching key in route's paramDefs.");
+    }
+    result.set(slug, serializeValue(values.get(slug), slug.serde, rootSitemap[defaultSerde]));
+  }
+  return result;
+}
+
 /**
  * Convert a `Locator` to a URL string.
  *
+ * - Aliases resolve to their destination before serialization.
  * - Path params are serialized as URL path segments.
  * - Search params are serialized as query string entries (`?key=value`).
  * - Hidden params are omitted from the URL.
  * - Search params whose value equals their declared default are omitted.
  *
- * Throws if the route is not registered in the given `rootSitemap`.
+ * Throws if the resolved route is not registered in the given `rootSitemap`.
  */
 export function locatorToUrl(rootSitemap: RootSitemap, locator: Locator<any>): string {
+  locator = resolveAliases(locator);
   const slugPath = getSlugPath(rootSitemap, locator.route);
   if (slugPath === undefined) {
     throw new Error('Route is not registered in the provided rootSitemap.');
@@ -35,28 +58,8 @@ export function locatorToUrl(rootSitemap: RootSitemap, locator: Locator<any>): s
   const paramDefs: Record<string, ParamDef<any>> = locator.route.paramDefs;
   const values: Record<string, unknown> = locator.values as Record<string, unknown>;
 
-  // Build a reverse map: ParamDef instance → param name (for path param lookup).
-  const paramDefToName = new Map<ParamDef<any>, string>();
-  for (const [name, def] of Object.entries(paramDefs)) {
-    paramDefToName.set(def, name);
-  }
-
-  // --- Path segments ---
-  const segments: string[] = [];
-  for (const slug of slugPath) {
-    if (typeof slug === 'string') {
-      segments.push(slug);
-    } else {
-      // slug is a ParamDef<any, 'path'>
-      const name = paramDefToName.get(slug);
-      if (name === undefined) {
-        throw new Error(`Path param in slug path has no matching key in route's paramDefs.`);
-      }
-      segments.push(serializeValue(values[name], slug.serde, rootDefault));
-    }
-  }
-
-  const pathname = '/' + segments.join('/');
+  const pathParams = serializePathParams(rootSitemap, locator, slugPath);
+  const pathname = '/' + slugPath.map(slug => typeof slug === 'string' ? slug : pathParams.get(slug)!).join('/');
 
   // --- Search params ---
   const searchParams = new URLSearchParams();

@@ -28,6 +28,19 @@ for (const scenario of scenarios) {
   });
 }
 
+test('menu replacement preserves the browser traversal key, but changes entry identity', async ({ page }) => {
+  await page.goto('/home?scenario=menu&checks=manual');
+  const app = page.getByTestId('scenario-app');
+  await app.getByRole('link', { name: 'Detail', exact: true }).click();
+  await expect(app.getByRole('heading', { name: 'Detail', exact: true })).toBeVisible();
+  const before = await page.evaluate(() => ({ id: navigation.currentEntry!.id, key: navigation.currentEntry!.key }));
+  await app.getByRole('button', { name: 'A', exact: true }).click();
+  await expect(app.getByRole('heading', { name: 'A', exact: true })).toBeVisible();
+  const after = await page.evaluate(() => ({ id: navigation.currentEntry!.id, key: navigation.currentEntry!.key }));
+  expect(after.key).toBe(before.key);
+  expect(after.id).not.toBe(before.id);
+});
+
 test('a settled mismatch fails promptly without advancing; correcting it allows retry', async ({ page }) => {
   await page.goto('/home?scenario=links&checks=manual');
   const notes = page.getByTestId('scenario-app').getByRole('textbox', { name: 'Notes' });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { index, param, route, root } from "./index.js";
-import { getSlugPath } from "./root.js";
+import { getSlugPath, isSlugPathPrefix } from "./root.js";
 
 const userId = param.path<string>();
 const postId = param.path<number>();
@@ -84,5 +84,25 @@ describe('root validation', () => {
     expect(() =>
       root({ [userId.$]: { home: route({}) }})
     ).toThrow(/does not use all ancestor path params/);
+  });
+});
+
+describe('isSlugPathPrefix', () => {
+  it('includes the same node and the empty path used by root index routes', () => {
+    expect(isSlugPathPrefix([], [])).toBe(true);
+    expect(isSlugPathPrefix([], ['users', userId])).toBe(true);
+    expect(isSlugPathPrefix(['users', userId], ['users', userId])).toBe(true);
+    expect(isSlugPathPrefix(['users', userId], ['users', userId, 'posts', postId])).toBe(true);
+  });
+
+  it('compares whole slugs, not string prefixes', () => {
+    expect(isSlugPathPrefix(['a'], ['ab'])).toBe(false);
+    expect(isSlugPathPrefix(['a', 'b'], ['a'])).toBe(false);
+    expect(isSlugPathPrefix(['a', 'b'], ['a', 'c'])).toBe(false);
+  });
+
+  it('matches dynamic slugs by definition identity', () => {
+    expect(isSlugPathPrefix([userId], [userId, 'posts'])).toBe(true);
+    expect(isSlugPathPrefix([userId], [param.path<string>(), 'posts'])).toBe(false);
   });
 });

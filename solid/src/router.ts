@@ -1,11 +1,15 @@
 import { RootSitemap } from "@kinetic-router/definition/root.js";
 import { SolidImplementationMap } from "./implementation-map.js";
-import { ActualRouter } from "./actual-router.js";
+import { ActualRouter, type DestinationSnapshot, type NavigateOptions, type NavigationMode } from "./actual-router.js";
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator } from "@kinetic-router/definition";
+import type { AnyParamDefs } from "@kinetic-router/definition/params.js";
 import { Accessor, createSignal, Setter } from "solid-js";
 import { NavigationEngine } from "./navigation-engine.js";
 import { NavigationApiEngine } from "./navigation-api-engine.js";
+import { RenderedRouteCache } from "./rendered-route-cache.js";
+
+export type { DestinationSnapshot, NavigateOptions, NavigationMode } from './actual-router.js';
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
@@ -29,8 +33,13 @@ export class Router<
   constructor(sitemap: RootSitemap, options?: {
     /** The history layer to use. Defaults to the browser's Navigation API.
      * Tests can use MemoryEngine; other integrations can supply their own. */
-    engine?: NavigationEngine
+    engine?: NavigationEngine,
+    /** Maximum live rendered pages and retained history-entry stacks (default 10).
+     * Nested ancestors count; shared instances count once. The visible stack is
+     * always kept, even above this limit. Zero keeps only the visible stack. */
+    maxCachedPages?: number,
   }) {
+    const rrCache = new RenderedRouteCache(options?.maxCachedPages);
     this.sitemap = sitemap;
     this.implMap = new SolidImplementationMap(this.sitemap);
 
@@ -42,7 +51,7 @@ export class Router<
     queueMicrotask(async () => {
       this.implMap.check();
       const engine = options?.engine ?? new NavigationApiEngine();
-      const router = new ActualRouter(this.sitemap, this.implMap, engine);
+      const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache);
       await router.init();
       this.actualRouter = router;
       this.setDidInit(true);
@@ -58,16 +67,27 @@ export class Router<
   implement: typeof this.implMap.implement;
   implementLazy: typeof this.implMap.implementLazy;
 
-  navigate(...args: Parameters<ActualRouter<ExtraStaticData, ExtraOutput>['navigate']>) {
+  navigate<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, options?: NavigateOptions) {
     if (this.actualRouter === undefined) {
       throw new Error('Router didnt init yet')
     }
 
-    return this.actualRouter.navigate(...args);
+    return this.actualRouter.navigate(locator, options);
+  }
+
+  resolveDestination<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, mode?: NavigationMode) {
+    if (this.actualRouter === undefined) throw new Error('Router didnt init yet');
+    return this.actualRouter.resolveDestination(locator, mode);
+  }
+
+  activateDestination(snapshot: DestinationSnapshot, info?: Omit<NavigateOptions, 'mode'>) {
+    if (this.actualRouter === undefined) throw new Error('Router didnt init yet');
+    return this.actualRouter.activateDestination(snapshot, info);
   }
 
   toUrl(locator: Locator<any>) {
-    return locatorToUrl(this.sitemap, locator)
+    // Also usable before asynchronous init (e.g. for an initial anchor href).
+    return locatorToUrl(this.sitemap, locator);
   }
 
   toLocator(url: URL) {
