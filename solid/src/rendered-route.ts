@@ -1,4 +1,4 @@
-import { createContext, runWithOwner } from "solid-js";
+import { createComponent, createContext, flatten, runWithOwner, untrack } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
 
@@ -44,17 +44,24 @@ export async function renderRoute({ route, implementation, renderArgs }: {
       subFrame: undefined,  // to be set later 
     };
 
-    // manually setting Context here (yeah I'm kinda abusing solid here, dont care)
-    owner._context[(InRenderedRoute as any).id] = res;
     runWithOwner(owner, () => {
-      let output = renderFunc(renderArgs.params.reactiveProxyObject, renderArgs.pageStatus);
-      while (typeof output === 'function') {
-        output = output();
-      }
-      while (typeof output.html === 'function') {
-        output.html = output.html();
-      }
-      res.renderOutput = output;
+      // Use the public context provider: owner internals are mangled in production.
+      flatten(createComponent(InRenderedRoute, {
+        value: res,
+        get children() {
+          return untrack(() => {
+            let output = renderFunc(renderArgs.params.reactiveProxyObject, renderArgs.pageStatus);
+            while (typeof output === 'function') {
+              output = output();
+            }
+            while (typeof output.html === 'function') {
+              output.html = output.html();
+            }
+            res.renderOutput = output;
+            return output.html;
+          });
+        },
+      }));
     });
 
     return res;

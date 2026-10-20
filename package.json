@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "test": "pnpm -r build && vitest run",
+    "test:browser": "pnpm --filter @kinetic-router/integration-tests... -r build && pnpm --filter @kinetic-router/integration-tests test",
+    "dev:integration": "pnpm --filter @kinetic-router/solid... -r build && pnpm --filter @kinetic-router/integration-tests dev",
     "clean": "pnpm -r clean && rm -rf $(pnpm store path)"
   },
   "devDependencies": {

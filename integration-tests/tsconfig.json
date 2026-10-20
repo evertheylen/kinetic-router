@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "types": ["node", "dom-navigation", "vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "*.ts"],
+  "references": [
+    { "path": "../definition/tsconfig.build.json" },
+    { "path": "../solid/tsconfig.build.json" }
+  ]
+}

@@ -5,6 +5,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Browser test artifacts
+playwright-report/
+test-results/
+
 # pnpm
 .pnpm-store/
 
