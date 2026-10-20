@@ -4,12 +4,14 @@ import { ActualRouter, type DestinationSnapshot, type NavigateOptions, type Navi
 import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator } from "@kinetic-router/definition";
 import type { AnyParamDefs } from "@kinetic-router/definition/params.js";
-import { Accessor, createSignal, Setter } from "solid-js";
+import { Accessor, createSignal, getOwner, onCleanup, Setter } from "solid-js";
 import { NavigationEngine } from "./navigation-engine.js";
 import { NavigationApiEngine } from "./navigation-api-engine.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
+import { PreparationRegistry, type PrefetchCacheOptions } from './preparation-registry.js';
 
 export type { DestinationSnapshot, NavigateOptions, NavigationMode } from './actual-router.js';
+export type { PrefetchCacheOptions } from './preparation-registry.js';
 
 // This class just collects the most useful methods of the various objects
 // and centralizes it into one type-safe object that delegates the calls to the 
@@ -34,12 +36,18 @@ export class Router<
     /** The history layer to use. Defaults to the browser's Navigation API.
      * Tests can use MemoryEngine; other integrations can supply their own. */
     engine?: NavigationEngine,
-    /** Maximum live rendered pages and retained history-entry stacks (default 10).
+    /** Maximum history-cached pages and retained entry stacks (default 10).
      * Nested ancestors count; shared instances count once. The visible stack is
-     * always kept, even above this limit. Zero keeps only the visible stack. */
+     * always kept, even above this limit. Zero keeps only the visible stack.
+     * Speculative output and construction-only pins have a separate budget. */
     maxCachedPages?: number,
+    /** Completed, unused speculative preparations only (defaults: 3 / 30s).
+     * Either zero disables retention; independent of maxCachedPages. */
+    prefetchCache?: PrefetchCacheOptions,
   }) {
     const rrCache = new RenderedRouteCache(options?.maxCachedPages);
+    const preparations = new PreparationRegistry(options?.prefetchCache);
+    if (getOwner()) onCleanup(() => preparations.dispose());
     this.sitemap = sitemap;
     this.implMap = new SolidImplementationMap(this.sitemap);
 
@@ -51,7 +59,7 @@ export class Router<
     queueMicrotask(async () => {
       this.implMap.check();
       const engine = options?.engine ?? new NavigationApiEngine();
-      const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache);
+      const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache, preparations);
       const initialization = router.init();
       // The engine is attached; navigation need not wait for the first page's
       // arbitrary async factory. currentLocator stays undefined until activation.

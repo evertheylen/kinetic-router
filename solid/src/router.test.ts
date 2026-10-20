@@ -383,7 +383,7 @@ describe('page lifecycle', () => {
       expect(status.hasFocus()).toBe(false);
       expect(app.contexts.beta?.signal.aborted).toBe(false);
       expect(app.frame.firstChild).toBe(outside);
-      expect(app.rendered.outer!.renderOutput!.html.parentNode).toBeNull();
+      expect(document.querySelector('[data-kinetic-router-backstage]')?.contains(app.rendered.outer!.renderOutput!.html)).toBe(true);
       expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
       expect(document.title).toBe('outside');
       expect(scroll).not.toHaveBeenCalled();
@@ -448,6 +448,13 @@ describe('page lifecycle', () => {
 });
 
 describe('bounded page caching', () => {
+  it.each([
+    { maxEntries: -1 }, { maxEntries: 0.5 }, { maxEntries: NaN }, { maxEntries: Infinity },
+    { retainFor: -1 }, { retainFor: NaN }, { retainFor: Infinity },
+  ])('validates prefetchCache synchronously: %j', prefetchCache => {
+    expect(() => new Router(root({ home: route({}) }), { prefetchCache })).toThrow(RangeError);
+  });
+
   it.each([-1, 0.5, NaN, Infinity])('validates maxCachedPages synchronously: %s', maxCachedPages => {
     expect(() => new Router(root({ home: route({}) }), { maxCachedPages })).toThrow(RangeError);
   });

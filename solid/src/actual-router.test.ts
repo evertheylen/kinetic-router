@@ -118,7 +118,7 @@ async function createApp(betaReady?: Promise<void>) {
   return { router, engine, frame, routes: { layout, alpha, beta }, rendered, initialParams, cleanups };
 }
 
-it('constructs detached destination output without changing live params, frames, focus, title, scroll or history', async () => {
+it('constructs staged destination output without changing live params, frames, focus, title, scroll or history', async () => {
   const app = await createApp();
   const activeStack = app.router.rrCache.get(app.engine.currentEntry().id)!;
   const activeNode = app.frame.firstChild;
@@ -142,7 +142,7 @@ it('constructs detached destination output without changing live params, frames,
     expect(app.engine.entries()).toHaveLength(1);
     expect(app.router.rrCache.cache.size).toBe(1);
     const beta = prepared.routes[1];
-    expect(beta.renderOutput!.html.parentNode).toBeNull();
+    expect(document.querySelector('[data-kinetic-router-backstage]')?.contains(beta.renderOutput!.html)).toBe(true);
     expect(beta.renderArgs.pageStatus.shouldFetch()).toBe(true);
     expect(beta.renderArgs.pageStatus.isVisible()).toBe(false);
     expect(beta.renderArgs.pageStatus.hasFocus()).toBe(false);

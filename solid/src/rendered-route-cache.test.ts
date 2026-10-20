@@ -173,6 +173,21 @@ describe('RenderedRouteCache', () => {
     expect(parent.cleanup).toHaveBeenCalledOnce();
   });
 
+  it('does not charge construction-only pins against the history cache budget', () => {
+    const cache = new RenderedRouteCache(2);
+    const parent = page(), child = page(parent.rendered), a = page(), b = page();
+    cache.markUsedFor('nested', [parent.rendered, child.rendered]);
+    const release = cache.retainForRender([parent.rendered]);
+    cache.markUsedFor('a', [a.rendered]);
+    cache.markUsedFor('b', [b.rendered]);
+    expect([...cache.cache.keys()]).toEqual(['a', 'b']);
+    expect(parent.cleanup).not.toHaveBeenCalled();
+    expect(a.cleanup).not.toHaveBeenCalled();
+    release();
+    expect(parent.cleanup).toHaveBeenCalledOnce();
+    expect(a.cleanup).not.toHaveBeenCalled();
+  });
+
   it('releases a replaced child without disposing its retained parent', () => {
     const cache = new RenderedRouteCache();
     const parent = page(), a = page(parent.rendered), b = page(parent.rendered);

@@ -22,6 +22,11 @@ export class RenderedRouteCache {
     return this.cache.get(id);
   }
 
+  /** Displayed output can outlive its entry index during pending navigation. */
+  currentRoutes(): readonly RenderedRoute[] {
+    return this.current;
+  }
+
   /** A source entry may disappear while its ancestors are being reused. */
   retainForRender(routes: readonly RenderedRoute[]): () => void {
     const stack = [...routes];
@@ -41,9 +46,10 @@ export class RenderedRouteCache {
     adoptConstruction?.();
 
     for (const entryId of this.cache.keys()) {
+      // Construction pins protect ownership, but don't consume the history budget.
       // The visible stack is the newest entry and must never be evicted.
       if (this.cache.size === 1 || (
-        this.cache.size <= this.maxPages && this.pages().size <= this.maxPages
+        this.cache.size <= this.maxPages && new Set([...this.cache.values()].flat()).size <= this.maxPages
       )) break;
       this.cache.delete(entryId);
     }

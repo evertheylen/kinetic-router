@@ -15,6 +15,8 @@ import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "soli
 import { calculateRouteChanges } from "./diff.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
 import { EngineEntry, EngineNavigateEvent, EngineNavigationResult, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
+import { Backstage } from './backstage.js';
+import { PreparationRegistry, type PreparationLease } from './preparation-registry.js';
 
 export type NavigationMode = 'push' | 'replace' | 'menu';
 export type NavigateOptions = Pick<NavigationInfo, 'forceNewInstance'> & {
@@ -23,7 +25,7 @@ export type NavigateOptions = Pick<NavigationInfo, 'forceNewInstance'> & {
 
 /** Constructed output has no live frame, parameter, or history side effects.
  * The caller must either activate it or dispose it; adopt transfers ownership
- * to the history cache. Stage 3 can stage its new suffix in isolated containers. */
+ * to the history cache. Only its new suffix is mounted in isolated Backstage. */
 export type PreparedNavigation = {
   readonly routes: readonly RenderedRoute[],
   readonly reusedCount: number,
@@ -62,7 +64,9 @@ export class ActualRouter<
 
   readonly rrCache: RenderedRouteCache;
 
-  // TODO: Stage 3 — mount prepared output in isolated Backstage containers.
+  protected readonly preparations: PreparationRegistry;
+  protected readonly implLoads = new Map<Route<any>, Promise<Page<ExtraOutput, any, any>>>();
+  protected readonly preparationHandoffs = new WeakMap<NavigationInfo, PreparationLease>();
 
   protected pendingRender: AbortController | undefined;
 
@@ -85,11 +89,13 @@ export class ActualRouter<
     implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>,
     engine: NavigationEngine,
     rrCache = new RenderedRouteCache(),
+    preparations = new PreparationRegistry(),
   ) {
     this.sitemap = sitemap;
     this.implMap = implMap;
     this.engine = engine;
     this.rrCache = rrCache;
+    this.preparations = preparations;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
     [this.navigationVersion, this.setNavigationVersion] = createSignal(0);
@@ -234,18 +240,48 @@ export class ActualRouter<
 
   protected executeDestination({ locator, url, operation }: DestinationSnapshot, info?: Omit<NavigateOptions, 'mode'>): EngineNavigationResult {
     if (operation.type === 'no-op') return { finished: Promise.resolve() };
-    const result = operation.type === 'traverse'
-      ? this.engine.traverseTo(operation.key, { forceNewInstance: info?.forceNewInstance })
-      : this.engine.navigate({
-        url, history: operation.type,
-        state: AppState.fromLocator(locator).serialize(this.sitemap),
-        info: { forceNewInstance: info?.forceNewInstance },
-      });
-    // Callers can still await failures, but fire-and-forget navigation must not
-    // produce unhandled rejections when a later navigation cancels construction.
-    void result.committed?.catch(() => {});
-    void result.finished?.catch(() => {});
-    return result;
+    const state = AppState.fromLocator(locator);
+    // Bridge activation to the engine's (possibly later) committed event. This
+    // ownership is acquired synchronously, before a Link can release its lease.
+    const handoff = !info?.forceNewInstance
+      ? this.preparations.claim(state, operation.type === 'traverse' ? operation.id : undefined)
+      : undefined;
+    const navigationInfo = { forceNewInstance: info?.forceNewInstance };
+    if (handoff) this.preparationHandoffs.set(navigationInfo, handoff);
+    try {
+      const result = operation.type === 'traverse'
+        ? this.engine.traverseTo(operation.key, navigationInfo)
+        : this.engine.navigate({
+          url, history: operation.type, state: state.serialize(this.sitemap),
+          info: navigationInfo,
+        });
+      const release = () => handoff?.release(true);
+      void Promise.resolve(result.finished).then(release, release);
+      // Fire-and-forget callers must not orphan a rejected commit promise.
+      void result.committed?.catch(() => {});
+      return result;
+    } catch (error) {
+      handoff?.release(true);
+      throw error;
+    }
+  }
+
+  /** Internal seam for future Link triggers. Resolve again when acquiring;
+   * snapshots are plans, never permission to use stale menu/history targets. */
+  acquirePreparation(snapshot: DestinationSnapshot, cancelDelay = 0): PreparationLease | undefined {
+    const destination = this.resolveDestination(snapshot.target, snapshot.mode);
+    if (destination.operation.type === 'no-op') return;
+    const entryId = destination.operation.type === 'traverse' ? destination.operation.id : undefined;
+    const state = AppState.fromLocator(destination.locator);
+    return this.preparations.acquire(state, entryId, signal => {
+      const cached = entryId === undefined ? this.rrCache.currentRoutes() : this.rrCache.get(entryId) ?? [];
+      return this.prepareNavigation(state, this.reusableRoutes(state, cached), signal);
+    }, cancelDelay);
+  }
+
+  /** Router teardown releases speculative ownership immediately. */
+  disposePreparations() {
+    this.preparations.dispose();
   }
 
   /** Unmatched or unreadable entries may exist in the engine but are not menu
@@ -294,13 +330,18 @@ export class ActualRouter<
     newState.id = event.committedId;
     // A visit is committed even if its renderer is slow, fails, or is superseded.
     this.recordVisit(newState.locator);
-    return this.renderNavigation(
+    const rendering = this.renderNavigation(
       newState,
       event.navigationType === 'traverse' ? event.committedId : event.fromId,
       event.info,
       this.beginRender(),
       event.signal,
+      event.navigationType === 'traverse' ? event.committedId : undefined,
     );
+    // renderNavigation has acquired its own lease before its first await.
+    this.preparationHandoffs.get(event.info)?.release(true);
+    this.preparationHandoffs.delete(event.info);
+    return rendering;
   }
 
     /** Make an AppState based on the best source of information */
@@ -358,31 +399,69 @@ export class ActualRouter<
     navInfo: NavigationInfo,
     controller: AbortController,
     navigationSignal?: AbortSignal,
+    entryId?: string,
   ) {
     const signal = navigationSignal ? AbortSignal.any([controller.signal, navigationSignal]) : controller.signal;
     let prepared: PreparedNavigation | undefined;
+    let lease: PreparationLease | undefined;
+    const release = () => lease?.release(true);
     try {
       signal.throwIfAborted();
-      const routes = [...newState.route.nestedInRoutes, newState.route];
-      const cached = cacheId === undefined ? [] : this.rrCache.get(cacheId) ?? [];
-      const changes = calculateRouteChanges(cached, { routes, state: newState });
-      if (navInfo.forceNewInstance) changes[changes.length - 1] = 'render';
-      const firstRender = changes.indexOf('render');
-      const reused = cached.slice(0, firstRender < 0 ? changes.length : firstRender);
-      prepared = await this.prepareNavigation(newState, reused, signal);
+      const cached = cacheId === undefined ? undefined : this.rrCache.get(cacheId);
+      // An unfinished outgoing entry may have no cached output. Fall back to
+      // the displayed stack, but never merge distinct history restorations.
+      const source = cached ?? (entryId === undefined ? this.rrCache.currentRoutes() : []);
+      const reused = this.reusableRoutes(newState, source, navInfo.forceNewInstance);
+      lease = !navInfo.forceNewInstance ? this.preparations.claim(newState, entryId) : undefined;
+      signal.addEventListener('abort', release, { once: true });
+      if (lease) {
+        const candidate = await lease.ready;
+        signal.throwIfAborted();
+        // Owners/frames cannot be reparented. Preserve reusable active layouts,
+        // adopting the suffix only when it was constructed under these parents.
+        if (candidate.reusedCount === reused.length
+          && reused.every((route, i) => candidate.routes[i] === route)) {
+          prepared = candidate;
+        } else {
+          lease.discard();
+          lease = undefined;
+        }
+      }
+      prepared ??= await this.prepareNavigation(newState, reused, signal);
       signal.throwIfAborted();
       this.activateNavigation(newState, prepared, signal);
     } finally {
-      // Disposal is a no-op once history has adopted the output. Failure disposes
-      // construction without pretending that the navigation was superseded.
-      prepared?.dispose();
+      signal.removeEventListener('abort', release);
+      if (lease) release();
+      else prepared?.dispose();
       if (this.pendingRender === controller) this.pendingRender = undefined;
     }
   }
 
-  /** Construction never mounts frames, writes live params, or registers history.
-   * Reused ancestors are pinned, not modified. A future Backstage caller can
-   * stage only routes.slice(reusedCount), then revalidate before activation. */
+  protected reusableRoutes(state: AppState, cached: readonly RenderedRoute[], forceNewInstance = false) {
+    const routes = [...state.route.nestedInRoutes, state.route];
+    const changes = calculateRouteChanges(cached, { routes, state });
+    if (forceNewInstance) changes[changes.length - 1] = 'render';
+    const firstRender = changes.indexOf('render');
+    return cached.slice(0, firstRender < 0 ? changes.length : firstRender);
+  }
+
+  protected loadImplementation(route: Route<any>) {
+    const cached = this.implCache.get(route);
+    if (cached) return Promise.resolve(cached);
+    let loading = this.implLoads.get(route);
+    if (!loading) {
+      loading = this.implMap.loadImplementation(route).then(impl => {
+        this.implCache.set(route, impl);
+        return impl;
+      }).finally(() => this.implLoads.delete(route));
+      this.implLoads.set(route, loading);
+    }
+    return loading;
+  }
+
+  /** Only the new suffix is staged. Reused ancestors are pinned, never mounted
+   * in Backstage, and inherited destination params remain isolated until adopt. */
   protected async prepareNavigation(
     state: AppState, reused: readonly RenderedRoute[], requestSignal: AbortSignal,
   ): Promise<PreparedNavigation> {
@@ -390,10 +469,17 @@ export class ActualRouter<
     const { signal } = controller;
     const createdParams: ParamStorage[] = [];
     const createdRoutes: RenderedRoute[] = [];
+    const stagedRoutes = new Map<number, RenderedRoute>();
+    const backstage = Backstage();
+    let stageIndex = reused.length;
+    let stageFrame: FrameDelegate | undefined = {
+      setElement: node => backstage.replaceChildren(node), clear: () => backstage.replaceChildren(),
+    };
     const releaseReused = this.rrCache.retainForRender(reused);
     let ownsConstruction = true;
     const detach = () => {
       requestSignal.removeEventListener('abort', dispose);
+      backstage.remove();
       releaseReused();
     };
     const adopt = () => {
@@ -418,14 +504,12 @@ export class ActualRouter<
       requestSignal.throwIfAborted();
       signal.throwIfAborted();
       const routes = [...state.route.nestedInRoutes, state.route];
+      if (routes.length > reused.length) document.body.append(backstage);
       const pending = reused.map(rendered => Promise.resolve(rendered));
       let parentParams = reused.at(-1) && Promise.resolve(reused.at(-1)!.renderArgs.params);
       for (let i = reused.length; i < routes.length; i++) {
         const route = routes[i];
-        const implementation = Promise.resolve(this.implCache.get(route) ?? this.implMap.loadImplementation(route).then(impl => {
-          this.implCache.set(route, impl);
-          return impl;
-        }));
+        const implementation = this.loadImplementation(route);
         const deferParent = i === reused.length && reused.length > 0;
         const params: Promise<ParamStorage> = Promise.all([implementation, parentParams]).then(([impl, parent]) => {
           signal.throwIfAborted();
@@ -440,6 +524,15 @@ export class ActualRouter<
         }).then(rendered => {
           createdRoutes.push(rendered);
           signal.throwIfAborted();
+          stagedRoutes.set(i, rendered);
+          while (stagedRoutes.has(stageIndex)) {
+            const next = stagedRoutes.get(stageIndex)!;
+            this.assertFrame(stageFrame, next.route);
+            stageFrame.setElement(next.renderOutput!.html);
+            stageFrame = next.subFrame;
+            stageIndex++;
+            signal.throwIfAborted();
+          }
           runWithOwner(rendered.owner, () => createEffect(
             () => rendered.renderArgs.pageStatus.hasFocus() ? rendered.renderOutput!.title : undefined,
             title => { if (title !== undefined) document.title = title; },
