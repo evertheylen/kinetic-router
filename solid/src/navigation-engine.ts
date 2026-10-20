@@ -4,8 +4,6 @@
 //   - NavigationApiEngine: the default browser engine, backed by the W3C
 //     Navigation API (`window.navigation`).
 //   - MemoryEngine: an in-memory stack, used for headless testing/tooling.
-//   - NativeBridgeEngine (planned, see ios-plan.md): forwards navigation
-//     intents to a native shell which owns the history stack.
 //
 // The engine owns the history stack (entries, current index, entry ids and
 // their serialized states). The router owns everything else: resolving URLs
@@ -95,9 +93,4 @@ export interface NavigationEngine {
   updateCurrentEntry(state: unknown): void;
 
   navigate(intent: NavigationIntent): EngineNavigationResult;
-
-  /** Optional: notified whenever the leaf page's title changes (reactively or
-   * on render). Used by engines that mirror the title to a host environment
-   * (e.g. the native shell's navigation bar). */
-  titleChanged?(title: string): void;
 }

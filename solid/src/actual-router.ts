@@ -310,10 +310,7 @@ export class ActualRouter<
           // TODO gate this behind some check if this route is active and most-specific (via PageStatus?)
           runWithOwner(rendered.owner, () => createEffect(
             () => rendered.renderOutput!.title,
-            (title) => {
-              document.title = title;
-              this.engine.titleChanged?.(title);
-            }
+            (title) => { document.title = title; }
           ));
         }
 

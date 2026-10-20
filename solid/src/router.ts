@@ -28,8 +28,7 @@ export class Router<
 
   constructor(sitemap: RootSitemap, options?: {
     /** The history layer to use. Defaults to the browser's Navigation API.
-     * Mostly useful for testing (MemoryEngine); library integrations (like
-     * the planned native shell) may provide their own engine. */
+     * Tests can use MemoryEngine; other integrations can supply their own. */
     engine?: NavigationEngine
   }) {
     this.sitemap = sitemap;

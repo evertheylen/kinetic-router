@@ -6,7 +6,6 @@ export default defineConfig({
       'definition',
       'url',
       'solid',
-      'native-bridge',
     ],
   },
 })

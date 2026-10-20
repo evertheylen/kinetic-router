@@ -13,8 +13,8 @@ and assume node is configured with `--enable-source-maps` so there's no need for
 | `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js`, `@solidjs/web`, both 2.0 beta). |
 | `example-app` | `example-app/` | Vite + `vite-plugin-solid` demo (private). `pnpm --filter example-app dev`. |
 
-`ios-plan.md` documents the plan (and current status) for running kinetic-router apps
-inside a native iOS shell. Read it before touching anything engine- or bridge-related.
+Keep history behind `NavigationEngine`: future iOS support should use engine injection,
+not platform-specific branches in the router core.
 
 ## Commands
 
@@ -31,7 +31,7 @@ Publishing: `./publish.sh` — patch-bumps and publishes packages changed since 
 ## Adding a new package
 
 Use `solid/package.json` and `solid/tsconfig.json` as templates. Reference the
-upstream packages in `tsconfig.build.json` (native-bridge→solid→url→definition).
+upstream packages in `tsconfig.build.json` (solid→url→definition).
 Add the package to `pnpm-workspace.yaml`. Use happy-dom for DOM-dependent tests.
 
 ## Implementing a new NavigationEngine
@@ -91,8 +91,7 @@ There are no `<Route>`/`<Link>` components and no `useNavigate`. The model is:
   The engine owns the history stack (entries, ids, states); the router owns rendering
   and caches rendered routes *by entry id*. Implementations:
   - `NavigationApiEngine` (default, browsers, `window.navigation`),
-  - `MemoryEngine` (headless tests/tooling; also the reference for engine semantics),
-  - `NativeBridgeEngine` (planned, see `ios-plan.md`).
+  - `MemoryEngine` (headless tests/tooling; also the reference for engine semantics).
   Inject via `new Router(sitemap, { engine })`.
 - Caches: `RenderedRouteCache` (rendered routes keyed by entry id; disposed via the
   engine's `handleDispose`), `implCache`, `stateCache` (`AppState` by entry id).
