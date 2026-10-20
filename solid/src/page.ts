@@ -1,4 +1,4 @@
-import { JSX } from "solid-js/jsx-runtime";
+import type { JSX } from "@solidjs/web";
 
 export type PageStatus = {
   /** Should the page fetch resources? False when the page is somewhere in the

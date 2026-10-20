@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { route } from '@kinetic-router/definition';
-import { createOwner, flush, onCleanup, runWithOwner, useContext } from 'solid-js';
+import { createEffect, createOwner, createSignal, flush, onCleanup, runWithOwner, useContext } from 'solid-js';
 import { createParamStorage } from './params.js';
 import type { Page, PagePreparationContext } from './page.js';
 import { InRenderedRoute, renderRoute, type RenderedRoute } from './rendered-route.js';
@@ -9,12 +9,17 @@ it('provides the rendered route without leaking context to unrelated owners', as
   const home = route({});
   const unrelatedOwner = createOwner();
   let seenContext: RenderedRoute | null = null;
+  const [text, setText] = createSignal('initial');
+  const cleanup = vi.fn();
   const implementation: Page<{}> = {
     untrackedKeys: [],
     async render() {
       return () => {
         seenContext = useContext(InRenderedRoute);
-        return { html: document.createElement('div'), title: 'Home' };
+        const html = document.createElement('div');
+        createEffect(text, value => { html.textContent = value; });
+        onCleanup(cleanup);
+        return { html, title: 'Home' };
       };
     },
   };
@@ -28,10 +33,17 @@ it('provides the rendered route without leaking context to unrelated owners', as
     });
     expect(seenContext).toBe(rendered);
     expect(runWithOwner(unrelatedOwner, () => useContext(InRenderedRoute))).toBe(null);
+    flush();
+    expect(rendered.renderOutput!.html.textContent).toBe('initial');
+    expect(cleanup).not.toHaveBeenCalled();
+    setText('updated');
+    flush();
+    expect(rendered.renderOutput!.html.textContent).toBe('updated');
   } finally {
     params.owner.dispose();
     unrelatedOwner.dispose();
   }
+  expect(cleanup).toHaveBeenCalledOnce();
 });
 
 it('skips a pre-cancelled factory and disposes its parameter owner exactly once', async () => {

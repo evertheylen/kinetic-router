@@ -11,15 +11,16 @@ allowBuilds:
 catalog:
   '@dovetail-js/utils': ^0.8.0
   '@playwright/test': ^1.64.1
-  '@solidjs/web': 2.0.0-beta.8
+  # Solid 2 and its Vite plugin are still prereleases; keep compatible versions pinned.
+  '@solidjs/vite-plugin': 3.0.0-next.50
+  '@solidjs/web': 2.0.0-rc.15
   '@types/dom-navigation': ^1.0.7
-  '@types/node': ^25.6.0
-  happy-dom: ^20.11.1
-  solid-js: 2.0.0-beta.8
-  typescript: ^6.0.3
-  vite: 8.0.0-beta.18
-  vite-plugin-solid: 3.0.0-next.5
-  vitest: ^4.1.5
+  '@types/node': ^26.6.5
+  happy-dom: ^21.0.3
+  solid-js: 2.0.0-rc.15
+  typescript: ^7.0.2
+  vite: ^8.3.4
+  vitest: ^5.0.5
 
 catalogMode: prefer
 

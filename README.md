@@ -1,7 +1,7 @@
 # kinetic-router
 
 A type-safe client-side router for SolidJS, built on the browser's Navigation API.
-Requires Solid 2.0 beta and a browser with Navigation API support; no History API fallback.
+Requires a Solid 2.0 release candidate and a browser with Navigation API support; no History API fallback.
 
 ## Status / TODO
 

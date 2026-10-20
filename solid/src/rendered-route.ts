@@ -1,4 +1,4 @@
-import { createComponent, createContext, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
+import { createComponent, createContext, createRenderEffect, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
 
@@ -90,7 +90,7 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
 
       runWithOwner(owner, () => {
         // Use the public context provider: owner internals are mangled in production.
-        flatten(createComponent(InRenderedRoute, {
+        const content = createComponent(InRenderedRoute, {
           value: res,
           get children() {
             return untrack(() => {
@@ -105,7 +105,11 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
               return output.html;
             });
           },
-        }));
+        });
+        // Resolve synchronously so renderer errors reject construction, then keep
+        // the provider's lazy children observed until this page owner is disposed.
+        flatten(content);
+        createRenderEffect(() => flatten(content), () => {});
       });
 
       // Application callbacks can cancel construction synchronously too.
