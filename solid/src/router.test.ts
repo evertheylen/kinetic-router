@@ -11,6 +11,7 @@ import { Router } from './router.js';
 import { MemoryEngine, type MemoryEntry } from './memory-engine.js';
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from './frame.js';
 import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
+import type { PagePreparationContext } from './page.js';
 
 function installRootFrame() {
   const el = document.createElement('div');
@@ -101,11 +102,13 @@ function createNestedApp(
   const counters = { outer: 0, layout: 0, alpha: 0, beta: 0, outside: 0 };
   const cleanups = { ...counters };
   const rendered: Partial<Record<Name, RenderedRoute>> = {};
+  const contexts: Partial<Record<Name, PagePreparationContext>> = {};
 
   for (const name of ['outer', 'layout', 'alpha', 'beta', 'outside'] as const) {
     router.implement(routes[name], {
       untrackedKeys: [],
-      async render() {
+      async render(_params, context) {
+        contexts[name] = context;
         counters[name]++;
         if (name === 'beta' && betaReady !== undefined) await betaReady;
         return () => {
@@ -132,7 +135,7 @@ function createNestedApp(
 
   const frame = installRootFrame();
   const ready = vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
-  return { router, engine, routes, frame, counters, cleanups, rendered, ready };
+  return { router, engine, routes, frame, counters, cleanups, rendered, contexts, ready };
 }
 
 describe('Router on a MemoryEngine', () => {
@@ -283,6 +286,164 @@ describe('Router on a MemoryEngine', () => {
 
     await app.engine.back().finished;
     expect(app.frame.textContent).toBe('home page');
+  });
+});
+
+describe('page lifecycle', () => {
+  it('allows the first async renderer to be superseded without stranding the facade or orphaning its initialization', async () => {
+    const slow = route({}), home = route({});
+    const engine = new MemoryEngine('/slow');
+    const router = new Router(root({ slow, home }), { engine });
+    const gate = Promise.withResolvers<void>();
+    const started = vi.fn(), cleanup = vi.fn();
+    const slowOutput = vi.fn(() => ({ html: document.createElement('section'), title: 'Slow' }));
+    router.implement(slow, {
+      untrackedKeys: [],
+      async render() {
+        started();
+        onCleanup(cleanup);
+        await gate.promise;
+        return slowOutput;
+      },
+    });
+    router.implement(home, {
+      untrackedKeys: [],
+      async render() {
+        return () => ({ html: document.createTextNode('home'), title: 'Home' });
+      },
+    });
+    const frame = installRootFrame();
+    try {
+      await vi.waitFor(() => expect(started).toHaveBeenCalledOnce());
+      await router.navigate(home.locate({})).finished;
+      expect(router.currentLocator()?.route).toBe(home);
+      expect(frame.textContent).toBe('home');
+      expect(cleanup).toHaveBeenCalledOnce();
+      gate.resolve();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(slowOutput).not.toHaveBeenCalled();
+      expect(router.currentLocator()?.route).toBe(home);
+      expect(document.title).toBe('Home');
+      await router.navigate(home.locate({})).finished;
+    } finally { gate.resolve(); }
+  });
+
+  it('focuses only the active leaf and renews retained fetch signals without rerendering', async () => {
+    const app = createNestedApp(10);
+    await app.ready;
+    const status = (name: keyof typeof app.rendered) => app.rendered[name]!.renderArgs.pageStatus;
+    const initialOuter = status('outer').fetchSignal()!;
+    const initialAlpha = status('alpha').fetchSignal()!;
+    expect(status('outer').isVisible()).toBe(true);
+    expect(status('layout').hasFocus()).toBe(false);
+    expect(status('outer').hasFocus()).toBe(false);
+    expect(status('alpha').hasFocus()).toBe(true);
+
+    await app.router.navigate(app.routes.beta.locate({})).finished;
+    const initialBeta = status('beta').fetchSignal()!;
+    expect(status('outer').fetchSignal()).toBe(initialOuter);
+    expect(initialAlpha.aborted).toBe(true);
+    expect(status('alpha').shouldFetch()).toBe(false);
+    expect(status('alpha').isVisible()).toBe(false);
+    expect(status('alpha').hasFocus()).toBe(false);
+    expect(status('beta').hasFocus()).toBe(true);
+
+    await app.router.navigate(app.routes.outside.locate({})).finished;
+    expect(initialOuter.aborted).toBe(true);
+    expect(initialBeta.aborted).toBe(true);
+    // Construction was adopted; cancellation of its original navigation is
+    // independent of the retained page's renewable fetch-active period.
+    expect(app.contexts.beta!.signal.aborted).toBe(false);
+    expect(status('outer').fetchSignal()).toBeUndefined();
+    await app.engine.back().finished;
+    expect(status('outer').fetchSignal()).not.toBe(initialOuter);
+    expect(status('outer').fetchSignal()?.aborted).toBe(false);
+    expect(status('beta').fetchSignal()).not.toBe(initialBeta);
+    expect(status('beta').fetchSignal()?.aborted).toBe(false);
+    expect(status('beta').hasFocus()).toBe(true);
+    expect(status('layout').hasFocus()).toBe(false);
+    expect(status('outside').shouldFetch()).toBe(false);
+    expect(app.counters).toEqual({ outer: 1, layout: 1, alpha: 1, beta: 1, outside: 1 });
+    expect(app.cleanups).toEqual({ outer: 0, layout: 0, alpha: 0, beta: 0, outside: 0 });
+  });
+
+  it('keeps unfinished construction invisible and title/scroll updates activation-only', async () => {
+    const gate = Promise.withResolvers<void>();
+    const app = createNestedApp(1, new MemoryEngine('/outside'), gate.promise);
+    await app.ready;
+    await vi.waitFor(() => expect(document.title).toBe('outside'));
+    const outside = app.frame.firstChild;
+    const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const navigation = app.router.navigate(app.routes.beta.locate({}));
+    try {
+      await vi.waitFor(() => expect(app.rendered.layout).toBeDefined());
+      const status = app.rendered.layout!.renderArgs.pageStatus;
+      expect(status.shouldFetch()).toBe(true);
+      expect(status.isVisible()).toBe(false);
+      expect(status.hasFocus()).toBe(false);
+      expect(app.contexts.beta?.signal.aborted).toBe(false);
+      expect(app.frame.firstChild).toBe(outside);
+      expect(app.rendered.outer!.renderOutput!.html.parentNode).toBeNull();
+      expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
+      expect(document.title).toBe('outside');
+      expect(scroll).not.toHaveBeenCalled();
+      gate.resolve();
+      await navigation.finished;
+      await vi.waitFor(() => expect(document.title).toBe('beta'));
+      expect(status.isVisible()).toBe(true);
+      expect(status.hasFocus()).toBe(false);
+      expect(app.rendered.beta!.renderArgs.pageStatus.hasFocus()).toBe(true);
+      expect(app.rendered.outside!.renderArgs.pageStatus.shouldFetch()).toBe(false);
+      expect(app.cleanups.outside).toBe(1);
+    } finally {
+      gate.resolve();
+      await navigation.finished;
+      scroll.mockRestore();
+    }
+  });
+
+  it.each(['lazy', 'renderer'] as const)('observes fire-and-forget cancellation and late %s rejection, then retries', async phase => {
+    const home = route({}), slow = route({});
+    const engine = new MemoryEngine('/home');
+    const router = new Router(root({ home, slow }), { engine });
+    const gate = Promise.withResolvers<void>();
+    const cleanup = vi.fn(), output = vi.fn(() => ({ html: document.createElement('div'), title: 'Slow' }));
+    const implementation = {
+      untrackedKeys: [] as const,
+      async render() { return () => ({ html: document.createElement('div'), title: 'Home' }); },
+    };
+    router.implement(home, implementation);
+    const render = vi.fn(async () => {
+      if (phase === 'renderer' && render.mock.calls.length === 1) {
+        onCleanup(cleanup);
+        await gate.promise;
+      }
+      return output;
+    });
+    const load = vi.fn(async () => {
+      if (phase === 'lazy' && load.mock.calls.length === 1) await gate.promise;
+      return { untrackedKeys: implementation.untrackedKeys, render };
+    });
+    router.implementLazy(slow, load, { untrackedKeys: implementation.untrackedKeys });
+    const frame = installRootFrame();
+    await vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
+    const first = router.navigate(slow.locate({}));
+    await vi.waitFor(() => expect(phase === 'lazy' ? load : render).toHaveBeenCalledOnce());
+    await router.navigate(home.locate({})).finished;
+    if (phase === 'renderer') expect(cleanup).toHaveBeenCalledOnce();
+    // Deliberately do not observe `first.finished` until after rejection.
+    const failure = new Error('late rejected application work');
+    gate.reject(failure);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await expect(first.finished).rejects.toBe(failure);
+    expect(output).not.toHaveBeenCalled();
+    expect(frame.textContent).toBe('');
+    expect(router.currentLocator()?.route).toBe(home);
+    expect(document.title).toBe('Home');
+    await router.navigate(slow.locate({})).finished;
+    expect(output).toHaveBeenCalledOnce();
+    expect(router.currentLocator()?.route).toBe(slow);
+    if (phase === 'renderer') expect(cleanup).toHaveBeenCalledOnce();
   });
 });
 
@@ -527,7 +688,8 @@ describe('bounded page caching', () => {
     const navigation = app.router.navigate(app.routes.beta.locate({}));
     const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
     try {
-      await vi.waitFor(() => expect(app.frame.querySelector('[data-page="layout"]')).not.toBeNull());
+      await vi.waitFor(() => expect(app.rendered.layout).toBeDefined());
+      expect(app.frame.textContent).toBe('outside');
       const outerNode = app.rendered.outer!.renderOutput!.html;
       const layoutNode = app.rendered.layout!.renderOutput!.html;
       await app.router.navigate(app.routes.outside.locate({})).finished;
@@ -589,7 +751,8 @@ describe('bounded page caching', () => {
     await app.ready;
     const navigation = app.router.navigate(app.routes.beta.locate({}));
     const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(app.frame.querySelector('[data-page="layout"]')).not.toBeNull());
+    await vi.waitFor(() => expect(app.rendered.layout).toBeDefined());
+    expect(app.frame.textContent).toBe('outside');
     const outerNode = app.rendered.outer!.renderOutput!.html;
     fail(error);
     expect(await outcome).toBe(error);

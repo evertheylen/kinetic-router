@@ -5,7 +5,7 @@ import { AnyParamDefs, convertParamsByKey } from "@kinetic-router/definition/par
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
 import { locatorToUrl, serializePathParams, SerializedPathParams, urlToLocator } from "@kinetic-router/url";
 
-import { Page, PageStatus } from "./page.js";
+import { Page } from "./page.js";
 import { AppState, SerializedAppState } from "./app-state.js";
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame.js";
 import { createParamStorage, ParamStorage } from "./params.js";
@@ -19,6 +19,17 @@ import { EngineEntry, EngineNavigateEvent, EngineNavigationResult, EntrySource, 
 export type NavigationMode = 'push' | 'replace' | 'menu';
 export type NavigateOptions = Pick<NavigationInfo, 'forceNewInstance'> & {
   mode?: NavigationMode,
+};
+
+/** Constructed output has no live frame, parameter, or history side effects.
+ * The caller must either activate it or dispose it; adopt transfers ownership
+ * to the history cache. Stage 3 can stage its new suffix in isolated containers. */
+export type PreparedNavigation = {
+  readonly routes: readonly RenderedRoute[],
+  readonly reusedCount: number,
+  readonly signal: AbortSignal,
+  adopt(): void,
+  dispose(): void,
 };
 
 type MenuBookmark = { id: string, key: string };
@@ -51,7 +62,7 @@ export class ActualRouter<
 
   readonly rrCache: RenderedRouteCache;
 
-  // TODO use Backstage!
+  // TODO: Stage 3 — mount prepared output in isolated Backstage containers.
 
   protected pendingRender: AbortController | undefined;
 
@@ -66,8 +77,6 @@ export class ActualRouter<
 
   protected _currentLocator: Accessor<Locator<any> | undefined>;
   protected _setCurrentLocator: Setter<Locator<any> | undefined>;
-  protected activeLeaf: Accessor<RenderedRoute | undefined>;
-  protected setActiveLeaf: Setter<RenderedRoute | undefined>;
 
   rootFrame!: FrameDelegate;
 
@@ -83,7 +92,6 @@ export class ActualRouter<
     this.rrCache = rrCache;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
-    [this.activeLeaf, this.setActiveLeaf] = createSignal();
     [this.navigationVersion, this.setNavigationVersion] = createSignal(0);
   }
 
@@ -91,7 +99,7 @@ export class ActualRouter<
     return this._currentLocator();
   }
 
-  async init() {
+  init() {
     //@ts-ignore
     window.__router = this;
 
@@ -108,7 +116,12 @@ export class ActualRouter<
 
     // setup after initial navigation stuff to avoid weird unwanted behaviour
     this.engine.attach({
-      handleNavigate: (event) => this.handleNavigateEvent(event),
+      handleNavigate: (event) => {
+        const rendering = this.handleNavigateEvent(event);
+        // Engine-initiated navigation can be fire-and-forget too.
+        void rendering.catch(() => {});
+        return rendering;
+      },
       handleDispose: (entryId) => {
         this.rrCache.unreference(entryId);
         for (const [route, bookmarks] of this.bookmarks) {
@@ -122,7 +135,10 @@ export class ActualRouter<
       },
       handleBeforeCommit: () => this.handleBeforeCommit(),
     });
+    return this.initializeEntry();
+  }
 
+  protected async initializeEntry() {
     const state = this.getState(this.engine.currentEntry()!)!;
     
     const newLocator: Locator<any> = {
@@ -148,8 +164,15 @@ export class ActualRouter<
       this.engine.updateCurrentEntry(serializedState);
     }
 
+    if (this.engine.currentEntry()?.id !== state.id) return;
     this.recordVisit(state.locator);
-    await this.renderNavigation(state, undefined, {});
+    const controller = this.beginRender();
+    try {
+      await this.renderNavigation(state, undefined, {}, controller);
+    } catch (error) {
+      // A successor owns rendering now. Genuine initialization errors still fail.
+      if (!controller.signal.aborted) throw error;
+    }
   }
 
   navigate<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, options?: NavigateOptions) {
@@ -211,12 +234,18 @@ export class ActualRouter<
 
   protected executeDestination({ locator, url, operation }: DestinationSnapshot, info?: Omit<NavigateOptions, 'mode'>): EngineNavigationResult {
     if (operation.type === 'no-op') return { finished: Promise.resolve() };
-    if (operation.type === 'traverse') return this.engine.traverseTo(operation.key, { forceNewInstance: info?.forceNewInstance });
-    return this.engine.navigate({
-      url, history: operation.type,
-      state: AppState.fromLocator(locator).serialize(this.sitemap),
-      info: { forceNewInstance: info?.forceNewInstance },
-    });
+    const result = operation.type === 'traverse'
+      ? this.engine.traverseTo(operation.key, { forceNewInstance: info?.forceNewInstance })
+      : this.engine.navigate({
+        url, history: operation.type,
+        state: AppState.fromLocator(locator).serialize(this.sitemap),
+        info: { forceNewInstance: info?.forceNewInstance },
+      });
+    // Callers can still await failures, but fire-and-forget navigation must not
+    // produce unhandled rejections when a later navigation cancels construction.
+    void result.committed?.catch(() => {});
+    void result.finished?.catch(() => {});
+    return result;
   }
 
   /** Unmatched or unreadable entries may exist in the engine but are not menu
@@ -257,7 +286,8 @@ export class ActualRouter<
   }
 
   /** Called by the engine for every navigation it observes. */
-  protected handleNavigateEvent(event: EngineNavigateEvent): Promise<void> {
+  protected async handleNavigateEvent(event: EngineNavigateEvent): Promise<void> {
+    event.signal.throwIfAborted();
     // could be an existing state!
     const newState = this.getState(event.destination)!;
 
@@ -268,6 +298,8 @@ export class ActualRouter<
       newState,
       event.navigationType === 'traverse' ? event.committedId : event.fromId,
       event.info,
+      this.beginRender(),
+      event.signal,
     );
   }
 
@@ -312,125 +344,151 @@ export class ActualRouter<
       }
     }
 
+  protected beginRender(): AbortController {
+    const previous = this.pendingRender;
+    const controller = new AbortController();
+    this.pendingRender = controller;
+    previous?.abort();
+    return controller;
+  }
+
   protected async renderNavigation(
     newState: AppState,
     cacheId: string | undefined,
-    navInfo: NavigationInfo
+    navInfo: NavigationInfo,
+    controller: AbortController,
+    navigationSignal?: AbortSignal,
   ) {
-    const previousRender = this.pendingRender;
+    const signal = navigationSignal ? AbortSignal.any([controller.signal, navigationSignal]) : controller.signal;
+    let prepared: PreparedNavigation | undefined;
+    try {
+      signal.throwIfAborted();
+      const routes = [...newState.route.nestedInRoutes, newState.route];
+      const cached = cacheId === undefined ? [] : this.rrCache.get(cacheId) ?? [];
+      const changes = calculateRouteChanges(cached, { routes, state: newState });
+      if (navInfo.forceNewInstance) changes[changes.length - 1] = 'render';
+      const firstRender = changes.indexOf('render');
+      const reused = cached.slice(0, firstRender < 0 ? changes.length : firstRender);
+      prepared = await this.prepareNavigation(newState, reused, signal);
+      signal.throwIfAborted();
+      this.activateNavigation(newState, prepared, signal);
+    } finally {
+      // Disposal is a no-op once history has adopted the output. Failure disposes
+      // construction without pretending that the navigation was superseded.
+      prepared?.dispose();
+      if (this.pendingRender === controller) this.pendingRender = undefined;
+    }
+  }
+
+  /** Construction never mounts frames, writes live params, or registers history.
+   * Reused ancestors are pinned, not modified. A future Backstage caller can
+   * stage only routes.slice(reusedCount), then revalidate before activation. */
+  protected async prepareNavigation(
+    state: AppState, reused: readonly RenderedRoute[], requestSignal: AbortSignal,
+  ): Promise<PreparedNavigation> {
     const controller = new AbortController();
     const { signal } = controller;
-    this.pendingRender = controller;
-
     const createdParams: ParamStorage[] = [];
     const createdRoutes: RenderedRoute[] = [];
-    const renderedRoutes: RenderedRoute[] = [];
-    let committed = false;
-    let releaseReused: (() => void) | undefined;
-    const discard = () => {
-      if (committed) return; // Successful stacks belong to the cache now.
+    const releaseReused = this.rrCache.retainForRender(reused);
+    let ownsConstruction = true;
+    const detach = () => {
+      requestSignal.removeEventListener('abort', dispose);
+      releaseReused();
+    };
+    const adopt = () => {
+      signal.throwIfAborted();
+      ownsConstruction = false;
+      detach();
+    };
+    const dispose = () => {
+      if (!ownsConstruction) return;
+      ownsConstruction = false;
+      controller.abort(requestSignal.reason);
       for (const params of createdParams.toReversed()) params.owner.dispose();
       for (const rendered of createdRoutes.toReversed()) {
         const html = rendered.renderOutput?.html;
         if (html !== undefined) html.parentNode?.removeChild(html);
       }
-      releaseReused?.();
+      detach();
     };
-    signal.addEventListener('abort', discard, { once: true });
+    requestSignal.addEventListener('abort', dispose, { once: true });
 
     try {
-      previousRender?.abort();
+      requestSignal.throwIfAborted();
       signal.throwIfAborted();
-      const newRouteStack = [...newState.route.nestedInRoutes, newState.route];
-      const potentialReusedRoutes = cacheId === undefined ? [] : this.rrCache.get(cacheId) ?? [];
-      const routeChanges = calculateRouteChanges(
-        potentialReusedRoutes,
-        { routes: newRouteStack, state: newState }
-      );
-      if (navInfo.forceNewInstance) routeChanges[routeChanges.length - 1] = 'render';
-      const firstRender = routeChanges.indexOf('render');
-      releaseReused = this.rrCache.retainForRender(potentialReusedRoutes.slice(0, firstRender < 0 ? routeChanges.length : firstRender));
-
-      let i = 0;
-      let frame: FrameDelegate | undefined = this.rootFrame;
-      for (; i < routeChanges.length; i++) {
-        signal.throwIfAborted();
-        if (routeChanges[i] === 'render') break;
-        const reused = potentialReusedRoutes[i];
-        if (routeChanges[i] === 'set-params') {
-          for (const [pd, value] of reused.renderArgs.params.ownedValues) {
-            if (value.reactive) value.write(newState.paramsByDefinition.get(pd));
-          }
-        }
-        this.assertFrame(frame, reused.route);
-        frame.setElement(reused.renderOutput!.html);
-        frame = reused.subFrame;
-        renderedRoutes.push(reused);
-      }
-
-      let parentParamStorage: Promise<ParamStorage> | undefined = i === 0
-        ? undefined
-        : Promise.resolve(potentialReusedRoutes[i - 1].renderArgs.params);
-      let framePromise = Promise.resolve(frame);
-
-      // Prepare nested renders concurrently, but mount them in ancestor order.
-      for (; i < routeChanges.length; i++) {
-        const route = newRouteStack[i];
-        const implementationPromise = (
-          this.implCache.get(route) ?? this.implMap.loadImplementation(route).then(impl => {
-            this.implCache.set(route, impl);
-            return impl;
-          })
-        );
-        const paramStorage: Promise<ParamStorage> = Promise.all([implementationPromise, parentParamStorage]).then(
-          ([implementation, parent]) => {
-            signal.throwIfAborted();
-            const params = createParamStorage({ route, implementation, paramMap: newState.paramsByDefinition, parent });
-            createdParams.push(params);
-            return params;
-          }
-        );
-        parentParamStorage = paramStorage;
-
-        const renderPromise = Promise.all([implementationPromise, paramStorage]).then(
-          ([implementation, params]) => renderRoute({
-            renderArgs: { params, pageStatus: this.createPageStatus() },
-            implementation,
-            route,
-            signal,
-          })
-        );
-        framePromise = Promise.all([renderPromise, framePromise]).then(([rendered, frame]) => {
+      const routes = [...state.route.nestedInRoutes, state.route];
+      const pending = reused.map(rendered => Promise.resolve(rendered));
+      let parentParams = reused.at(-1) && Promise.resolve(reused.at(-1)!.renderArgs.params);
+      for (let i = reused.length; i < routes.length; i++) {
+        const route = routes[i];
+        const implementation = Promise.resolve(this.implCache.get(route) ?? this.implMap.loadImplementation(route).then(impl => {
+          this.implCache.set(route, impl);
+          return impl;
+        }));
+        const deferParent = i === reused.length && reused.length > 0;
+        const params: Promise<ParamStorage> = Promise.all([implementation, parentParams]).then(([impl, parent]) => {
           signal.throwIfAborted();
-          createdRoutes.push(rendered);
-          this.assertFrame(frame, route);
-          runWithOwner(rendered.owner, () => createEffect(
-            () => this.activeLeaf() === rendered ? rendered.renderOutput!.title : undefined,
-            title => { if (title !== undefined) document.title = title; }
-          ));
-          renderedRoutes.push(rendered);
-          frame.setElement(rendered.renderOutput!.html);
-          return rendered.subFrame;
+          const storage = createParamStorage({ route, implementation: impl, paramMap: state.paramsByDefinition, parent, deferParent });
+          createdParams.push(storage);
+          return storage;
         });
+        parentParams = params;
+        pending.push(Promise.all([implementation, params]).then(([implementation, params]) => {
+          signal.throwIfAborted();
+          return renderRoute({ route, implementation, renderArgs: { params }, signal });
+        }).then(rendered => {
+          createdRoutes.push(rendered);
+          signal.throwIfAborted();
+          runWithOwner(rendered.owner, () => createEffect(
+            () => rendered.renderArgs.pageStatus.hasFocus() ? rendered.renderOutput!.title : undefined,
+            title => { if (title !== undefined) document.title = title; },
+          ));
+          return rendered;
+        }));
       }
-
-      const leafFrame = await framePromise;
+      // Observe every sibling rejection, even when another branch fails first.
+      const renderedRoutes = await Promise.all(pending);
       signal.throwIfAborted();
-      leafFrame?.clear();
-      this.restoreScrollPositions(newState);
-      this.currentState = newState;
-      committed = true;
-      this.rrCache.markUsedFor(newState.id, renderedRoutes);
-      signal.throwIfAborted();
-      this.setActiveLeaf(renderedRoutes.at(-1));
-      this._setCurrentLocator(newState.locator);
-    } finally {
-      // Also stop sibling work and clean up owners if rendering fails.
-      if (!committed) controller.abort();
-      releaseReused?.();
-      signal.removeEventListener('abort', discard);
-      if (this.pendingRender === controller) this.pendingRender = undefined;
+      return { routes: renderedRoutes, reusedCount: reused.length, signal, adopt, dispose };
+    } catch (error) {
+      dispose();
+      throw error;
     }
+  }
+
+  /** The only phase allowed to touch live frames, parameters and current state. */
+  protected activateNavigation(state: AppState, prepared: PreparedNavigation, signal: AbortSignal): void {
+    signal = AbortSignal.any([signal, prepared.signal]);
+    signal.throwIfAborted();
+    let frame: FrameDelegate | undefined = this.rootFrame;
+    for (const rendered of prepared.routes) {
+      this.assertFrame(frame, rendered.route);
+      frame = rendered.subFrame;
+    }
+    // Solid 2 batches signal writes until the end of this synchronous phase.
+    for (const rendered of prepared.routes.slice(0, prepared.reusedCount)) {
+      signal.throwIfAborted();
+      for (const [pd, value] of rendered.renderArgs.params.ownedValues) {
+        const next = state.paramsByDefinition.get(pd);
+        if (value.reactive && !isEqual(value.read(), next)) value.write(next);
+      }
+    }
+    for (const rendered of prepared.routes.slice(prepared.reusedCount)) rendered.renderArgs.params.activate();
+    frame = this.rootFrame;
+    for (const rendered of prepared.routes) {
+      signal.throwIfAborted();
+      frame!.setElement(rendered.renderOutput!.html);
+      frame = rendered.subFrame;
+    }
+    signal.throwIfAborted();
+    frame?.clear();
+    this.restoreScrollPositions(state);
+    signal.throwIfAborted();
+    this.currentState = state;
+    this.rrCache.markUsedFor(state.id, prepared.routes, prepared.adopt);
+    signal.throwIfAborted();
+    this._setCurrentLocator(state.locator);
   }
 
   protected assertFrame(frame: FrameDelegate | undefined, route: Route<any>): asserts frame is FrameDelegate {
@@ -441,13 +499,4 @@ export class ActualRouter<
     }
   }
 
-  createPageStatus(): PageStatus {
-    // TODO implement PageStatus properly
-    return {
-      shouldFetch: () => true,
-      isVisible: () => true,
-      isAnimating: () => false,
-      hasFocus: () => true
-    };
-  }
 }

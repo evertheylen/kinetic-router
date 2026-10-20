@@ -48,19 +48,40 @@ describe('NavigationApiEngine', () => {
     });
     const event = Object.assign(new Event('navigate'), {
       canIntercept: true, navigationType: 'replace', destination: first,
+      signal: new AbortController().signal,
       info: { forceNewInstance: true }, intercept,
     });
     navigation.dispatchEvent(event);
     await intercept.mock.results[0].value;
     expect(handlers.handleNavigate).toHaveBeenCalledWith({
       navigationType: 'replace', fromId: first.id, committedId: replacement.id,
-      destination: replacement, info: event.info,
+      signal: event.signal, destination: replacement, info: event.info,
     });
     // Programmatic commit observation and interception must not add two listeners.
     navigation.navigate.mockReturnValue({ committed: Promise.resolve(replacement), finished: Promise.resolve(replacement) });
     await engine.navigate({ url: '/replacement', state: {}, history: 'replace' }).committed;
     replacement.dispatchEvent(new Event('dispose'));
     expect(handlers.handleDispose).toHaveBeenCalledExactlyOnceWith(replacement.id);
+  });
+
+  it.each([false, true])('reports application failure unless its own navigation was cancelled (cancelled %s)', async cancelled => {
+    const { navigation, handlers } = setup();
+    const controller = new AbortController();
+    const failure = new DOMException('Application resource failed', 'AbortError');
+    handlers.handleNavigate.mockRejectedValue(failure);
+    const intercept = vi.fn(({ handler }) => handler());
+    const event = Object.assign(new Event('navigate'), {
+      canIntercept: true, navigationType: 'push', signal: controller.signal,
+      info: {}, intercept,
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      if (cancelled) controller.abort();
+      navigation.dispatchEvent(event);
+      await expect(intercept.mock.results[0].value).rejects.toBe(failure);
+      if (cancelled) expect(log).not.toHaveBeenCalled();
+      else expect(log).toHaveBeenCalledExactlyOnceWith('Navigation failed', failure);
+    } finally { log.mockRestore(); }
   });
 
   it('does not orphan a rejected commit while observing disposal', async () => {

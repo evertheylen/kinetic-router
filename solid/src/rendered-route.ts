@@ -1,4 +1,4 @@
-import { createComponent, createContext, flatten, runWithOwner, untrack } from "solid-js";
+import { createComponent, createContext, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
 
@@ -17,6 +17,7 @@ export type RenderedRoute = {
   }
   renderOutput?: {html: Node, title: string },
   owner: SolidRoot,
+  lifecycle: ReturnType<typeof createPageLifecycle>,
   subFrame: FrameDelegate | undefined;
 };
 
@@ -24,49 +25,97 @@ export const InRenderedRoute = createContext<RenderedRoute | null>(null);
 
 export type RenderArgs = {
   params: ParamStorage,
-  pageStatus: PageStatus,
 };
+
+type PageLifecycleState = 'preparing' | 'retained' | 'active' | 'disposed';
+
+/** Owned by one rendered instance. Independent signals keep focus/visibility
+ * changes from invalidating resources that only track their fetch signal. */
+export function createPageLifecycle() {
+  let controller: AbortController | undefined = new AbortController();
+  let disposed = false;
+  // Cancellation can dispose this owner while its renderer is executing.
+  const options = { ownedWrite: true };
+  const [fetchSignal, setFetchSignal] = createSignal<AbortSignal | undefined>(controller.signal, options);
+  const [isVisible, setVisible] = createSignal(false, options);
+  const [hasFocus, setFocus] = createSignal(false, options);
+  const setState = (state: PageLifecycleState, focus = false) => {
+    if (disposed) return;
+    disposed = state === 'disposed';
+    const previous = controller;
+    const fetching = state === 'preparing' || state === 'active';
+    controller = fetching ? controller ?? new AbortController() : undefined;
+    setFetchSignal(controller?.signal);
+    setVisible(state === 'active');
+    setFocus(state === 'active' && focus);
+    // Publish all state before abort callbacks can re-enter the router.
+    if (controller !== previous) previous?.abort();
+  };
+  onCleanup(() => setState('disposed'));
+  const status: PageStatus = {
+    shouldFetch: () => fetchSignal() !== undefined,
+    fetchSignal, isVisible, hasFocus,
+    isAnimating: () => false,
+  };
+  return { status, setState };
+}
 
 export async function renderRoute({ route, implementation, renderArgs, signal }: {
     route: Route<any>,
     implementation: Page<any, any, any>,
     renderArgs: RenderArgs,
-    signal?: AbortSignal,
+    signal: AbortSignal,
   }): Promise<RenderedRoute> {
-    signal?.throwIfAborted();
     const owner = renderArgs.params.owner;
-    const renderFunc = await implementation.render(renderArgs.params.untrackedObject);
-    // Awaited application work can outlive the owner when navigation is superseded.
-    signal?.throwIfAborted();
+    const dispose = () => owner.dispose();
+    signal.addEventListener('abort', dispose, { once: true });
+    try {
+      signal.throwIfAborted();
+      const lifecycle = runWithOwner(owner, createPageLifecycle);
+      const pageStatus = lifecycle.status;
+      const renderFunc = await runWithOwner(owner, () => implementation.render(
+        renderArgs.params.untrackedObject, { signal, pageStatus },
+      ));
+      // Arbitrary application promises may finish after cancellation disposed us.
+      signal.throwIfAborted();
 
-    const res: RenderedRoute = {
-      route,
-      implementation,
-      renderArgs,
-      owner,
-      subFrame: undefined,  // to be set later 
-    };
+      const res: RenderedRoute = {
+        route,
+        implementation,
+        renderArgs: { ...renderArgs, pageStatus },
+        owner,
+        lifecycle,
+        subFrame: undefined,  // to be set later
+      };
 
-    runWithOwner(owner, () => {
-      // Use the public context provider: owner internals are mangled in production.
-      flatten(createComponent(InRenderedRoute, {
-        value: res,
-        get children() {
-          return untrack(() => {
-            let output = renderFunc(renderArgs.params.reactiveProxyObject, renderArgs.pageStatus);
-            while (typeof output === 'function') {
-              output = output();
-            }
-            while (typeof output.html === 'function') {
-              output.html = output.html();
-            }
-            res.renderOutput = output;
-            return output.html;
-          });
-        },
-      }));
-    });
+      runWithOwner(owner, () => {
+        // Use the public context provider: owner internals are mangled in production.
+        flatten(createComponent(InRenderedRoute, {
+          value: res,
+          get children() {
+            return untrack(() => {
+              let output = renderFunc(renderArgs.params.reactiveProxyObject, pageStatus);
+              while (typeof output === 'function') {
+                output = output();
+              }
+              while (typeof output.html === 'function') {
+                output.html = output.html();
+              }
+              res.renderOutput = output;
+              return output.html;
+            });
+          },
+        }));
+      });
 
-    return res;
+      // Application callbacks can cancel construction synchronously too.
+      signal.throwIfAborted();
+      return res;
+    } catch (error) {
+      owner.dispose();
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', dispose);
+    }
   }
 

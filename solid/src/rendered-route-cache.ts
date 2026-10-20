@@ -32,11 +32,13 @@ export class RenderedRouteCache {
   }
 
   /** Called after a successful render; completing a navigation refreshes LRU. */
-  markUsedFor(id: string, renderedRoutes: readonly RenderedRoute[]) {
+  markUsedFor(id: string, renderedRoutes: readonly RenderedRoute[], adoptConstruction?: () => void) {
     const previous = this.pages();
     this.current = [...renderedRoutes];
     this.cache.delete(id);
     this.cache.set(id, this.current);
+    // Transfer ownership before lifecycle abort/cleanup callbacks can navigate.
+    adoptConstruction?.();
 
     for (const entryId of this.cache.keys()) {
       // The visible stack is the newest entry and must never be evicted.
@@ -46,6 +48,13 @@ export class RenderedRouteCache {
       this.cache.delete(entryId);
     }
 
+    const active = new Set(this.current);
+    for (const rendered of previous) {
+      if (!active.has(rendered)) rendered.lifecycle.setState('retained');
+    }
+    for (const rendered of this.current) {
+      rendered.lifecycle.setState('active', rendered === this.current.at(-1));
+    }
     this.disposeUnused(previous);
   }
 

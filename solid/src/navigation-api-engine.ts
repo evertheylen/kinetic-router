@@ -47,7 +47,7 @@ export class NavigationApiEngine implements NavigationEngine {
       const fromId = window.navigation.currentEntry!.id;
 
       event.intercept({
-        handler: () => {
+        handler: async () => {
           // Read the final identity after commit, not from the pre-commit destination.
           const committedEntry = window.navigation.currentEntry!;
 
@@ -55,21 +55,25 @@ export class NavigationApiEngine implements NavigationEngine {
           // navigate(); watch them here so handleDispose fires for them too
           this.watchDispose(committedEntry);
 
-          return handlers.handleNavigate({
-            navigationType: event.navigationType as 'push' | 'replace' | 'traverse',
-            fromId,
-            committedId: committedEntry.id,
-            destination: committedEntry,
-            info,
-          });
+          try {
+            await handlers.handleNavigate({
+              navigationType: event.navigationType as 'push' | 'replace' | 'traverse',
+              signal: event.signal,
+              fromId,
+              committedId: committedEntry.id,
+              destination: committedEntry,
+              info,
+            });
+          } catch (error) {
+            // Cancellation belongs to this event, not to an error's name. A
+            // page throwing AbortError without navigation cancellation is a failure.
+            if (!event.signal.aborted) console.error('Navigation failed', error);
+            throw error;
+          }
         },
       });
     });
 
-    window.navigation.addEventListener('navigateerror', (event) => {
-      console.error("NAVIGATION ERROR");
-      console.error(event.error);
-    });
   }
 
   currentEntry(): EngineEntry | undefined {

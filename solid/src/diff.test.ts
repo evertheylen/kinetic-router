@@ -3,7 +3,8 @@ import { param, route, type Route } from '@kinetic-router/definition';
 import { AppState } from './app-state.js';
 import { calculateRouteChanges } from './diff.js';
 import { createParamStorage } from './params.js';
-import type { RenderedRoute } from './rendered-route.js';
+import { runWithOwner } from 'solid-js';
+import { createPageLifecycle, type RenderedRoute } from './rendered-route.js';
 
 const created: RenderedRoute[] = [];
 
@@ -11,9 +12,10 @@ function rendered(definition: Route<any>, values: Record<string, any>, untracked
   const state = AppState.fromLocator(definition.locate(values));
   const implementation = { untrackedKeys, async render() { return () => ({ html: document.createElement('div'), title: '' }); } };
   const params = createParamStorage({ route: definition, implementation, paramMap: state.paramsByDefinition, parent: parent?.renderArgs.params });
+  const lifecycle = runWithOwner(params.owner, createPageLifecycle);
   const result: RenderedRoute = {
-    route: definition, implementation, owner: params.owner,
-    renderArgs: { params, pageStatus: { shouldFetch: () => true, isVisible: () => true, isAnimating: () => false, hasFocus: () => true } },
+    route: definition, implementation, owner: params.owner, lifecycle,
+    renderArgs: { params, pageStatus: lifecycle.status },
     renderOutput: undefined, subFrame: undefined,
   };
   created.push(result);

@@ -1,6 +1,5 @@
 import { Accessor, createOwner, createSignal, runWithOwner, Setter } from "solid-js";
 import { AnyParamDefs, ParamDef, ParamMap, ParamValues } from "@kinetic-router/definition/params.js";
-import { RenderedRoute } from "./rendered-route.js";
 import { SolidRoot } from "./utils.js";
 import { Page } from "./page.js";
 import { Route } from "@kinetic-router/definition/routes.js";
@@ -27,8 +26,11 @@ export function mapParamObjectToParamInitMap<ParamDefs extends AnyParamDefs>(
 }
 
 
-export function createParamStorage({parent, route, implementation, paramMap}: {
+export function createParamStorage({parent, route, implementation, paramMap, deferParent = false}: {
   parent?: ParamStorage,
+  /** Read inherited destination values without changing a reused live parent.
+   * activate() reconnects those reads to the parent's signals. */
+  deferParent?: boolean,
   route: Route<any>,
   implementation: Page<any, any, any>,
   paramMap: ParamMap,
@@ -47,6 +49,16 @@ export function createParamStorage({parent, route, implementation, paramMap}: {
   );
 
   const allValues = new Map(parent?.allValues);
+  let activate = () => {};
+  if (deferParent && parent !== undefined) {
+    const [parentActive, setParentActive] = runWithOwner(owner, () => createSignal(false));
+    activate = () => { setParentActive(true); };
+    for (const [pd, value] of allValues) {
+      if (value.reactive) {
+        allValues.set(pd, { ...value, read: () => parentActive() ? value.read() : paramMap.get(pd) });
+      }
+    }
+  }
   const ownedValues = new Map<ParamDef<any>, Value<any>>();
   for (const pd of ownedParamDefs) {
     let value: Value<any>;
@@ -98,6 +110,7 @@ export function createParamStorage({parent, route, implementation, paramMap}: {
   // Step 5: store in stack
   return {
     parent: parent,
+    activate,
     ownedValues,
     allValues,
     reactiveProxyObject,
@@ -116,6 +129,7 @@ export type Value<T> = ReactiveValue<T> | UntrackedValue<T>;
 // This owner is reused to render!
 export type ParamStorage = {
   parent: ParamStorage | undefined;
+  activate(): void;
   owner: SolidRoot,
   allValues: Map<ParamDef<any>, Value<any>>;
   ownedValues: Map<ParamDef<any>, Value<any>>;

@@ -52,9 +52,12 @@ export class Router<
       this.implMap.check();
       const engine = options?.engine ?? new NavigationApiEngine();
       const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache);
-      await router.init();
+      const initialization = router.init();
+      // The engine is attached; navigation need not wait for the first page's
+      // arbitrary async factory. currentLocator stays undefined until activation.
       this.actualRouter = router;
       this.setDidInit(true);
+      await initialization;
     });
   }
 

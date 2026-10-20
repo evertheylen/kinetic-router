@@ -87,6 +87,25 @@ test('a pending render can finish while its check is running', async ({ page }) 
   await expect(page.getByTestId('result')).toHaveText('✅ Passed', { timeout: 1000 });
 });
 
+test('browser cancellation without a successor commit cannot mount a late renderer', async ({ page }) => {
+  await page.goto('/home?scenario=slow&checks=manual');
+  const app = page.getByTestId('scenario-app');
+  await app.getByRole('link', { name: 'Slow', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigation.transition?.navigationType)).toBe('push');
+  // A cancelled successor aborts the pending browser navigation, but never
+  // reaches the router's handleNavigate callback with a new committed entry.
+  await page.evaluate(async () => {
+    navigation.addEventListener('navigate', event => event.preventDefault(), { once: true });
+    const result = navigation.navigate('/home');
+    await Promise.allSettled([result.committed, result.finished]);
+  });
+  await page.getByRole('button', { name: 'Finish rendering', exact: true }).click();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await expect(app.getByRole('heading', { name: 'Home', exact: true })).toBeVisible();
+  await expect(app.getByRole('heading', { name: 'Slow', exact: true })).toHaveCount(0);
+  await expect(page).toHaveTitle('Home');
+});
+
 test('unexpected navigation reports the actual history mismatch', async ({ page }) => {
   await page.goto('/home?scenario=links&checks=manual');
   await page.getByTestId('scenario-app').getByRole('link', { name: 'About' }).click();

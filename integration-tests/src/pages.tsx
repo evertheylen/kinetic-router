@@ -43,9 +43,9 @@ export function delayedPage(title: string) {
   const page = simplePage(title);
   return {
     finish,
-    page: { ...page, async render(params) {
+    page: { ...page, async render(params, context) {
       await ready;
-      return page.render(params);
+      return page.render(params, context);
     } } satisfies TestPage,
   };
 }

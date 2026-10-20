@@ -173,6 +173,27 @@ describe('MemoryEngine', () => {
     expect(engine.entries().map(entry => entry.url)).toEqual(['/', '/c', '/d']);
   });
 
+  it('cancels prior navigation signals on commits, but not on no-op traversal', async () => {
+    const { engine, events } = attachedEngine('/');
+    await engine.navigate({ url: '/a', state: undefined, history: 'push' }).finished;
+    const first = events.at(-1)!.signal;
+    expect(first.aborted).toBe(false);
+    await engine.navigate({ url: '/b', state: undefined, history: 'push' }).finished;
+    const second = events.at(-1)!.signal;
+    expect(first.aborted).toBe(true);
+    expect(second.aborted).toBe(false);
+    await engine.traverseTo(engine.currentEntry().key).finished;
+    expect(second.aborted).toBe(false);
+    await engine.back().finished;
+    const traversal = events.at(-1)!.signal;
+    expect(second.aborted).toBe(true);
+    expect(traversal.aborted).toBe(false);
+    const count = events.length;
+    await engine.navigate({ url: '/ignored', state: undefined, history: 'replace', info: { ignore: true } }).finished;
+    expect(traversal.aborted).toBe(true);
+    expect(events).toHaveLength(count);
+  });
+
   it('updates the state of the current entry', () => {
     const { engine } = attachedEngine('/');
     engine.updateCurrentEntry({ hello: 'world' });

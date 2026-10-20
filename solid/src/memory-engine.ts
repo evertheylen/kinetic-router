@@ -21,6 +21,7 @@ export class MemoryEngine implements NavigationEngine {
   protected stack: MemoryEntry[];
   protected index = 0;
   protected nextId = 0;
+  protected navigationController: AbortController | undefined;
 
   constructor(initialUrl: string = '/') {
     const id = this.mintId();
@@ -80,6 +81,7 @@ export class MemoryEngine implements NavigationEngine {
 
     const info = intent.info ?? {};
     const committed = Promise.resolve(entry);
+    const signal = this.beginNavigation();
 
     let finished: Promise<unknown>;
     if (info.ignore) {
@@ -87,6 +89,7 @@ export class MemoryEngine implements NavigationEngine {
     } else {
       finished = handlers.handleNavigate({
         navigationType: intent.history,
+        signal,
         fromId: from.id,
         committedId: entry.id,
         destination: this.toSource(entry),
@@ -125,8 +128,10 @@ export class MemoryEngine implements NavigationEngine {
 
     this.index = targetIndex;
     const committed = Promise.resolve(target);
+    const signal = this.beginNavigation();
     const finished = info.ignore ? committed : handlers.handleNavigate({
       navigationType: 'traverse',
+      signal,
       fromId: from.id,
       committedId: target.id,
       destination: this.toSource(target),
@@ -142,6 +147,14 @@ export class MemoryEngine implements NavigationEngine {
 
   forward() {
     return this.traverse(+1);
+  }
+
+  protected beginNavigation(): AbortSignal {
+    const previous = this.navigationController;
+    const controller = new AbortController();
+    this.navigationController = controller;
+    previous?.abort();
+    return controller.signal;
   }
 
   protected mintId(): string {

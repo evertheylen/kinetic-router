@@ -1,16 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { route } from '@kinetic-router/definition';
 import { onCleanup, runWithOwner } from 'solid-js';
-import type { Page, PageStatus } from './page.js';
+import type { Page } from './page.js';
 import { createParamStorage } from './params.js';
-import type { RenderedRoute } from './rendered-route.js';
+import { createPageLifecycle, type RenderedRoute } from './rendered-route.js';
 import { RenderedRouteCache } from './rendered-route-cache.js';
 
 const created: RenderedRoute[] = [];
-const pageStatus: PageStatus = {
-  shouldFetch: () => true, isVisible: () => true,
-  isAnimating: () => false, hasFocus: () => true,
-};
 
 function page(parent?: RenderedRoute) {
   const definition = parent?.route.nestedRoute({}) ?? route({});
@@ -23,11 +19,12 @@ function page(parent?: RenderedRoute) {
     route: definition, implementation, paramMap: new Map(),
     parent: parent?.renderArgs.params,
   });
+  const lifecycle = runWithOwner(params.owner, createPageLifecycle);
   const cleanup = vi.fn();
   runWithOwner(params.owner, () => onCleanup(cleanup));
   const rendered: RenderedRoute = {
-    route: definition, implementation, owner: params.owner,
-    renderArgs: { params, pageStatus }, renderOutput: { html, title: '' },
+    route: definition, implementation, owner: params.owner, lifecycle,
+    renderArgs: { params, pageStatus: lifecycle.status }, renderOutput: { html, title: '' },
     subFrame: undefined,
   };
   created.push(rendered);

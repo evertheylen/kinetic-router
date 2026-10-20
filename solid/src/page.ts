@@ -6,6 +6,10 @@ export type PageStatus = {
    * or currently visible. */
   shouldFetch: () => boolean,
 
+  /** Signal for the current fetch-active period. Aborted on retention/disposal;
+   * resumption supplies a fresh signal. Track this accessor in resource code. */
+  fetchSignal: () => AbortSignal | undefined,
+
   /** The current page is visible to the user, in whatever state that might be. */
   isVisible: () => boolean,
 
@@ -16,6 +20,14 @@ export type PageStatus = {
   hasFocus: () => boolean,
 }
 
+/** Available before the async factory runs. `signal` cancels construction only;
+ * use pageStatus.fetchSignal() for resources that can resume after retention.
+ * Register Solid cleanup synchronously, before awaiting application work. */
+export type PagePreparationContext = {
+  signal: AbortSignal,
+  pageStatus: PageStatus,
+};
+
 export type StaticPage<UntrackedKeys extends string> = {
   readonly untrackedKeys: ReadonlyArray<UntrackedKeys>,
 }
@@ -25,7 +37,7 @@ export type Page<
   Input extends object = any,
   UntrackedKeys extends (keyof Input & string) = any,
 > = {
-  readonly render: (untrackedParams: {[K in UntrackedKeys]: Input[K]}) => Promise<(
+  readonly render: (untrackedParams: {[K in UntrackedKeys]: Input[K]}, context: PagePreparationContext) => Promise<(
     (reactiveParams: {[K in Exclude<keyof Input, UntrackedKeys>]: Input[K]}, pageStatus: PageStatus) => (
       {html: JSX.Element, title: string } & Output
     )

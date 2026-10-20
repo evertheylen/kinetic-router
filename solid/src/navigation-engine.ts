@@ -52,6 +52,10 @@ export type NavigationIntent = {
 export type EngineNavigateEvent = {
   navigationType: 'push' | 'replace' | 'traverse',
 
+  /** Host cancellation, including cancellation without a successor commit.
+   * The router must stop construction when this signal aborts. */
+  signal: AbortSignal,
+
   /** Id of the entry that was current *before* this navigation committed.
    * Used as the cache id for reusing rendered routes. */
   fromId: string | undefined,
