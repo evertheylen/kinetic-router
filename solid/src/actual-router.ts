@@ -6,11 +6,11 @@ import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Page, PageStatus } from "./page.js";
 import { AppState, SerializedAppState } from "./app-state.js";
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame.js";
-import { createParamStorage, mapParamObjectToParamInitMap, ParamInit, ParamStorage, ReactiveValue } from "./params.js";
+import { createParamStorage, ParamStorage, ReactiveValue } from "./params.js";
 import { renderRoute, RenderedRoute } from "./rendered-route.js";
 import { SolidImplementationMap } from "./implementation-map.js";
 import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
-import { calculateRouteChanges, RouteChange } from "./diff.js";
+import { calculateRouteChanges } from "./diff.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
 import { EngineNavigateEvent, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
 
@@ -26,21 +26,11 @@ export class ActualRouter<
   // Simple cache for implementation, never cleaned (and no plans to do so)
   readonly implCache = new Map<Route<any>, Page<ExtraOutput, any, any>>();
 
-  // Cache for rendered routes, may be cleaned in the future depending on disposed history
-  // entries and max history depth.
-  readonly rrCache = new RenderedRouteCache();
-
-  // Cache for HistoryStates, just to avoid deserializing when possible.
-  // Keys are given by either:
-  //   - the UA as the `id` of a NavigationEntry
-  //   - a temporary ID made by navigate calls we control that avoids serializing the AppState (should be very shortlived, .isTemporary())
-  readonly stateCache = new Map<string, AppState>();
+  readonly rrCache: RenderedRouteCache;
 
   // TODO use Backstage!
 
-  // currentAppState: AppState | undefined;
-  // currentAppStateId: string | undefined;
-  currentRenderedRoutes: RenderedRoute[] = [];
+  protected pendingRender: AbortController | undefined;
 
   /** The AppState currently on screen; the target for pre-commit
    * scroll-position capture (see handleBeforeCommit). */
@@ -54,11 +44,13 @@ export class ActualRouter<
   constructor(
     sitemap: RootSitemap,
     implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>,
-    engine: NavigationEngine
+    engine: NavigationEngine,
+    rrCache = new RenderedRouteCache(),
   ) {
     this.sitemap = sitemap;
     this.implMap = implMap;
     this.engine = engine;
+    this.rrCache = rrCache;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
   }
@@ -127,8 +119,6 @@ export class ActualRouter<
     }
 
     const state = AppState.fromLocator(locator);
-    // note that at this point, it is a temporary ID
-    this.stateCache.set(state.id, state);
 
     //console.debug('navigate to ', state);
     
@@ -146,7 +136,9 @@ export class ActualRouter<
    * positions) onto that entry — after commit, `updateCurrentEntry` would
    * target the *new* entry and corrupt its state. */
   protected handleBeforeCommit(): void {
-    if (this.currentState === undefined) return;
+    // A committed entry may still be rendering while an older page is displayed.
+    // Never overwrite that unfinished entry with the displayed page's state.
+    if (this.currentState === undefined || this.currentState.id !== this.engine.currentEntry()?.id) return;
 
     this.currentState.scrollTops = this.captureScrollPositions();
     this.engine.updateCurrentEntry(this.currentState.serialize(this.sitemap));
@@ -157,31 +149,25 @@ export class ActualRouter<
     // could be an existing state!
     const newState = this.getState(event.destination)!;
 
-    if (event.navigationType === 'traverse') {
-      return this.renderNavigation(newState, newState.id, event.info);
-    } else {
-      // TODO handle 'replace' better if needed?
-      if (newState?.isTemporary()) {
-        this.stateCache.delete(newState.id);
-      }
-      newState.id = event.committedId;
-      return this.renderNavigation(newState, event.fromId, event.info);
-    }
+    newState.id = event.committedId;
+    return this.renderNavigation(
+      newState,
+      event.navigationType === 'traverse' ? event.committedId : event.fromId,
+      event.info,
+    );
   }
 
     /** Make an AppState based on the best source of information */
     protected getState(entry: EntrySource) {
-      if (entry.id) {
-        const state = this.stateCache.get(entry.id);
-        if (state !== undefined) return state;
-      }
-
       if (entry.getState !== undefined) {
         const rawState = entry.getState();
         // null happens for entries created without state (e.g. native link
         // clicks); treat it like a missing state and fall back to the URL
         if (rawState !== undefined && rawState !== null) {
-          return AppState.deserialize(this.sitemap, rawState as SerializedAppState)
+          const state = AppState.deserialize(this.sitemap, rawState as SerializedAppState);
+          // Serialized state can still carry a temporary or replaced entry id.
+          if (entry.id) state.id = entry.id;
+          return state;
         }
       }
 
@@ -210,133 +196,120 @@ export class ActualRouter<
   protected async renderNavigation(
     newState: AppState,
     cacheId: string | undefined,
-    navInfo: NavigationInfo & { forceNewInstance?: boolean }
+    navInfo: NavigationInfo
   ) {
-    const newRouteStack = [...newState.route.nestedInRoutes, newState.route];
-    const staticImpl = this.implMap.getStaticPartOfImplementation(newState.route); // sync!
-    const untrackedParamDefs = new Set(staticImpl.untrackedKeys.map(k => newState.route.paramDefs[k]));
+    const previousRender = this.pendingRender;
+    const controller = new AbortController();
+    const { signal } = controller;
+    this.pendingRender = controller;
 
-    const potentialReusedRoutes: RenderedRoute[] = [];
-    if (cacheId !== undefined) {
-      for (const route of newRouteStack) {
-        const rendered = this.rrCache.getEntry(cacheId, route)?.rendered;
-
-        if (rendered === undefined) {
-          break;
-        } else {
-          potentialReusedRoutes.push(rendered);
-        }
+    const createdParams: ParamStorage[] = [];
+    const createdRoutes: RenderedRoute[] = [];
+    const renderedRoutes: RenderedRoute[] = [];
+    let committed = false;
+    const discard = () => {
+      if (committed) return; // Successful stacks belong to the cache now.
+      for (const params of createdParams.toReversed()) params.owner.dispose();
+      for (const rendered of createdRoutes.toReversed()) {
+        const html = rendered.renderOutput?.html;
+        if (html !== undefined) html.parentNode?.removeChild(html);
       }
-    }
+    };
+    signal.addEventListener('abort', discard, { once: true });
 
-    // compare current state with new requested state
-    const routeChanges = calculateRouteChanges(
-      untrackedParamDefs,
-      potentialReusedRoutes,
-      { routes: newRouteStack, state: newState }
-    );
+    try {
+      previousRender?.abort();
+      signal.throwIfAborted();
+      const newRouteStack = [...newState.route.nestedInRoutes, newState.route];
+      const staticImpl = this.implMap.getStaticPartOfImplementation(newState.route);
+      const untrackedParamDefs = new Set(staticImpl.untrackedKeys.map(k => newState.route.paramDefs[k]));
+      const potentialReusedRoutes = cacheId === undefined ? [] : this.rrCache.get(cacheId) ?? [];
+      const routeChanges = calculateRouteChanges(
+        untrackedParamDefs,
+        potentialReusedRoutes,
+        { routes: newRouteStack, state: newState }
+      );
+      if (navInfo.forceNewInstance) routeChanges[routeChanges.length - 1] = 'render';
 
-    if (navInfo.forceNewInstance) {
-      routeChanges[routeChanges.length-1] = 'render';
-    }
-
-    // console.debug(`renderNavigation ${cacheId} > ${newState.id}: ${routeChanges.join(' | ')}`);
-    // console.debug(`  -> potential reuse:`, potentialReusedRoutes);
-
-    let i=0;
-    let frame: FrameDelegate | undefined = this.rootFrame;
-
-    // Loop through routechanges with simple parameter changes
-    for (; i<routeChanges.length; i++) {
-      const routeChange = routeChanges[i];
-
-      if (routeChange === 'render') {
-        break;
-      } else {
-        const reuseRoute = potentialReusedRoutes[i]!;
-
-        if (routeChange === 'set-params') {
-          // TODO check if rest of code uses ownedValues correctly? (i.e. we're not updating needlessly here)
-          const paramValues = reuseRoute.renderArgs.params.ownedValues;
-          for (const [pd, value] of paramValues.entries()) {
-            // TODO should these be memos? if so, can we simplify the rest of the code?
-            // should be reactive!
+      let i = 0;
+      let frame: FrameDelegate | undefined = this.rootFrame;
+      for (; i < routeChanges.length; i++) {
+        if (routeChanges[i] === 'render') break;
+        const reused = potentialReusedRoutes[i];
+        if (routeChanges[i] === 'set-params') {
+          for (const [pd, value] of reused.renderArgs.params.ownedValues) {
             (value as ReactiveValue<any>).write(newState.paramsByDefinition.get(pd)!);
           }
         }
-
-        this.assertFrame(frame, reuseRoute.route);
-        // even if nothing changes, still have to adjust frames!
-        frame.setElement(reuseRoute.renderOutput!.html);
-
-        frame = reuseRoute.subFrame;
+        this.assertFrame(frame, reused.route);
+        frame.setElement(reused.renderOutput!.html);
+        frame = reused.subFrame;
+        renderedRoutes.push(reused);
       }
+
+      let parentParamStorage: Promise<ParamStorage> | undefined = i === 0
+        ? undefined
+        : Promise.resolve(potentialReusedRoutes[i - 1].renderArgs.params);
+      let framePromise = Promise.resolve(frame);
+
+      // Prepare nested renders concurrently, but mount them in ancestor order.
+      for (; i < routeChanges.length; i++) {
+        const route = newRouteStack[i];
+        const isLeafRoute = i === routeChanges.length - 1;
+        const implementationPromise = (
+          this.implCache.get(route) ?? this.implMap.loadImplementation(route).then(impl => {
+            this.implCache.set(route, impl);
+            return impl;
+          })
+        );
+        const paramStorage: Promise<ParamStorage> = Promise.all([implementationPromise, parentParamStorage]).then(
+          ([implementation, parent]) => {
+            signal.throwIfAborted();
+            const params = createParamStorage({ route, implementation, paramMap: newState.paramsByDefinition, parent });
+            createdParams.push(params);
+            return params;
+          }
+        );
+        parentParamStorage = paramStorage;
+
+        const renderPromise = Promise.all([implementationPromise, paramStorage]).then(
+          ([implementation, params]) => renderRoute({
+            renderArgs: { params, pageStatus: this.createPageStatus() },
+            implementation,
+            route,
+            signal,
+          })
+        );
+        framePromise = Promise.all([renderPromise, framePromise]).then(([rendered, frame]) => {
+          signal.throwIfAborted();
+          createdRoutes.push(rendered);
+          this.assertFrame(frame, route);
+          if (isLeafRoute) {
+            runWithOwner(rendered.owner, () => createEffect(
+              () => rendered.renderOutput!.title,
+              title => { document.title = title; }
+            ));
+          }
+          renderedRoutes.push(rendered);
+          frame.setElement(rendered.renderOutput!.html);
+          return rendered.subFrame;
+        });
+      }
+
+      await framePromise;
+      signal.throwIfAborted();
+      this.restoreScrollPositions(newState);
+      this.currentState = newState;
+      committed = true;
+      this.rrCache.markUsedFor(newState.id, renderedRoutes);
+      signal.throwIfAborted();
+      this._setCurrentLocator(newState.locator);
+    } finally {
+      // Also stop sibling work and clean up owners if rendering fails.
+      if (!committed) controller.abort();
+      signal.removeEventListener('abort', discard);
+      if (this.pendingRender === controller) this.pendingRender = undefined;
     }
-
-    let parentParamStorage: Promise<ParamStorage> | undefined = undefined;
-    let framePromise = Promise.resolve(frame);
-    this.currentRenderedRoutes = potentialReusedRoutes.slice(0, i);
-
-    for (; i<routeChanges.length; i++) {
-      const route = newRouteStack[i];
-      // capture per iteration: `i` has moved on by the time the callbacks run
-      const isLeafRoute = i === routeChanges.length-1;
-      // assume all changes are 'render' from here on out
-      const implementationPromise = (
-        this.implCache.get(route) ?? this.implMap.loadImplementation(route).then((impl) => {
-          this.implCache.set(route, impl);
-          return impl;
-        })
-      );
-
-      const paramStorage: Promise<ParamStorage> = Promise.all([implementationPromise, parentParamStorage]).then(
-        ([implementation, parent]) => createParamStorage({route, implementation, paramMap: newState.paramsByDefinition, parent})
-      );
-
-      parentParamStorage = paramStorage;
-      
-      const renderPromise = Promise.all([implementationPromise, parentParamStorage]).then(
-        ([implementation, params]) => renderRoute({
-          renderArgs: { params, pageStatus: this.createPageStatus() },
-          implementation,
-          route,
-        })
-      );
-
-      framePromise = Promise.all([renderPromise, framePromise]).then(([rendered, frame]) => {
-        this.assertFrame(frame, route);
-
-        if (isLeafRoute) {
-          // TODO gate this behind some check if this route is active and most-specific (via PageStatus?)
-          runWithOwner(rendered.owner, () => createEffect(
-            () => rendered.renderOutput!.title,
-            (title) => { document.title = title; }
-          ));
-        }
-
-        // push should be safe as these run in order thanks to framePromise
-        this.currentRenderedRoutes.push(rendered);
-        frame.setElement(rendered.renderOutput!.html);
-        return rendered.subFrame;
-      });
-    }
-
-    // (Scroll positions of the outgoing page are captured in
-    // handleBeforeCommit, pre-commit — the only moment the outgoing entry is
-    // still the engine's current entry.)
-
-    this.stateCache.set(newState.id, newState);
-    // await final promise that ties all the others together (they form a DAG normally)
-    await framePromise;
-
-    // Restore scroll positions from the new state (set during a previous navigate-away).
-    this.restoreScrollPositions(newState);
-
-    // Update other state
-    this.currentState = newState;
-    this._setCurrentLocator(newState.locator);
-
-    this.rrCache.markUsedFor(newState.id, this.currentRenderedRoutes);
   }
 
   protected assertFrame(frame: FrameDelegate | undefined, route: Route<any>): asserts frame is FrameDelegate {

@@ -17,7 +17,6 @@ export type RenderedRoute = {
   }
   renderOutput?: {html: Node, title: string },
   owner: SolidRoot,
-  navigationEntryId?: string,
   subFrame: FrameDelegate | undefined;
 };
 
@@ -28,13 +27,17 @@ export type RenderArgs = {
   pageStatus: PageStatus,
 };
 
-export async function renderRoute({ route, implementation, renderArgs }: {
+export async function renderRoute({ route, implementation, renderArgs, signal }: {
     route: Route<any>,
     implementation: Page<any, any, any>,
     renderArgs: RenderArgs,
+    signal?: AbortSignal,
   }): Promise<RenderedRoute> {
+    signal?.throwIfAborted();
     const owner = renderArgs.params.owner;
     const renderFunc = await implementation.render(renderArgs.params.untrackedObject);
+    // Awaited application work can outlive the owner when navigation is superseded.
+    signal?.throwIfAborted();
 
     const res: RenderedRoute = {
       route,
