@@ -1,4 +1,4 @@
-import { AnyParamDefs, ParamDef, ParamValues } from "./params.js";
+import { AnyParamDefs, convertParamsByDefinition, convertParamsByKey, ParamDef, ParamValues } from "./params.js";
 import { Sitemap } from "./sitemap.js";
 
 export type Locator<ParamDefs extends Record<string, ParamDef<any>>> = {
@@ -6,9 +6,9 @@ export type Locator<ParamDefs extends Record<string, ParamDef<any>>> = {
   values: ParamValues<ParamDefs>
 }
 
-/** Contract for a future `route` prop: explicit values use a Locator; a bare
- * Route is allowed only when no values are required. Convert a bare Route
- * with locate({}); never infer values from the currently displayed page. */
+/** Link destinations: explicit values use a Locator; a bare
+ * Route is allowed only when no values are required. Preserve its identity
+ * until resolution; never infer values from the currently displayed page. */
 export type RouteTarget<ParamDefs extends AnyParamDefs> =
   | Locator<ParamDefs>
   | ({} extends ParamValues<ParamDefs> ? Route<ParamDefs> : never);
@@ -29,7 +29,7 @@ export class Route<ParamDefs extends Record<string, ParamDef<any>> = any> {
 
   // Returns Locator<any> because Alias may resolve to a different route.
   locate(values: ParamValues<ParamDefs>): Locator<any> {
-    return { route: this, values };
+    return resolveAliases({ route: this, values });
   }
 
   nestedRoute<const OwnParamDefs extends AnyParamDefs>(ownParamDefs: OwnParamDefs): Route<ParamDefs & OwnParamDefs> {
@@ -60,20 +60,13 @@ export class Alias<ParamDefs extends Record<string, ParamDef<any>>> extends Rout
     super(paramDefs);
     this.aliasFunc = aliasFunc;
   }
-
-  override locate(values: ParamValues<ParamDefs>): Locator<any> {
-    // core aliasing logic
-    let locator: Locator<any> = this.aliasFunc(values);
-    while (locator.route instanceof Alias) {
-      locator = locator.route.aliasFunc(locator.values);
-    }
-    return locator;
-  }
 }
 
 export function resolveAliases(locator: Locator<any>) {
-  while (locator.route instanceof Alias) {
-    locator = locator.route.locate(locator.values);
+  for (;;) {
+    const { route } = locator;
+    const values = convertParamsByKey(convertParamsByDefinition(locator.values, route.paramDefs), route.paramDefs);
+    if (!(route instanceof Alias)) return { route, values };
+    locator = route.aliasFunc(values);
   }
-  return locator;
 }

@@ -2,16 +2,22 @@ import { isEqual } from '@dovetail-js/utils/equal.js';
 import type { AppState } from './app-state.js';
 import type { PreparedNavigation } from './actual-router.js';
 
+/** Retains completed, unused preparations separately from the history cache.
+ * Either zero disables retention. Incomplete construction is cancelled instead
+ * of retained; unused output is LRU-evicted after its last consumer releases it. */
 export type PrefetchCacheOptions = {
+  /** Maximum unused preparations; non-negative safe integer. Default: 3. */
   maxEntries?: number,
+  /** Retention in finite, nonnegative milliseconds. Default: 30_000. */
   retainFor?: number,
 };
 
-/** Internal consumer ownership. Immediate release bypasses this consumer's grace
- * period (configuration changes, navigation cancellation, or teardown). */
+/** One consumer's interest. Links manage their own cancellation grace period. */
 export type PreparationLease = {
   ready: Promise<PreparedNavigation>,
-  release(immediate?: boolean): void,
+  /** Pin existing work for another consumer; never restart removed work. */
+  retain(): PreparationLease | undefined,
+  release(): void,
   discard(): void,
 };
 
@@ -22,10 +28,11 @@ type Preparation = {
   consumers: Set<() => void>,
   ready: Promise<PreparedNavigation>,
   output?: PreparedNavigation,
+  adopted?: boolean,
 };
 
-/** Unused completed output only; history ownership lives in RenderedRouteCache.
- * Map insertion order is the unused-instance LRU, refreshed on last release. */
+/** Consumer interests are independent of history ownership. Only unused,
+ * unadopted output enters the speculative LRU, refreshed on last release. */
 export class PreparationRegistry {
   private disposed = false;
   private entries = new Set<Preparation>();
@@ -46,12 +53,9 @@ export class PreparationRegistry {
 
   acquire(
     state: AppState, entryId: string | undefined,
-    build: (signal: AbortSignal) => Promise<PreparedNavigation>, cancelDelay = 0,
+    build: (signal: AbortSignal) => Promise<PreparedNavigation>,
   ): PreparationLease | undefined {
     if (this.disposed) return;
-    if (!Number.isFinite(cancelDelay) || cancelDelay < 0) {
-      throw new RangeError('cancelDelay must be finite and non-negative');
-    }
     let entry = this.find(state, entryId);
     if (!entry) {
       entry = {
@@ -59,11 +63,9 @@ export class PreparationRegistry {
         ready: undefined!,
       };
       const created = entry;
+      const construction = Promise.withResolvers<PreparedNavigation>();
       this.entries.add(created);
-      created.ready = Promise.resolve().then(() => {
-        created.controller.signal.throwIfAborted();
-        return build(created.controller.signal);
-      }).then(output => {
+      created.ready = construction.promise.then(output => {
         if (!this.entries.has(created)) {
           output.dispose();
           created.controller.signal.throwIfAborted();
@@ -71,8 +73,10 @@ export class PreparationRegistry {
         created.output = {
           ...output,
           adopt: () => {
+            // Existing consumers keep their interest, but new navigations must
+            // not claim output that now belongs to a particular history entry.
+            created.adopted = true;
             output.adopt();
-            this.forget(created);
           },
         };
         return created.output;
@@ -80,76 +84,62 @@ export class PreparationRegistry {
         this.remove(created);
         throw error;
       });
-      // Speculative consumers need not await failures; later requests retry.
+      // Register ownership before construction can re-enter the Router. Start
+      // synchronously so reused parents are pinned before history can dispose them.
       void created.ready.catch(() => {});
+      const lease = this.join(created);
+      try { construction.resolve(build(created.controller.signal)); }
+      catch (error) { construction.reject(error); }
+      return lease;
     }
-    return this.join(entry, cancelDelay);
+    return this.join(entry);
   }
 
   claim(state: AppState, entryId: string | undefined): PreparationLease | undefined {
     if (this.disposed) return;
     const entry = this.find(state, entryId);
-    return entry && this.join(entry, 0);
+    return entry && this.join(entry);
   }
 
   private find(state: AppState, entryId: string | undefined) {
-    return [...this.entries].find(entry => entry.entryId === entryId
+    return [...this.entries].find(entry => !entry.adopted && entry.entryId === entryId
       && entry.state.route === state.route
       && [...state.paramsByDefinition].every(([pd, value]) => isEqual(entry.state.paramsByDefinition.get(pd), value)));
   }
 
-  private join(entry: Preparation, cancelDelay: number): PreparationLease {
+  private join(entry: Preparation): PreparationLease {
     clearTimeout(this.unused.get(entry));
     this.unused.delete(entry);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let released = false;
     const drop = () => {
-      clearTimeout(timer);
       if (!entry.consumers.delete(drop) || !this.entries.has(entry)) return;
       if (entry.consumers.size === 0) this.idle(entry);
     };
     entry.consumers.add(drop);
-    for (const rendered of entry.output?.routes.slice(entry.output.reusedCount) ?? []) {
-      rendered.lifecycle.setState('preparing');
-    }
+    entry.output?.setRequested(true);
     return {
       ready: entry.ready,
-      release: (immediate = false) => {
-        if (immediate) { released = true; drop(); }
-        else if (!released) {
-          released = true;
-          if (cancelDelay === 0) drop();
-          else timer = setTimeout(drop, cancelDelay);
-        }
-      },
+      retain: () => !this.disposed && this.entries.has(entry) ? this.join(entry) : undefined,
+      release: drop,
       discard: () => this.remove(entry),
     };
   }
 
   private idle(entry: Preparation) {
-    if (!entry.output || this.maxEntries === 0 || this.retainFor === 0) {
+    if (entry.adopted || !entry.output || this.maxEntries === 0 || this.retainFor === 0) {
       this.remove(entry);
       return;
     }
     // Record ownership before abort callbacks can reacquire/navigate.
     this.unused.set(entry, setTimeout(() => this.remove(entry), this.retainFor));
-    for (const rendered of entry.output.routes.slice(entry.output.reusedCount)) {
-      if (!this.unused.has(entry)) break;
-      rendered.lifecycle.setState('retained');
-    }
+    entry.output.setRequested(false);
     while (this.unused.size > this.maxEntries) this.remove(this.unused.keys().next().value!);
   }
 
-  private forget(entry: Preparation) {
-    this.entries.delete(entry);
+  private remove(entry: Preparation) {
+    if (!this.entries.delete(entry)) return;
     clearTimeout(this.unused.get(entry));
     this.unused.delete(entry);
     for (const drop of entry.consumers) drop();
-  }
-
-  private remove(entry: Preparation) {
-    if (!this.entries.has(entry)) return;
-    this.forget(entry);
     entry.controller.abort();
     entry.output?.dispose();
   }

@@ -1,5 +1,5 @@
 import { index, Json, JsonObject, Locator, Route } from "@kinetic-router/definition";
-import { defaultSerde, RootSitemap, slugLookup } from "@kinetic-router/definition/root.js";
+import { RootSitemap, slugLookup } from "@kinetic-router/definition/root.js";
 import { Sitemap } from "@kinetic-router/definition/sitemap.js";
 
 import { AnyParamDefs, ParamMap, convertParamsByDefinition, convertParamsByKey, ParamValues } from "@kinetic-router/definition/params.js";
@@ -16,15 +16,11 @@ export class AppState {
   id: string;
   scrollTops = new Map<string, number>();
 
-  constructor(route: Route<any>, paramsByDefinition: ParamMap, paramsByKey?: ParamValues<any>, id?: string, scrollTops?: Map<string, number>) {
+  constructor(route: Route<any>, paramsByDefinition: ParamMap, id?: string, scrollTops?: Map<string, number>) {
     this.route = route;
     this.paramsByDefinition = paramsByDefinition;
 
-    if (paramsByKey !== undefined) {
-      this.paramsByKey = paramsByKey;
-    } else {
-      this.paramsByKey = convertParamsByKey(paramsByDefinition, this.route.paramDefs)
-    }
+    this.paramsByKey = convertParamsByKey(paramsByDefinition, route.paramDefs);
 
     this.id = id ?? getTemporaryId();
     if (scrollTops !== undefined) {
@@ -34,10 +30,6 @@ export class AppState {
 
   get locator(): Locator<any> {
     return { route: this.route, values: this.paramsByKey };
-  }
-
-  isTemporary() {
-    return this.id.startsWith('__temp__');
   }
 
   serialize(root: RootSitemap) {
@@ -54,7 +46,7 @@ export class AppState {
 
   static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, id?: string) {
     const paramsByDefinition = convertParamsByDefinition(locator.values, locator.route.paramDefs);
-    return new AppState(locator.route, paramsByDefinition, locator.values, id);
+    return new AppState(locator.route, paramsByDefinition, id);
   }
 
   static deserialize(root: RootSitemap, data: SerializedAppState): AppState {
@@ -96,7 +88,7 @@ export class AppState {
       }
     }
 
-    return new AppState(route, snapShotByDef, data.snapShotByKey, data.id, scrollTops);
+    return new AppState(route, snapShotByDef, data.id, scrollTops);
   }
 }
 

@@ -1,0 +1,19 @@
+{
+  "name": "@kinetic-router/testing-utils",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./fingerprint.js": "./src/fingerprint.tsx",
+    "./fingerprint.css": "./src/fingerprint.css"
+  },
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@solidjs/web": "catalog:",
+    "solid-js": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

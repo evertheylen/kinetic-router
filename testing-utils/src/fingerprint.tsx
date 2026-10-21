@@ -18,11 +18,16 @@ export function Fingerprint() {
     let animation: Animation | undefined;
     function update() {
       animation?.cancel();
-      animation = reducedMotion.matches ? undefined : border.animate(
-        [{ strokeDashoffset: '0px' }, { strokeDashoffset: '-100px' }],
-        // Refs can run while SVG nodes still belong to an inert template document.
-        { duration: 10_000, iterations: Infinity, easing: 'linear', timeline: document.timeline },
+      // Refs can run in Solid's inert template document. Construct the live
+      // timeline explicitly: Firefox ignores Element.animate's timeline option.
+      animation = reducedMotion.matches ? undefined : new Animation(
+        new KeyframeEffect(border,
+          [{ strokeDashoffset: '0px' }, { strokeDashoffset: '-100px' }],
+          { duration: 10_000, iterations: Infinity, easing: 'linear' },
+        ),
+        document.timeline,
       );
+      animation?.play();
     }
     update();
     reducedMotion.addEventListener('change', update);

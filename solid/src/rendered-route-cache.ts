@@ -1,7 +1,11 @@
 import { RenderedRoute } from "./rendered-route.js";
 
 /** LRU of complete history-entry stacks, oldest first. Keeping whole stacks
- * ensures a cached child always keeps its rendered ancestors alive. */
+ * ensures a cached child always keeps its rendered ancestors alive. The budget
+ * bounds both distinct rendered instances and retained entry indexes; shared
+ * ancestors count once and visible output is exempt. Successful renders refresh
+ * recency and enforce the budget without timers; incoming/outgoing stacks can
+ * coexist while rendering. Dispose only after all ownership pins are released. */
 export class RenderedRouteCache {
   readonly cache = new Map<string, readonly RenderedRoute[]>();
   readonly maxPages: number;
@@ -42,6 +46,11 @@ export class RenderedRouteCache {
     this.current = [...renderedRoutes];
     this.cache.delete(id);
     this.cache.set(id, this.current);
+    // Incoming routes become fetch-active before preparation releases its pins.
+    // This does not abort resources and keeps their signal stable on adoption.
+    for (const rendered of this.current) {
+      rendered.lifecycle.setState('active', rendered === this.current.at(-1));
+    }
     // Transfer ownership before lifecycle abort/cleanup callbacks can navigate.
     adoptConstruction?.();
 
@@ -58,9 +67,6 @@ export class RenderedRouteCache {
     for (const rendered of previous) {
       if (!active.has(rendered)) rendered.lifecycle.setState('retained');
     }
-    for (const rendered of this.current) {
-      rendered.lifecycle.setState('active', rendered === this.current.at(-1));
-    }
     this.disposeUnused(previous);
   }
 
@@ -69,6 +75,14 @@ export class RenderedRouteCache {
     if (previous === undefined) return;
     this.cache.delete(id);
     this.disposeUnused(new Set(previous));
+  }
+
+  dispose() {
+    const previous = this.pages();
+    this.cache.clear();
+    this.current = [];
+    this.rendering.clear();
+    this.disposeUnused(previous);
   }
 
   protected pages(): Set<RenderedRoute> {

@@ -10,6 +10,8 @@ import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
 import type { PagePreparationContext } from './page.js';
 
 class TestRouter extends ActualRouter<{}, {}> {
+  get hasPendingNavigation() { return this.pendingTransition !== undefined; }
+
   prepare(locator: Locator<any>, reused: readonly RenderedRoute[], signal: AbortSignal) {
     return this.prepareNavigation(AppState.fromLocator(locator), reused, signal);
   }
@@ -117,6 +119,42 @@ async function createApp(betaReady?: Promise<void>) {
   flush();
   return { router, engine, frame, routes: { layout, alpha, beta }, rendered, initialParams, cleanups };
 }
+
+it('finishes the transition when persisting committed state throws, without changing visible output', async () => {
+  const app = await createApp();
+  const before = app.frame.firstChild;
+  const outgoingId = app.engine.currentEntry().id;
+  const update = app.engine.updateCurrentEntry.bind(app.engine);
+  const failure = new Error('Cannot persist state');
+  const spy = vi.spyOn(app.engine, 'updateCurrentEntry').mockImplementation(state => {
+    if (app.engine.currentEntry().id !== outgoingId) throw failure;
+    update(state);
+  });
+  try {
+    await expect(app.router.navigate(app.routes.beta.locate({ id: 'bob' })).finished).rejects.toBe(failure);
+    expect(app.router.hasPendingNavigation).toBe(false);
+    expect(app.frame.firstChild).toBe(before);
+    expect(app.router.currentLocator()?.values).toEqual({ id: 'alice' });
+    expect(app.rendered.beta).toBeUndefined();
+    spy.mockRestore();
+    await app.router.navigate(app.routes.beta.locate({ id: 'bob' })).finished;
+    expect(app.frame.textContent).toBe('layout bobbeta bob');
+  } finally { spy.mockRestore(); app.router.dispose(); }
+});
+
+it('does not mistake failed initialization for cancellation during transition cleanup', async () => {
+  const home = route({});
+  const sitemap = root({ home });
+  const implementations = new SolidImplementationMap<{}, {}>(sitemap);
+  const failure = new DOMException('Application failure', 'AbortError');
+  implementations.implement(home, { untrackedKeys: [], async render() { throw failure; } });
+  const router = new TestRouter(sitemap, implementations, new MemoryEngine('/home'));
+  installRootFrame();
+  try {
+    await expect(router.init()).rejects.toBe(failure);
+    expect(router.hasPendingNavigation).toBe(false);
+  } finally { router.dispose(); }
+});
 
 it('constructs staged destination output without changing live params, frames, focus, title, scroll or history', async () => {
   const app = await createApp();

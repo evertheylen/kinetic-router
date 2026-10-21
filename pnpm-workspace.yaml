@@ -4,6 +4,7 @@ packages:
   - solid
   - example-app
   - integration-tests
+  - testing-utils
 
 allowBuilds:
   esbuild: true

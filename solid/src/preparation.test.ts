@@ -13,17 +13,18 @@ import type { Page, PagePreparationContext } from './page.js';
 
 const routers: ActualRouter<{}, {}>[] = [];
 afterEach(() => {
-  for (const router of routers.splice(0)) router.disposePreparations();
+  for (const router of routers.splice(0)) router.dispose();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 async function app(options: {
   cache?: PrefetchCacheOptions, maxCachedPages?: number, initialUrl?: string,
+  hiddenDefault?: () => { value: number } | undefined,
   betaGate?: (attempt: number) => Promise<void> | undefined, loadBeta?: (implementation: Page<{}, any, any>) => Promise<Page<{}, any, any>>,
 } = {}) {
   const id = param.path<string>();
-  const hidden = param.hidden<{ value: number }>().optional();
+  const hidden = param.hidden<{ value: number } | undefined>().withDefault(options.hiddenDefault ?? (() => undefined));
   const layout = route({ id, hidden });
   const alpha = layout.nestedRoute({}), beta = layout.nestedRoute({});
   const outside = route({});
@@ -72,18 +73,30 @@ async function app(options: {
   document.body.replaceChildren(frame);
   await router.init();
   flush();
-  const prepare = (locator = beta.locate({ id: 'bob' }), delay = 0) =>
-    router.acquirePreparation(router.resolveDestination(locator), delay)!;
+  const prepare = (locator = beta.locate({ id: 'bob' })) =>
+    router.acquirePreparation(router.resolveDestination(locator))!;
   return { router, engine, output, contexts, cleanups, frame, prepare, routes: { layout, alpha, beta, outside } };
 }
 
-it('defaults to three unused preparations for thirty seconds and validates consumer delays', async () => {
+it('defaults to three unused preparations for thirty seconds', () => {
   const registry = new PreparationRegistry();
   expect(registry.maxEntries).toBe(3);
   expect(registry.retainFor).toBe(30_000);
-  const a = await app();
-  for (const delay of [-1, NaN, Infinity]) expect(() => a.prepare(undefined, delay)).toThrow(RangeError);
-  expect(a.contexts.beta).toHaveLength(0);
+});
+
+it('keeps factory defaults stable from a destination snapshot through preparation and activation', async () => {
+  let value = 0;
+  const a = await app({ hiddenDefault: () => ({ value: ++value }) });
+  expect(value).toBe(1);
+  const snapshot = a.router.resolveDestination({ route: a.routes.beta, values: { id: 'bob' } });
+  expect(snapshot.locator.values.hidden).toEqual({ value: 2 });
+  const lease = a.router.acquirePreparation(snapshot)!;
+  const prepared = await lease.ready;
+  expect((prepared.routes[1].renderArgs.params.reactiveProxyObject as { hidden: { value: number } }).hidden).toEqual({ value: 2 });
+  await a.router.activateDestination(snapshot).finished;
+  lease.release();
+  expect(a.router.currentLocator()?.values.hidden).toEqual({ value: 2 });
+  expect(value).toBe(2);
 });
 
 it('shares equivalent hidden values, stages only the new suffix, and leaves all live state untouched', async () => {
@@ -117,9 +130,9 @@ it('shares equivalent hidden values, stages only the new suffix, and leaves all 
   expect(a.engine.entries().map(e => [e.id, e.url, e.state])).toEqual(history.map(e => [e.id, e.url, e.state]));
   expect(a.router.currentLocator()?.values.id).toBe('alice');
   expect(a.router.rrCache.cache.size).toBe(1);
-  first.release(true);
+  first.release();
   expect(child.renderArgs.pageStatus.shouldFetch()).toBe(true);
-  second.release(true);
+  second.release();
   flush();
   expect(child.renderArgs.pageStatus.shouldFetch()).toBe(false);
   expect(a.cleanups.beta).toBe(0);
@@ -142,35 +155,13 @@ it('does not merge equal hrefs with distinct hidden parameters or interfere with
   expect(hosts[1].isConnected).toBe(true);
 });
 
-it.each([false, true])('counts each consumer grace period independently (reverse release order: %s)', async reverse => {
+it('release and router teardown dispose unfinished owners exactly once', async () => {
   const gate = Promise.withResolvers<void>();
   const a = await app({ betaGate: () => gate.promise });
-  const short = a.prepare(undefined, 20), long = a.prepare(undefined, 100);
-  await vi.waitFor(() => expect(a.contexts.beta).toHaveLength(1));
-  const context = a.contexts.beta[0];
-  vi.useFakeTimers();
-  (reverse ? long : short).release();
-  (reverse ? short : long).release();
-  await vi.advanceTimersByTimeAsync(20);
-  expect(context.signal.aborted).toBe(false);
-  await vi.advanceTimersByTimeAsync(79);
-  expect(context.signal.aborted).toBe(false);
-  await vi.advanceTimersByTimeAsync(1);
-  expect(context.signal.aborted).toBe(true);
-  expect(a.cleanups.beta).toBe(1);
-  gate.resolve();
-  await expect(short.ready).rejects.toMatchObject({ name: 'AbortError' });
-  expect(a.output.beta).toHaveLength(0);
-  expect(document.querySelector('[data-kinetic-router-backstage]')).toBeNull();
-});
-
-it('immediate release and router teardown bypass grace and dispose unfinished owners exactly once', async () => {
-  const gate = Promise.withResolvers<void>();
-  const a = await app({ betaGate: () => gate.promise });
-  const lease = a.prepare(undefined, 1000);
+  const lease = a.prepare();
   await vi.waitFor(() => expect(a.contexts.beta).toHaveLength(1));
   lease.release();
-  lease.release(true);
+  lease.release();
   a.router.disposePreparations();
   expect(a.contexts.beta[0].signal.aborted).toBe(true);
   expect(a.cleanups.beta).toBe(1);
@@ -187,7 +178,7 @@ it('takes navigation ownership before speculative release and adopts under the a
   await vi.waitFor(() => expect(a.contexts.beta).toHaveLength(1));
   const parent = a.output.layout[0];
   const navigation = a.router.navigate(locator, { mode: 'replace' });
-  lease.release(true);
+  lease.release();
   expect(a.contexts.beta[0].signal.aborted).toBe(false);
   gate.resolve();
   const prepared = await lease.ready;
@@ -203,9 +194,65 @@ it('takes navigation ownership before speculative release and adopts under the a
   expect(prepared.routes[1].renderArgs.pageStatus.hasFocus()).toBe(true);
   expect(document.querySelector('[data-kinetic-router-backstage]')).toBeNull();
   a.router.disposePreparations();
-  lease.release(true);
+  lease.release();
   expect(a.cleanups.beta).toBe(0);
   expect(a.contexts.beta[0].signal.aborted).toBe(false);
+});
+
+it.each([0, 10])('preserves all consumer interests across adoption and history eviction (budget %s)', async maxCachedPages => {
+  const a = await app({ maxCachedPages });
+  const target = a.routes.beta.locate({ id: 'bob' });
+  const first = a.prepare(target), second = a.prepare(target);
+  const prepared = await first.ready;
+  const status = prepared.routes[1].renderArgs.pageStatus;
+  const fetching = status.fetchSignal()!;
+  await a.router.navigate(target).finished;
+  const entry = a.engine.currentEntry();
+  await a.router.navigate(a.routes.outside.locate({})).finished;
+  flush();
+  expect(status.isVisible()).toBe(false);
+  expect(status.shouldFetch()).toBe(true);
+  expect(status.fetchSignal()).toBe(fetching);
+  expect(fetching.aborted).toBe(false);
+  expect(a.cleanups.beta).toBe(0);
+  first.release();
+  expect(fetching.aborted).toBe(false);
+
+  // An adopted preparation cannot become a speculative cache hit for a new entry.
+  const next = a.prepare(target);
+  expect(next.ready).not.toBe(first.ready);
+  const fresh = await next.ready;
+  expect(fresh.routes[1]).not.toBe(prepared.routes[1]);
+  second.release();
+  flush();
+  expect(fetching.aborted).toBe(true);
+  expect(a.cleanups.beta).toBe(maxCachedPages === 0 ? 1 : 0);
+  if (maxCachedPages > 0) {
+    expect(a.router.rrCache.get(entry.id)?.[1]).toBe(prepared.routes[1]);
+    const resume = a.router.acquirePreparation(a.router.resolveDestination(target, 'menu'))!;
+    await resume.ready;
+    const renewed = status.fetchSignal()!;
+    expect(renewed).not.toBe(fetching);
+    expect(renewed.aborted).toBe(false);
+    resume.release();
+    expect(renewed.aborted).toBe(true);
+  }
+  next.release();
+});
+
+it('router teardown releases adopted consumer pins without disposing the active page', async () => {
+  const a = await app({ maxCachedPages: 0 });
+  const lease = a.prepare();
+  const prepared = await lease.ready;
+  const fetching = prepared.routes[1].renderArgs.pageStatus.fetchSignal()!;
+  await a.router.navigate(a.routes.beta.locate({ id: 'bob' })).finished;
+  await a.router.navigate(a.routes.outside.locate({})).finished;
+  expect(fetching.aborted).toBe(false);
+  a.router.disposePreparations();
+  lease.release();
+  expect(fetching.aborted).toBe(true);
+  expect(a.cleanups.beta).toBe(1);
+  expect(a.contexts.outside[0].pageStatus.isVisible()).toBe(true);
 });
 
 it('adopts under the same parent after intervening reactive parameter changes without leaking them into prepared children', async () => {
@@ -238,7 +285,7 @@ it('preserves compatible prepared output when an unfinished navigation is supers
   try {
     await vi.waitFor(() => expect(a.contexts.beta).toHaveLength(2));
     const navigation = a.router.navigate(target);
-    lease.release(true);
+    lease.release();
     await navigation.finished;
     expect(a.frame.firstChild).toBe(activeNode);
     expect(a.frame.querySelector('[data-page="beta"]')).toBe(prepared.routes[1].renderOutput!.html);
@@ -256,7 +303,7 @@ it('cancels navigation-owned construction promptly when no speculative owner rem
   const lease = a.prepare();
   await vi.waitFor(() => expect(a.contexts.beta).toHaveLength(1));
   const navigation = a.router.navigate(a.routes.beta.locate({ id: 'bob' }));
-  lease.release(true);
+  lease.release();
   await a.router.navigate(a.routes.outside.locate({})).finished;
   expect(a.contexts.beta[0].signal.aborted).toBe(true);
   expect(a.cleanups.beta).toBe(1);
@@ -281,7 +328,7 @@ it('does not cancel a still-requested preparation when its navigation is superse
   expect(a.frame.textContent).toBe('outside');
   expect(prepared.routes[1].renderArgs.pageStatus.isVisible()).toBe(false);
   expect(document.title).toBe('outside');
-  lease.release(true);
+  lease.release();
   flush();
   expect(prepared.routes[1].renderArgs.pageStatus.shouldFetch()).toBe(false);
 });
@@ -317,7 +364,7 @@ it('shares an uncancellable import across cancellation and retry without constru
   const a = await app({ loadBeta: load });
   const first = a.prepare();
   await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
-  first.release(true);
+  first.release();
   const retry = a.prepare();
   gate.resolve();
   await expect(first.ready).rejects.toMatchObject({ name: 'AbortError' });
@@ -393,7 +440,7 @@ it('evicts unused preparations in LRU order without evicting history-owned pages
   expect(a.router.rrCache.cache.size).toBe(1);
   expect(a.output.alpha[0].renderArgs.pageStatus.isVisible()).toBe(true);
   await a.router.navigate(target('one')).finished;
-  refreshed.release(true);
+  refreshed.release();
   a.router.disposePreparations();
   expect(one.routes[1].renderArgs.pageStatus.isVisible()).toBe(true);
   expect(a.cleanups.beta).toBe(2); // two + three, never adopted one
@@ -428,7 +475,7 @@ it.each(['different-parent', 'new-active-parent'] as const)('rejects incompatibl
   expect(prepared.signal.aborted).toBe(true);
   expect(a.output.beta[1].renderArgs.params.parent).toBe(activeParent.renderArgs.params);
   expect(a.frame.textContent).toBe('layout bobbeta bob');
-  lease.release(true);
+  lease.release();
   expect(a.output.beta[1].renderArgs.pageStatus.isVisible()).toBe(true);
 });
 
@@ -455,7 +502,7 @@ it('isolates equal history destinations by entry id and restores the correct pre
   await a.engine.traverseTo(firstEntry.key).finished;
   expect(a.router.rrCache.get(firstEntry.id)?.[1]).toBe(one.routes[1]);
   expect(two.routes[1].renderArgs.pageStatus.isVisible()).toBe(false);
-  first.release(true); second.release(true);
+  first.release(); second.release();
   expect(one.routes[1].renderArgs.pageStatus.isVisible()).toBe(true);
   expect(a.engine.entries()).toHaveLength(4);
 });
@@ -478,7 +525,7 @@ it('does not allow abort callbacks or later requests to resurrect a disposed reg
 it('releases speculation immediately when the facade owning Solid root is disposed', async () => {
   class TestFacade extends Router {
     prepare(locator: Locator<any>) {
-      return this.actualRouter!.acquirePreparation(this.resolveDestination(locator), 1000)!;
+      return this.actualRouter!.acquirePreparation(this.resolveDestination(locator))!;
     }
   }
   const home = route({}), slow = route({});
@@ -511,6 +558,57 @@ it('releases speculation immediately when the facade owning Solid root is dispos
   gate.resolve();
   await expect(lease.ready).rejects.toMatchObject({ name: 'AbortError' });
   expect(document.querySelector('[data-kinetic-router-backstage]')).toBeNull();
+});
+
+it('keeps requested ancestors fetch-active after an intervening navigation hides them', async () => {
+  const a = await app();
+  const lease = a.prepare();
+  const prepared = await lease.ready;
+  const parent = prepared.routes[0].renderArgs.pageStatus;
+  const fetching = parent.fetchSignal()!;
+  await a.router.navigate(a.routes.outside.locate({})).finished;
+  flush();
+  expect(parent.isVisible()).toBe(false);
+  expect(parent.shouldFetch()).toBe(true);
+  expect(fetching.aborted).toBe(false);
+  lease.release();
+  flush();
+  expect(parent.shouldFetch()).toBe(false);
+  expect(fetching.aborted).toBe(true);
+});
+
+it('resumes fetching for history-cached preparations without losing shared or navigation ownership', async () => {
+  const a = await app();
+  const target = a.routes.beta.locate({ id: 'bob' });
+  await a.router.navigate(target).finished;
+  const child = a.output.beta[0];
+  const status = child.renderArgs.pageStatus;
+  await a.router.navigate(a.routes.outside.locate({})).finished;
+  flush();
+  expect(status.shouldFetch()).toBe(false);
+  const snapshot = a.router.resolveDestination(target, 'menu');
+  const first = a.router.acquirePreparation(snapshot)!;
+  const second = a.router.acquirePreparation(snapshot)!;
+  const prepared = await first.ready;
+  flush();
+  const fetching = status.fetchSignal()!;
+  expect(prepared.routes[1]).toBe(child);
+  expect(fetching.aborted).toBe(false);
+  expect(status.isVisible()).toBe(false);
+  first.release();
+  expect(fetching.aborted).toBe(false);
+  second.release();
+  expect(fetching.aborted).toBe(true);
+  const retry = a.router.acquirePreparation(snapshot)!;
+  await retry.ready;
+  const resumed = status.fetchSignal()!;
+  expect(resumed).not.toBe(fetching);
+  await a.router.activateDestination(snapshot).finished;
+  retry.release();
+  flush();
+  expect(status.isVisible()).toBe(true);
+  expect(status.fetchSignal()).toBe(resumed);
+  expect(resumed.aborted).toBe(false);
 });
 
 it('skips no-op destinations and revalidates menu resolution before acquiring', async () => {

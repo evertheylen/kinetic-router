@@ -64,12 +64,12 @@ test('Backstage preserves viewport geometry without layout, focus, accessibility
     };
     // Actual navigation takes ownership synchronously, before this consumer ends.
     const navigation = router.activateDestination(snapshot);
-    first.release(true);
+    first.release();
     await navigation.finished;
     await new Promise(requestAnimationFrame);
     const adopted = live.firstChild === node
       && router.rrCache.get(window.navigation.currentEntry!.id)?.[0] === prepared.routes[0];
-    second.release(true);
+    second.release();
     router.disposePreparations();
     spacer.remove();
     return { before, unchanged, geometry, isolated, adopted,
@@ -106,7 +106,7 @@ test('browser pre-commit cancellation releases navigation ownership and a later 
     const node = prepared.routes[0].renderOutput!.html;
     window.navigation.addEventListener('navigate', event => event.preventDefault(), { once: true });
     const cancelled = router.activateDestination(snapshot);
-    first.release(true);
+    first.release();
     const outcome = await Promise.allSettled([cancelled.committed, cancelled.finished]);
     await new Promise(requestAnimationFrame);
     const retained = {
@@ -122,7 +122,7 @@ test('browser pre-commit cancellation releases navigation ownership and a later 
     await new Promise(requestAnimationFrame);
     const resumed = status.fetchSignal() !== fetching && status.fetchSignal()?.aborted === false;
     const navigation = router.activateDestination(snapshot);
-    retry.release(true);
+    retry.release();
     await navigation.finished;
     const adopted = output === prepared && document.getElementById('__kinetic_router_root_frame')!.firstChild === node;
     router.disposePreparations();

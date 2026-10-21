@@ -10,7 +10,7 @@ and assume node is configured with `--enable-source-maps` so there's no need for
 |---|---|---|
 | `@kinetic-router/definition` | `definition/` | Framework-agnostic DSL for declaring routes, params, and sitemaps. No runtime routing. |
 | `@kinetic-router/url` | `url/` | `Locator` ⇄ URL (de)serialization. Depends on `definition`. |
-| `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js`, `@solidjs/web`, both 2.0 beta). |
+| `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js`, `@solidjs/web`, both 2.0 prereleases). |
 | `example-app` | `example-app/` | Vite + `vite-plugin-solid` demo (private). `pnpm --filter example-app dev`. |
 
 Keep history behind `NavigationEngine`: future iOS support should use engine injection,
@@ -21,7 +21,7 @@ not platform-specific branches in the router core.
 ```sh
 CI=true pnpm install          # CI=true avoids interactive prompts
 pnpm -r build                 # tsc --build per package (no bundler)
-npx vitest run                # all test projects (definition, url, solid)
+pnpm exec vitest run          # all test projects
 CI=true pnpm --filter @kinetic-router/solid exec vitest run   # one package
 ```
 
@@ -64,7 +64,7 @@ Read these files, in order:
 
 ## Core concepts
 
-There are no `<Route>`/`<Link>` components and no `useNavigate`. The model is:
+There is no `<Route>` component or `useNavigate`. The model is:
 
 1. **Sitemap** (`definition`): `route(paramDefs)` creates `Route` objects (identity
    symbols — not serializable); `root({...})` builds the tree. String keys are path
@@ -72,29 +72,37 @@ There are no `<Route>`/`<Link>` components and no `useNavigate`. The model is:
    segment. `root()` attaches a `Route → Slug[]` lookup (`slugLookup` symbol).
 2. **Params**: `param.path/search/hidden<T>()`, with `.optional()` /
    `.withDefault()`. Hidden params live in history state, not the URL.
-3. **Pages** (`solid/src/page.ts`): a route implementation. `render(untrackedParams)`
-   returns (async) a function `(reactiveParams, pageStatus) => { html, title, ...ExtraOutput }`.
+3. **Pages** (`solid/src/page.ts`): a route implementation.
+   `render(untrackedParams, { signal, pageStatus })` returns (async) a function
+   `(reactiveParams, pageStatus) => { html, title, ...ExtraOutput }`.
    Registered via `router.implement(route, page)` or `implementLazy`.
 4. **Frames** (`solid/src/frame.ts`): outlets. The root frame carries id
    `__kinetic_router_root_frame` and a `FrameDelegate` attached to its DOM element.
-5. **Links** are plain `<a href={router.toUrl(route.locate({...}))}>`; the engine
-   intercepts them (Navigation API `navigate` event in browsers).
+5. **Links** (`solid/src/link.ts`): standalone `<Link route={...}>` captures the
+   single active Router when mounted; do not expose a router-bound component.
+   Plain `<a href={router.toUrl(route.locate({...}))}>` remains supported, but discouraged.
+   Option and lifecycle contracts live beside the exported types in
+   `solid/src/link.ts`, `solid/src/router.ts`, and `solid/src/page.ts`.
+   Keep `README.md` focused on capabilities and a small usage example, not an API reference.
 
 ### Router internals (`solid/`)
 
 - `Router` (`router.ts`) — the client-facing facade. Constructs `ActualRouter`
   asynchronously in a `queueMicrotask`; `currentLocator()` is signal-backed.
 - `ActualRouter` (`actual-router.ts`) — the engine-agnostic core: resolves entries to
-  `AppState`s, diffs route stacks (`diff.ts`: `'render' | 'set-params' | 'nothing'`
-  per nesting level), reuses rendered subtrees, mounts through the frame chain.
+  `AppState`s, finds reusable route prefixes (`diff.ts`), prepares isolated
+  output, and activates it through the frame chain.
 - **`NavigationEngine`** (`navigation-engine.ts`) — the history-layer abstraction.
   The engine owns the history stack (entries, ids, states); the router owns rendering
   and caches rendered routes *by entry id*. Implementations:
   - `NavigationApiEngine` (default, browsers, `window.navigation`),
   - `MemoryEngine` (headless tests/tooling; also the reference for engine semantics).
   Inject via `new Router(sitemap, { engine })`.
-- Caches: `RenderedRouteCache` (rendered routes keyed by entry id; disposed via the
-  engine's `handleDispose`), `implCache`, `stateCache` (`AppState` by entry id).
+- Caches: `RenderedRouteCache` owns history-retained output by entry id;
+  `PreparationRegistry` tracks shared preparation interests separately. Keep both
+  ownership lifetimes distinct. Implementations are cached in `implCache`.
+- Persist resolved destination state at commit, before awaiting rendering. A
+  cancelled or failed renderer must not lose an entry's hidden default values.
 - `AppState` (`app-state.ts`) is serializable and engine-agnostic; it's the `state`
   payload stored in history entries.
 
@@ -120,7 +128,7 @@ There are no `<Route>`/`<Link>` components and no `useNavigate`. The model is:
 - **Router tests don't need JSX**: pages can return plain DOM nodes (happy-dom), and
   the root frame is faked by attaching a `FrameDelegate` to a div with the root frame
   id (see `solid/src/router.test.ts`).
-- Solid 2.0 beta API differences: `createEffect(compute, effect)` takes two functions;
+- Solid 2.0 API differences: `createEffect(compute, effect)` takes two functions;
   `createOwner`/`runWithOwner` are used directly (rendered routes manage their own
   owners, see `rendered-route.ts`).
 - `Router` init is async (`queueMicrotask`): register all `implement()` calls
