@@ -1,0 +1,29 @@
+:root { font: 16px/1.5 system-ui, sans-serif; color: #e6eaf5; background: #111522; color-scheme: dark; }
+body { margin: 0; }
+main { max-width: 850px; padding: 2rem; margin: auto; }
+h1, h2 { line-height: 1.2; }
+section { border-top: 1px solid #3a4561; margin: 2rem 0; padding-top: 1rem; }
+nav { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+button, input { font: inherit; border-radius: .35rem; border: 1px solid #637498; padding: .4rem .65rem; }
+button { cursor: pointer; background: #263652; color: inherit; }
+button:hover { background: #344d75; }
+button:focus-visible, input:focus-visible { outline: 2px solid #b5d6ff; outline-offset: 3px; }
+.card { padding: 1rem; margin: .8rem 0; border: 1px solid #627ba6; border-radius: .6rem; background: #1d293e; }
+.card[data-phase=exiting] { border-color: #f6bb6a; }
+.card header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+.card label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .8rem 0; }
+.card input { flex: 1; min-width: 10rem; }
+code { color: #afc9ed; }
+
+@keyframes lifecycle-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes lifecycle-out { from { opacity: 1; } to { opacity: 0; } }
+.css-separate { animation-duration: var(--motion-duration); animation-timing-function: linear; animation-fill-mode: both; }
+.css-separate[data-direction=in] { animation-name: lifecycle-in; animation-delay: 250ms; }
+.css-separate[data-direction=out] { animation-name: lifecycle-out; }
+.css-inout { opacity: 0; transition: opacity var(--motion-duration) linear; }
+.css-inout[data-direction=in] { opacity: 1; }
+@starting-style { .css-inout[data-direction=in] { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .css-separate[data-direction] { animation-duration: 1ms; animation-delay: 0ms; }
+  .css-inout { transition-duration: 1ms; }
+}

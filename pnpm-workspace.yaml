@@ -2,6 +2,7 @@ packages:
   - definition
   - url
   - solid
+  - lifecycle
   - example-app
   - integration-tests
 
@@ -11,6 +12,8 @@ allowBuilds:
 catalog:
   '@dovetail-js/utils': ^0.8.0
   '@playwright/test': ^1.64.1
+  # Root peer pin keeps the beta web renderer on the router's signal runtime.
+  '@solidjs/signals': 2.0.0-beta.8
   '@solidjs/web': 2.0.0-beta.8
   '@types/dom-navigation': ^1.0.7
   '@types/node': ^25.6.0
@@ -20,6 +23,15 @@ catalog:
   vite: 8.0.0-beta.18
   vite-plugin-solid: 3.0.0-next.5
   vitest: ^4.1.5
+
+# Keep the lifecycle experiment on the current RC without migrating the router.
+catalogs:
+  lifecycle:
+    '@solidjs/signals': 2.0.0-rc.15
+    '@solidjs/web': 2.0.0-rc.15
+    solid-js: 2.0.0-rc.15
+    vite: 8.3.4
+    vite-plugin-solid: 3.0.0-next.27
 
 catalogMode: prefer
 

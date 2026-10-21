@@ -1,0 +1,32 @@
+{
+  "name": "@kinetic-router/lifecycle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run",
+    "dev": "vite demo --host 127.0.0.1",
+    "build:demo": "tsc -p demo/tsconfig.json && vite build demo",
+    "test:browser": "pnpm build:demo && playwright test",
+    "test:browser:dev": "LIFECYCLE_DEV=1 playwright test"
+  },
+  "peerDependencies": {
+    "solid-js": "catalog:lifecycle"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@solidjs/signals": "catalog:lifecycle",
+    "@solidjs/web": "catalog:lifecycle",
+    "happy-dom": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:lifecycle",
+    "vite-plugin-solid": "catalog:lifecycle",
+    "vitest": "catalog:"
+  }
+}
