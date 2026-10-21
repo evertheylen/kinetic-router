@@ -11,6 +11,7 @@ import {
  * (`window.navigation`). */
 export class NavigationApiEngine implements NavigationEngine {
   protected handlers: EngineHandlers | undefined;
+  protected attachment: AbortController | undefined;
 
   /** Entries we already attached a `dispose` listener to. */
   protected watchedEntries = new WeakSet<NavigationHistoryEntry>();
@@ -18,6 +19,7 @@ export class NavigationApiEngine implements NavigationEngine {
   attach(handlers: EngineHandlers) {
     if (this.handlers !== undefined) throw new Error('NavigationApiEngine is already attached');
     this.handlers = handlers;
+    const attachment = this.attachment = new AbortController();
 
     // watch pre-existing entries (session restore) for disposal
     for (const entry of window.navigation.entries()) {
@@ -25,6 +27,8 @@ export class NavigationApiEngine implements NavigationEngine {
     }
 
     window.navigation.addEventListener("navigate", (event) => {
+      // Downloads have a native default action, not an in-app destination.
+      if (event.downloadRequest != null) return;
       if (!event.canIntercept) {
         console.warn('Cannot intercept navigation', event);
         return;
@@ -48,6 +52,7 @@ export class NavigationApiEngine implements NavigationEngine {
 
       event.intercept({
         handler: async () => {
+          attachment.signal.throwIfAborted();
           // Read the final identity after commit, not from the pre-commit destination.
           const committedEntry = window.navigation.currentEntry!;
 
@@ -67,13 +72,20 @@ export class NavigationApiEngine implements NavigationEngine {
           } catch (error) {
             // Cancellation belongs to this event, not to an error's name. A
             // page throwing AbortError without navigation cancellation is a failure.
-            if (!event.signal.aborted) console.error('Navigation failed', error);
+            if (!event.signal.aborted && !attachment.signal.aborted) console.error('Navigation failed', error);
             throw error;
           }
         },
       });
-    });
+    }, { signal: attachment.signal });
 
+    return () => {
+      if (this.attachment !== attachment) return;
+      this.handlers = undefined;
+      this.attachment = undefined;
+      this.watchedEntries = new WeakSet();
+      attachment.abort();
+    };
   }
 
   currentEntry(): EngineEntry | undefined {
@@ -101,17 +113,21 @@ export class NavigationApiEngine implements NavigationEngine {
 
     // Covers `ignore` navigations, which bypass interception. Observe rejection
     // too, so this listener cannot orphan a rejected promise; callers keep res.
-    void res.committed?.then(entry => this.watchDispose(entry), () => {});
+    const attachment = this.attachment;
+    void res.committed?.then(entry => {
+      if (this.attachment === attachment) this.watchDispose(entry);
+    }, () => {});
 
     return res;
   }
 
   protected watchDispose(entry: NavigationHistoryEntry) {
-    if (this.watchedEntries.has(entry)) return;
+    const attachment = this.attachment;
+    if (!attachment || this.watchedEntries.has(entry)) return;
     this.watchedEntries.add(entry);
 
     entry.addEventListener('dispose', () => {
       this.handlers?.handleDispose(entry.id);
-    });
+    }, { signal: attachment.signal });
   }
 }

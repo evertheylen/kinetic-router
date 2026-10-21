@@ -10,10 +10,8 @@ it animate every row out.
 
 ## Run
 
-Requires Node 22.12+ (Solid 2's minimum). The `lifecycle` named version catalog
-pins the RC runtime and matching Solid 2 compiler toolchain for this package;
-other workspace packages retain their existing beta dependencies. A root beta
-signals peer pin prevents pnpm mixing the beta renderer with the RC runtime.
+Requires Node 22.12+ (Solid 2's minimum). This package shares the workspace's
+pinned Solid RC runtime and `@solidjs/vite-plugin` compiler toolchain.
 JSX uses `@solidjs/web` as `jsxImportSource`; core types come from `solid-js`.
 
 From the monorepo root:

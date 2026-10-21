@@ -82,7 +82,11 @@ without timing guesses. It is not yet a visual-animation test.
 
 Shared setup and verification are in `src/pages.tsx` and `src/checks.ts`. The UI is
 in `src/main.tsx`; the small Playwright driver is in `tests/scenarios.e2e.ts`.
-No library-private router fields are inspected.
+`tests/preparation.e2e.ts` checks the internal preparation seam. The isolated
+`/link-test/home` fixture and `tests/link.e2e.ts` exercise production managed Links
+with real hover, keyboard, touch/implicit capture, cancellation, new-tab/download,
+menu/replace, and save-data changes. Add `?hold&press` to pause async page factories
+and enable only press, then use **Release renders** to complete navigation.
 
 `pnpm --filter @kinetic-router/integration-tests test` runs the package directly
 if the app/libraries have already been built. Use the root command otherwise.

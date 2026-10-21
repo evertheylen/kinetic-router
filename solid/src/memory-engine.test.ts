@@ -51,6 +51,32 @@ describe('MemoryEngine', () => {
     expect(() => engine.attach(handlers)).toThrow(/already attached/);
   });
 
+  it('detaches, aborts ongoing navigation, and never sends stale disposal to a new attachment', async () => {
+    const engine = new MemoryEngine('/');
+    const first = mockHandlers();
+    const gate = Promise.withResolvers<void>();
+    const detach = engine.attach({
+      ...first.handlers,
+      async handleNavigate(event) {
+        first.events.push(event);
+        await gate.promise;
+      },
+    });
+    const pending = engine.navigate({ url: '/a', state: undefined, history: 'replace' });
+    detach();
+    expect(first.events[0].signal.aborted).toBe(true);
+    const next = mockHandlers();
+    const detachNext = engine.attach(next.handlers);
+    detach();
+    gate.resolve();
+    await pending.finished;
+    expect(next.disposed).toEqual([]);
+    await engine.navigate({ url: '/b', state: undefined, history: 'push' }).finished;
+    expect(next.events).toHaveLength(1);
+    detachNext();
+    expect(() => engine.navigate({ url: '/c', state: undefined, history: 'push' })).toThrow('not attached');
+  });
+
   it('pushes a new entry and reports a navigate event', async () => {
     const { engine, events } = attachedEngine('/');
     const initialId = engine.currentEntry().id!;

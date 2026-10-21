@@ -1,24 +1,26 @@
+/* @refresh skip */
+// Recreate the module-level Router and root Frame together on app updates.
 import { render } from "@solidjs/web";
 
-import { agencyList, homePage, serviceBrandList, sitemap, trainList,  } from "./sitemap.js";
-import { router } from "./routing.js";
+import { homePage, sitemap } from "./sitemap.js";
+import { Link } from "@kinetic-router/solid/link.js";
 import "./routes.js";
 import { Frame } from "@kinetic-router/solid/frame.js";
 import { index } from "@kinetic-router/definition";
 
 export default function App() {
-  console.log("this is App", { router });
   return (
     <main>
-      <ul>
-        <li><a href={router.toUrl(homePage.locate({}))}>home</a></li>
-        <li><a href={router.toUrl(sitemap.account.locate({}))}>account</a></li>
-        <li><a href={router.toUrl(sitemap.explore[index].locate({}))}>agencies</a></li>
-        {/* <li><a href={router.toUrl(agencyList.locate({}))}>all agencies</a></li>
-        <li><a href={router.toUrl(serviceBrandList.locate({ agencyId: 'NMBS' }))}>NMBS</a></li>
-        <li><a href={router.toUrl(trainList.locate({ agencyId: 'NMBS', serviceBrand: 'IC' }))}>NMBS IC</a></li> */}
-      </ul>
-      <Frame component="div"/>
+      <nav aria-label="Main navigation">
+        <ul>
+          <li><Link route={homePage} mode="menu">Home</Link></li>
+          <li><Link route={sitemap.account} mode="menu">Account</Link></li>
+          <li><Link route={sitemap.explore[index]} mode="menu">Agencies</Link></li>
+        </ul>
+      </nav>
+      <p>Hover or keyboard-focus a link to prepare its page; pressing prepares it immediately.</p>
+      <p>Menu links resume your last visit. Select Agencies from an agency page to return to the list.</p>
+      <Frame component="div" />
     </main>
   );
 }

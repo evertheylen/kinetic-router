@@ -3,7 +3,7 @@
 // the root Frame is replaced by a hand-made frame delegate, so no JSX or
 // Solid rendering setup is needed.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { index, param, route, root } from '@kinetic-router/definition';
 import { createSignal, onCleanup, useContext } from 'solid-js';
 
@@ -12,6 +12,9 @@ import { MemoryEngine, type MemoryEntry } from './memory-engine.js';
 import { FrameDelegate, frameDelegateAttribute, rootFrameId } from './frame.js';
 import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
 import type { PagePreparationContext } from './page.js';
+
+const routers: Router[] = [];
+afterEach(() => { for (const router of routers.splice(0)) router.dispose(); });
 
 function installRootFrame() {
   const el = document.createElement('div');
@@ -39,6 +42,7 @@ function createApp(initialUrl: string, maxCachedPages?: number) {
 
   const engine = new MemoryEngine(initialUrl);
   const router = new Router(sitemap, { engine, maxCachedPages });
+  routers.push(router);
 
   const counters = { home: 0, user: 0 };
   const cleanups = { home: 0, user: 0 };
@@ -99,6 +103,7 @@ function createNestedApp(
   type Name = keyof typeof routes;
   const sitemap = root({ nested: { [index]: outer, alpha, beta }, outside });
   const router = new Router(sitemap, { engine, maxCachedPages });
+  routers.push(router);
   const counters = { outer: 0, layout: 0, alpha: 0, beta: 0, outside: 0 };
   const cleanups = { ...counters };
   const rendered: Partial<Record<Name, RenderedRoute>> = {};
@@ -232,6 +237,7 @@ describe('Router on a MemoryEngine', () => {
     const detail = route({ constant: param.hidden<number>(), live: param.hidden<number>() });
     const engine = new MemoryEngine('/home');
     const router = new Router(root({ home, detail }), { engine });
+    routers.push(router);
     router.implement(home, { untrackedKeys: [], async render() { return () => ({ html: document.createElement('div'), title: 'Home' }); } });
     const [suffix, setSuffix] = createSignal('');
     const render = vi.fn(async () => (params: { live: number }) => ({
@@ -290,10 +296,120 @@ describe('Router on a MemoryEngine', () => {
 });
 
 describe('page lifecycle', () => {
+  it.each(['superseded', 'failed'])('persists URL-originated defaults at commit even when rendering is %s', async interruption => {
+    let nextToken = 0;
+    const makeDefault = vi.fn(() => ++nextToken);
+    const home = route({}), draft = route({ token: param.hidden<number>().withDefault(makeDefault) });
+    const engine = new MemoryEngine('/home');
+    const router = new Router(root({ home, draft }), { engine, maxCachedPages: 0 });
+    routers.push(router);
+    const gate = Promise.withResolvers<void>();
+    const tokens: (number | undefined)[] = [];
+    router.implement(home, {
+      untrackedKeys: [],
+      async render() { return () => ({ html: document.createElement('section'), title: 'Home' }); },
+    });
+    router.implement(draft, {
+      untrackedKeys: ['token'],
+      async render({ token }) {
+        tokens.push(token);
+        if (tokens.length === 1) await gate.promise;
+        return () => ({ html: document.createTextNode(String(token)), title: 'Draft' });
+      },
+    });
+    const frame = installRootFrame();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
+    // Ordinary anchors create entries without an AppState payload.
+    const navigation = engine.navigate({ url: '/draft', state: undefined, history: 'push' });
+    const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(tokens).toEqual([1]));
+      const visited = engine.currentEntry();
+      expect(visited.getState?.()).toMatchObject({ snapShotByKey: { token: 1 } });
+      const target = draft.locate({ token: 999 });
+      expect(router.resolveDestination(target, 'menu').locator.values).toEqual({ token: 1 });
+      const failure = new Error('Draft failed');
+      if (interruption === 'failed') {
+        gate.reject(failure);
+        expect(await outcome).toBe(failure);
+      }
+      await router.navigate(home.locate({})).finished;
+      gate.resolve();
+      if (interruption === 'superseded') expect(await outcome).toMatchObject({ name: 'AbortError' });
+
+      const snapshot = router.resolveDestination(target, 'menu');
+      expect(snapshot.operation).toEqual({ type: 'traverse', id: visited.id, key: visited.key });
+      expect(snapshot.locator.values).toEqual({ token: 1 });
+      expect(router.resolveDestination(target, 'menu').locator.values).toEqual({ token: 1 });
+      const first = router.acquirePreparation(snapshot)!;
+      const second = router.acquirePreparation(snapshot)!;
+      expect(first.ready).toBe(second.ready);
+      await first.ready;
+      await router.activateDestination(snapshot).finished;
+      first.release(); second.release();
+      expect(engine.currentEntry().id).toBe(visited.id);
+      expect(router.currentLocator()?.values).toEqual({ token: 1 });
+      expect(frame.textContent).toBe('1');
+      expect(tokens).toEqual([1, 1]);
+      expect(makeDefault).toHaveBeenCalledOnce();
+    } finally { gate.resolve(); await outcome; }
+  });
+
+  it('does not resume a navigation superseded while persisting its committed state', async () => {
+    const app = createApp('/home');
+    await app.ready;
+    const initialId = app.engine.currentEntry().id;
+    const update = app.engine.updateCurrentEntry.bind(app.engine);
+    let redirected = false;
+    let latest: ReturnType<typeof app.router.navigate> | undefined;
+    const spy = vi.spyOn(app.engine, 'updateCurrentEntry').mockImplementation(state => {
+      update(state);
+      // Models a browser currententrychange listener reacting to the new state.
+      if (!redirected && app.engine.currentEntry().id !== initialId) {
+        redirected = true;
+        latest = app.router.navigate(app.routes.home.locate({}));
+      }
+    });
+    try {
+      const interrupted = app.router.navigate(app.routes.user.locate({ userId: 'alice' }));
+      await expect(interrupted.finished).rejects.toMatchObject({ name: 'AbortError' });
+      await latest!.finished;
+      expect(app.router.currentLocator()?.route).toBe(app.routes.home);
+      expect(app.frame.textContent).toBe('home page');
+      expect(app.counters.user).toBe(0);
+      // The interrupted entry was still committed, so its bookmark survives.
+      const snapshot = app.router.resolveDestination(app.routes.user.locate({ userId: 'alice' }), 'menu');
+      expect(snapshot.operation).toMatchObject({ type: 'traverse', id: app.engine.entries()[1].id });
+      expect(snapshot.locator.values).toEqual({ userId: 'alice' });
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each([false, true])('does not resume or orphan initialization after disposal (late rejection %s)', async reject => {
+    const home = route({});
+    const engine = new MemoryEngine('/home');
+    const gate = Promise.withResolvers<{ id: string }>();
+    const navigate = engine.navigate.bind(engine);
+    vi.spyOn(engine, 'navigate').mockImplementationOnce(intent => ({ ...navigate(intent), committed: gate.promise }));
+    const router = new Router(root({ home }), { engine });
+    routers.push(router);
+    const render = vi.fn(async () => () => ({ html: document.createElement('div'), title: 'old' }));
+    router.implement(home, { untrackedKeys: [], render });
+    installRootFrame();
+    await vi.waitFor(() => expect(engine.navigate).toHaveBeenCalledOnce());
+    router.dispose();
+    const next = createApp('/home');
+    if (reject) gate.reject(new DOMException('Disposed', 'AbortError'));
+    else gate.resolve({ id: engine.currentEntry().id });
+    await next.ready;
+    expect(render).not.toHaveBeenCalled();
+    expect(next.frame.textContent).toBe('home page');
+  });
+
   it('allows the first async renderer to be superseded without stranding the facade or orphaning its initialization', async () => {
     const slow = route({}), home = route({});
     const engine = new MemoryEngine('/slow');
     const router = new Router(root({ slow, home }), { engine });
+    routers.push(router);
     const gate = Promise.withResolvers<void>();
     const started = vi.fn(), cleanup = vi.fn();
     const slowOutput = vi.fn(() => ({ html: document.createElement('section'), title: 'Slow' }));
@@ -383,7 +499,7 @@ describe('page lifecycle', () => {
       expect(status.hasFocus()).toBe(false);
       expect(app.contexts.beta?.signal.aborted).toBe(false);
       expect(app.frame.firstChild).toBe(outside);
-      expect(app.rendered.outer!.renderOutput!.html.parentNode).toBeNull();
+      expect(document.querySelector('[data-kinetic-router-backstage]')?.contains(app.rendered.outer!.renderOutput!.html)).toBe(true);
       expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
       expect(document.title).toBe('outside');
       expect(scroll).not.toHaveBeenCalled();
@@ -406,6 +522,7 @@ describe('page lifecycle', () => {
     const home = route({}), slow = route({});
     const engine = new MemoryEngine('/home');
     const router = new Router(root({ home, slow }), { engine });
+    routers.push(router);
     const gate = Promise.withResolvers<void>();
     const cleanup = vi.fn(), output = vi.fn(() => ({ html: document.createElement('div'), title: 'Slow' }));
     const implementation = {
@@ -448,6 +565,13 @@ describe('page lifecycle', () => {
 });
 
 describe('bounded page caching', () => {
+  it.each([
+    { maxEntries: -1 }, { maxEntries: 0.5 }, { maxEntries: NaN }, { maxEntries: Infinity },
+    { retainFor: -1 }, { retainFor: NaN }, { retainFor: Infinity },
+  ])('validates prefetchCache synchronously: %j', prefetchCache => {
+    expect(() => new Router(root({ home: route({}) }), { prefetchCache })).toThrow(RangeError);
+  });
+
   it.each([-1, 0.5, NaN, Infinity])('validates maxCachedPages synchronously: %s', maxCachedPages => {
     expect(() => new Router(root({ home: route({}) }), { maxCachedPages })).toThrow(RangeError);
   });
@@ -492,6 +616,7 @@ describe('bounded page caching', () => {
     const home = route({}), detail = route({ draft: param.hidden<string>() });
     const engine = new MemoryEngine('/home');
     const router = new Router(root({ home, detail }), { engine, maxCachedPages: 1 });
+    routers.push(router);
     const implementation = {
       untrackedKeys: [] as const,
       async render() {
@@ -712,6 +837,7 @@ describe('bounded page caching', () => {
     const home = route({}), slow = route({});
     const engine = new MemoryEngine('/home');
     const router = new Router(root({ home, slow }), { engine, maxCachedPages: 1 });
+    routers.push(router);
     const implementation = {
       untrackedKeys: [] as const,
       async render() {

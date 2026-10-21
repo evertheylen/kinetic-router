@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import solidPlugin from 'vite-plugin-solid';
+import solidPlugin from '@solidjs/vite-plugin';
 
 export default defineConfig({
   plugins: [solidPlugin()],
@@ -12,7 +12,6 @@ export default defineConfig({
   build: {
     target: 'esnext',
   },
-  base: './',
   optimizeDeps: {
     exclude: ['@kinetic-router/definition', '@kinetic-router/url', '@kinetic-router/solid']
   }

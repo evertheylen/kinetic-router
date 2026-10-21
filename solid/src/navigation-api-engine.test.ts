@@ -17,8 +17,8 @@ function setup() {
   vi.stubGlobal('navigation', navigation);
   const handlers = { handleNavigate: vi.fn(async () => {}), handleBeforeCommit: vi.fn(), handleDispose: vi.fn() };
   const engine = new NavigationApiEngine();
-  engine.attach(handlers);
-  return { engine, navigation, first, handlers };
+  const detach = engine.attach(handlers);
+  return { engine, navigation, first, handlers, detach };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -31,6 +31,17 @@ describe('NavigationApiEngine', () => {
     const info = { forceNewInstance: true };
     engine.traverseTo(first.key, info);
     expect(navigation.traverseTo).toHaveBeenCalledWith(first.key, { info });
+  });
+
+  it('leaves download requests to the browser without capturing state or intercepting', () => {
+    const { navigation, handlers } = setup();
+    const intercept = vi.fn();
+    navigation.dispatchEvent(Object.assign(new Event('navigate'), {
+      canIntercept: true, navigationType: 'push', downloadRequest: '', intercept,
+    }));
+    expect(intercept).not.toHaveBeenCalled();
+    expect(handlers.handleBeforeCommit).not.toHaveBeenCalled();
+    expect(handlers.handleNavigate).not.toHaveBeenCalled();
   });
 
   it('rejects duplicate attachment', () => {
@@ -82,6 +93,44 @@ describe('NavigationApiEngine', () => {
       if (cancelled) expect(log).not.toHaveBeenCalled();
       else expect(log).toHaveBeenCalledExactlyOnceWith('Navigation failed', failure);
     } finally { log.mockRestore(); }
+  });
+
+  it('detaches navigation and entry listeners, and permits a clean reattachment', async () => {
+    const { engine, navigation, first, handlers, detach } = setup();
+    const late = entry('late', 'late-slot', 1);
+    const committed = Promise.withResolvers<typeof late>();
+    navigation.navigate.mockReturnValue({ committed: committed.promise, finished: Promise.resolve() });
+    engine.navigate({ url: '/late', state: {}, history: 'push' });
+    detach();
+    const intercept = vi.fn();
+    navigation.dispatchEvent(Object.assign(new Event('navigate'), { canIntercept: true, intercept }));
+    first.dispatchEvent(new Event('dispose'));
+    expect(intercept).not.toHaveBeenCalled();
+    expect(handlers.handleDispose).not.toHaveBeenCalled();
+
+    const next = { handleNavigate: vi.fn(async () => {}), handleDispose: vi.fn() };
+    const detachNext = engine.attach(next);
+    detach();
+    first.dispatchEvent(new Event('dispose'));
+    expect(next.handleDispose).toHaveBeenCalledExactlyOnceWith(first.id);
+    committed.resolve(late);
+    await committed.promise;
+    late.dispatchEvent(new Event('dispose'));
+    expect(next.handleDispose).toHaveBeenCalledOnce();
+    detachNext();
+    first.dispatchEvent(new Event('dispose'));
+    expect(next.handleDispose).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an intercepted handler that starts after detachment', async () => {
+    const { navigation, handlers, detach } = setup();
+    const intercept = vi.fn();
+    navigation.dispatchEvent(Object.assign(new Event('navigate'), {
+      canIntercept: true, navigationType: 'push', signal: new AbortController().signal, intercept,
+    }));
+    detach();
+    await expect(intercept.mock.calls[0][0].handler()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(handlers.handleNavigate).not.toHaveBeenCalled();
   });
 
   it('does not orphan a rejected commit while observing disposal', async () => {

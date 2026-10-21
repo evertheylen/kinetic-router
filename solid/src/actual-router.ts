@@ -1,7 +1,7 @@
 import { DeepMap } from "@dovetail-js/utils/deep-map.js";
 import { isEqual } from "@dovetail-js/utils/equal.js";
 import { getSlugPath, isSlugPathPrefix, RootSitemap, slugLookup, slugPathToString } from "@kinetic-router/definition/root.js";
-import { AnyParamDefs, convertParamsByKey } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, convertParamsByDefinition, convertParamsByKey } from "@kinetic-router/definition/params.js";
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
 import { locatorToUrl, serializePathParams, SerializedPathParams, urlToLocator } from "@kinetic-router/url";
 
@@ -12,23 +12,31 @@ import { createParamStorage, ParamStorage } from "./params.js";
 import { renderRoute, RenderedRoute } from "./rendered-route.js";
 import { SolidImplementationMap } from "./implementation-map.js";
 import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
-import { calculateRouteChanges } from "./diff.js";
+import { reusableRoutes } from "./diff.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
 import { EngineEntry, EngineNavigateEvent, EngineNavigationResult, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
+import { Backstage } from './backstage.js';
+import { PreparationRegistry, type PreparationLease } from './preparation-registry.js';
+import { NavigationTransition, type NavigationTransitionOptions } from './navigation-transition.js';
 
+/** push (default) adds an entry; replace replaces the current entry.
+ * menu resumes a subtree's last committed visit from outside, returns to its
+ * root from below, and is a no-op at the root. Activation revalidates the
+ * original menu root rather than blindly following a previously resolved href. */
 export type NavigationMode = 'push' | 'replace' | 'menu';
 export type NavigateOptions = Pick<NavigationInfo, 'forceNewInstance'> & {
   mode?: NavigationMode,
 };
 
-/** Constructed output has no live frame, parameter, or history side effects.
- * The caller must either activate it or dispose it; adopt transfers ownership
- * to the history cache. Stage 3 can stage its new suffix in isolated containers. */
+/** Isolated construction and its consumer interest. Adoption gives history
+ * ownership without ending that interest; dispose releases it. Only the new
+ * suffix is mounted in Backstage, without live frame or parameter side effects. */
 export type PreparedNavigation = {
   readonly routes: readonly RenderedRoute[],
   readonly reusedCount: number,
   readonly signal: AbortSignal,
   adopt(): void,
+  setRequested(requested: boolean): void,
   dispose(): void,
 };
 
@@ -62,9 +70,13 @@ export class ActualRouter<
 
   readonly rrCache: RenderedRouteCache;
 
-  // TODO: Stage 3 — mount prepared output in isolated Backstage containers.
+  protected readonly preparations: PreparationRegistry;
+  protected readonly implLoads = new Map<Route<any>, Promise<Page<ExtraOutput, any, any>>>();
+  protected readonly preparationHandoffs = new WeakMap<NavigationInfo, PreparationLease>();
 
-  protected pendingRender: AbortController | undefined;
+  protected pendingTransition: NavigationTransition | undefined;
+  protected detachEngine: (() => void) | undefined;
+  protected disposed = false;
 
   // Route identity outside DeepMap; path-parameter equality inside it.
   protected bookmarks = new Map<Route, DeepMap<SerializedPathParams, MenuBookmark>>();
@@ -85,11 +97,13 @@ export class ActualRouter<
     implMap: SolidImplementationMap<ExtraStaticData, ExtraOutput>,
     engine: NavigationEngine,
     rrCache = new RenderedRouteCache(),
+    preparations = new PreparationRegistry(),
   ) {
     this.sitemap = sitemap;
     this.implMap = implMap;
     this.engine = engine;
     this.rrCache = rrCache;
+    this.preparations = preparations;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
     [this.navigationVersion, this.setNavigationVersion] = createSignal(0);
@@ -115,7 +129,7 @@ export class ActualRouter<
     }
 
     // setup after initial navigation stuff to avoid weird unwanted behaviour
-    this.engine.attach({
+    this.detachEngine = this.engine.attach({
       handleNavigate: (event) => {
         const rendering = this.handleNavigateEvent(event);
         // Engine-initiated navigation can be fire-and-forget too.
@@ -160,18 +174,16 @@ export class ActualRouter<
       if (committedEntry !== undefined) {
         state.id = committedEntry.id;
       }
-    } else {
-      this.engine.updateCurrentEntry(serializedState);
     }
 
-    if (this.engine.currentEntry()?.id !== state.id) return;
+    if (this.disposed || this.engine.currentEntry()?.id !== state.id) return;
     this.recordVisit(state.locator);
-    const controller = this.beginRender();
+    const transition = this.beginTransition(state);
     try {
-      await this.renderNavigation(state, undefined, {}, controller);
+      await this.renderNavigation(transition);
     } catch (error) {
       // A successor owns rendering now. Genuine initialization errors still fail.
-      if (!controller.signal.aborted) throw error;
+      if (!transition.signal.aborted) throw error;
     }
   }
 
@@ -179,13 +191,17 @@ export class ActualRouter<
     return this.executeDestination(this.resolveDestination(locator, options?.mode), options);
   }
 
-  /** Shared by navigation, future hrefs and preparation. Reads engine history,
+  /** Shared by navigation, hrefs and preparation. Reads engine history,
    * never changes it. Reactive consumers are invalidated at commit/disposal. */
   resolveDestination<ParamDefs extends AnyParamDefs>(
     target: Locator<ParamDefs>, mode: NavigationMode = 'push',
   ): DestinationSnapshot {
     this.navigationVersion();
-    target = { route: target.route, values: { ...target.values } };
+    // Materialize defaults in the snapshot so a factory is not rerun between
+    // hover, preparation and activation. Keep the original alias identity.
+    target = { route: target.route, values: convertParamsByKey(
+      convertParamsByDefinition(target.values, target.route.paramDefs), target.route.paramDefs,
+    ) };
     const resolved = resolveAliases(target);
     const root = { route: resolved.route, values: { ...resolved.values } };
     const snapshot = (locator: Locator<any>, operation: DestinationOperation): DestinationSnapshot => ({
@@ -233,19 +249,62 @@ export class ActualRouter<
   }
 
   protected executeDestination({ locator, url, operation }: DestinationSnapshot, info?: Omit<NavigateOptions, 'mode'>): EngineNavigationResult {
+    if (this.disposed) throw new Error('Router is disposed');
     if (operation.type === 'no-op') return { finished: Promise.resolve() };
-    const result = operation.type === 'traverse'
-      ? this.engine.traverseTo(operation.key, { forceNewInstance: info?.forceNewInstance })
-      : this.engine.navigate({
-        url, history: operation.type,
-        state: AppState.fromLocator(locator).serialize(this.sitemap),
-        info: { forceNewInstance: info?.forceNewInstance },
-      });
-    // Callers can still await failures, but fire-and-forget navigation must not
-    // produce unhandled rejections when a later navigation cancels construction.
-    void result.committed?.catch(() => {});
-    void result.finished?.catch(() => {});
-    return result;
+    const state = AppState.fromLocator(locator);
+    // Bridge activation to the engine's (possibly later) committed event. This
+    // ownership is acquired synchronously, before a Link can release its lease.
+    const handoff = !info?.forceNewInstance
+      ? this.preparations.claim(state, operation.type === 'traverse' ? operation.id : undefined)
+      : undefined;
+    const navigationInfo = { forceNewInstance: info?.forceNewInstance };
+    if (handoff) this.preparationHandoffs.set(navigationInfo, handoff);
+    try {
+      const result = operation.type === 'traverse'
+        ? this.engine.traverseTo(operation.key, navigationInfo)
+        : this.engine.navigate({
+          url, history: operation.type, state: state.serialize(this.sitemap),
+          info: navigationInfo,
+        });
+      const release = () => handoff?.release();
+      void Promise.resolve(result.finished).then(release, release);
+      // Fire-and-forget callers must not orphan a rejected commit promise.
+      void result.committed?.catch(() => {});
+      return result;
+    } catch (error) {
+      handoff?.release();
+      throw error;
+    }
+  }
+
+  /** Resolve again when acquiring preparation;
+   * snapshots are plans, never permission to use stale menu/history targets. */
+  acquirePreparation(snapshot: DestinationSnapshot): PreparationLease | undefined {
+    const destination = this.resolveDestination(snapshot.target, snapshot.mode);
+    if (destination.operation.type === 'no-op') return;
+    const entryId = destination.operation.type === 'traverse' ? destination.operation.id : undefined;
+    const state = AppState.fromLocator(destination.locator);
+    return this.preparations.acquire(state, entryId, signal => {
+      const cached = entryId === undefined ? this.rrCache.currentRoutes() : this.rrCache.get(entryId) ?? [];
+      return this.prepareNavigation(state, reusableRoutes(cached, state), signal);
+    });
+  }
+
+  /** Stop callbacks and rendering before releasing preparation and page owners. */
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.detachEngine?.();
+    this.pendingTransition?.abort();
+    this.pendingTransition = undefined;
+    this.disposePreparations();
+    this.rrCache.dispose();
+    this.bookmarks.clear();
+  }
+
+  /** Release speculative ownership without disposing the active pages. */
+  disposePreparations() {
+    this.preparations.dispose();
   }
 
   /** Unmatched or unreadable entries may exist in the engine but are not menu
@@ -287,6 +346,7 @@ export class ActualRouter<
 
   /** Called by the engine for every navigation it observes. */
   protected async handleNavigateEvent(event: EngineNavigateEvent): Promise<void> {
+    if (this.disposed) throw new DOMException('Router is disposed', 'AbortError');
     event.signal.throwIfAborted();
     // could be an existing state!
     const newState = this.getState(event.destination)!;
@@ -294,13 +354,18 @@ export class ActualRouter<
     newState.id = event.committedId;
     // A visit is committed even if its renderer is slow, fails, or is superseded.
     this.recordVisit(newState.locator);
-    return this.renderNavigation(
-      newState,
-      event.navigationType === 'traverse' ? event.committedId : event.fromId,
-      event.info,
-      this.beginRender(),
-      event.signal,
-    );
+    const entryId = event.navigationType === 'traverse' ? event.committedId : undefined;
+    const transition = this.beginTransition(newState, {
+      cacheId: entryId ?? event.fromId,
+      entryId,
+      forceNewInstance: event.info.forceNewInstance,
+      signal: event.signal,
+    });
+    const rendering = this.renderNavigation(transition);
+    // renderNavigation has acquired its own lease before its first await.
+    this.preparationHandoffs.get(event.info)?.release();
+    this.preparationHandoffs.delete(event.info);
+    return rendering;
   }
 
     /** Make an AppState based on the best source of information */
@@ -344,45 +409,55 @@ export class ActualRouter<
       }
     }
 
-  protected beginRender(): AbortController {
-    const previous = this.pendingRender;
-    const controller = new AbortController();
-    this.pendingRender = controller;
+  protected beginTransition(
+    state: AppState, options: NavigationTransitionOptions & { cacheId?: string } = {},
+  ): NavigationTransition {
+    const cached = options.cacheId === undefined ? undefined : this.rrCache.get(options.cacheId);
+    // An unfinished outgoing entry may have no cached output. Fall back to the
+    // displayed stack, but never merge distinct history restorations.
+    const source = cached ?? (options.entryId === undefined ? this.rrCache.currentRoutes() : []);
+    const previous = this.pendingTransition;
+    const transition = new NavigationTransition(source, state, options);
+    // Publish first: abort callbacks may synchronously start another navigation.
+    this.pendingTransition = transition;
     previous?.abort();
-    return controller;
+    return transition;
   }
 
-  protected async renderNavigation(
-    newState: AppState,
-    cacheId: string | undefined,
-    navInfo: NavigationInfo,
-    controller: AbortController,
-    navigationSignal?: AbortSignal,
-  ) {
-    const signal = navigationSignal ? AbortSignal.any([controller.signal, navigationSignal]) : controller.signal;
-    let prepared: PreparedNavigation | undefined;
+  protected async renderNavigation(transition: NavigationTransition) {
+    const { to, signal } = transition;
     try {
       signal.throwIfAborted();
-      const routes = [...newState.route.nestedInRoutes, newState.route];
-      const cached = cacheId === undefined ? [] : this.rrCache.get(cacheId) ?? [];
-      const changes = calculateRouteChanges(cached, { routes, state: newState });
-      if (navInfo.forceNewInstance) changes[changes.length - 1] = 'render';
-      const firstRender = changes.indexOf('render');
-      const reused = cached.slice(0, firstRender < 0 ? changes.length : firstRender);
-      prepared = await this.prepareNavigation(newState, reused, signal);
+      // Persist resolved defaults before any async work, even if rendering fails.
+      // Keep persistence in this cleanup scope: it can throw or start a new navigation.
+      this.engine.updateCurrentEntry(to.serialize(this.sitemap));
       signal.throwIfAborted();
-      this.activateNavigation(newState, prepared, signal);
+      const prepared = await transition.prepare(this.preparations,
+        (reused, requestSignal) => this.prepareNavigation(to, reused, requestSignal),
+      );
+      this.activateNavigation(to, prepared, signal);
     } finally {
-      // Disposal is a no-op once history has adopted the output. Failure disposes
-      // construction without pretending that the navigation was superseded.
-      prepared?.dispose();
-      if (this.pendingRender === controller) this.pendingRender = undefined;
+      transition.dispose();
+      if (this.pendingTransition === transition) this.pendingTransition = undefined;
     }
   }
 
-  /** Construction never mounts frames, writes live params, or registers history.
-   * Reused ancestors are pinned, not modified. A future Backstage caller can
-   * stage only routes.slice(reusedCount), then revalidate before activation. */
+  protected loadImplementation(route: Route<any>) {
+    const cached = this.implCache.get(route);
+    if (cached) return Promise.resolve(cached);
+    let loading = this.implLoads.get(route);
+    if (!loading) {
+      loading = this.implMap.loadImplementation(route).then(impl => {
+        this.implCache.set(route, impl);
+        return impl;
+      }).finally(() => this.implLoads.delete(route));
+      this.implLoads.set(route, loading);
+    }
+    return loading;
+  }
+
+  /** Only the new suffix is staged. Reused ancestors are pinned, never mounted
+   * in Backstage, and inherited destination params remain isolated until adopt. */
   protected async prepareNavigation(
     state: AppState, reused: readonly RenderedRoute[], requestSignal: AbortSignal,
   ): Promise<PreparedNavigation> {
@@ -390,27 +465,58 @@ export class ActualRouter<
     const { signal } = controller;
     const createdParams: ParamStorage[] = [];
     const createdRoutes: RenderedRoute[] = [];
-    const releaseReused = this.rrCache.retainForRender(reused);
-    let ownsConstruction = true;
+    const stagedRoutes = new Map<number, RenderedRoute>();
+    const backstage = Backstage();
+    let stageIndex = reused.length;
+    let stageFrame: FrameDelegate | undefined = {
+      setElement: node => backstage.replaceChildren(node), clear: () => backstage.replaceChildren(),
+    };
+    let releaseRoutes = this.rrCache.retainForRender(reused);
+    let renderedRoutes: readonly RenderedRoute[] = reused;
+    let phase: 'constructing' | 'adopted' | 'disposed' = 'constructing';
+    let requested = true;
+    let fetching = reused.map(rendered => rendered.lifecycle.requestFetch());
+    const releaseFetching = () => {
+      const previous = fetching;
+      fetching = [];
+      for (const release of previous) release();
+    };
+    const setRequested = (value: boolean) => {
+      if (phase === 'disposed' || requested === value) return;
+      requested = value;
+      if (value) fetching = [...reused, ...createdRoutes].map(rendered => rendered.lifecycle.requestFetch());
+      else releaseFetching();
+    };
     const detach = () => {
       requestSignal.removeEventListener('abort', dispose);
-      releaseReused();
+      backstage.remove();
     };
     const adopt = () => {
       signal.throwIfAborted();
-      ownsConstruction = false;
+      if (phase !== 'constructing') return;
+      phase = 'adopted';
+      // History owns the output now, but outstanding consumers still pin the
+      // complete tree and request fetching, even if history later evicts it.
+      const releaseReused = releaseRoutes;
+      releaseRoutes = this.rrCache.retainForRender(renderedRoutes);
       detach();
+      releaseReused();
     };
     const dispose = () => {
-      if (!ownsConstruction) return;
-      ownsConstruction = false;
-      controller.abort(requestSignal.reason);
-      for (const params of createdParams.toReversed()) params.owner.dispose();
-      for (const rendered of createdRoutes.toReversed()) {
-        const html = rendered.renderOutput?.html;
-        if (html !== undefined) html.parentNode?.removeChild(html);
+      if (phase === 'disposed') return;
+      const constructing = phase === 'constructing';
+      phase = 'disposed';
+      if (constructing) {
+        controller.abort(requestSignal.reason);
+        for (const params of createdParams.toReversed()) params.owner.dispose();
+        for (const rendered of createdRoutes.toReversed()) {
+          const html = rendered.renderOutput?.html;
+          if (html !== undefined) html.parentNode?.removeChild(html);
+        }
       }
       detach();
+      releaseFetching();
+      releaseRoutes();
     };
     requestSignal.addEventListener('abort', dispose, { once: true });
 
@@ -418,14 +524,12 @@ export class ActualRouter<
       requestSignal.throwIfAborted();
       signal.throwIfAborted();
       const routes = [...state.route.nestedInRoutes, state.route];
+      if (routes.length > reused.length) document.body.append(backstage);
       const pending = reused.map(rendered => Promise.resolve(rendered));
       let parentParams = reused.at(-1) && Promise.resolve(reused.at(-1)!.renderArgs.params);
       for (let i = reused.length; i < routes.length; i++) {
         const route = routes[i];
-        const implementation = Promise.resolve(this.implCache.get(route) ?? this.implMap.loadImplementation(route).then(impl => {
-          this.implCache.set(route, impl);
-          return impl;
-        }));
+        const implementation = this.loadImplementation(route);
         const deferParent = i === reused.length && reused.length > 0;
         const params: Promise<ParamStorage> = Promise.all([implementation, parentParams]).then(([impl, parent]) => {
           signal.throwIfAborted();
@@ -440,6 +544,18 @@ export class ActualRouter<
         }).then(rendered => {
           createdRoutes.push(rendered);
           signal.throwIfAborted();
+          // Fetch interest is independent of visibility and survives adoption.
+          fetching.push(rendered.lifecycle.requestFetch());
+          rendered.lifecycle.setState('retained');
+          stagedRoutes.set(i, rendered);
+          while (stagedRoutes.has(stageIndex)) {
+            const next = stagedRoutes.get(stageIndex)!;
+            this.assertFrame(stageFrame, next.route);
+            stageFrame.setElement(next.renderOutput!.html);
+            stageFrame = next.subFrame;
+            stageIndex++;
+            signal.throwIfAborted();
+          }
           runWithOwner(rendered.owner, () => createEffect(
             () => rendered.renderArgs.pageStatus.hasFocus() ? rendered.renderOutput!.title : undefined,
             title => { if (title !== undefined) document.title = title; },
@@ -448,9 +564,9 @@ export class ActualRouter<
         }));
       }
       // Observe every sibling rejection, even when another branch fails first.
-      const renderedRoutes = await Promise.all(pending);
+      renderedRoutes = await Promise.all(pending);
       signal.throwIfAborted();
-      return { routes: renderedRoutes, reusedCount: reused.length, signal, adopt, dispose };
+      return { routes: renderedRoutes, reusedCount: reused.length, signal, adopt, setRequested, dispose };
     } catch (error) {
       dispose();
       throw error;

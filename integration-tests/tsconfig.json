@@ -4,7 +4,7 @@
     "composite": false,
     "incremental": false,
     "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "jsxImportSource": "@solidjs/web",
     "types": ["node", "dom-navigation", "vite/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "*.ts"],

@@ -1,7 +1,7 @@
 
 import { Dynamic } from "@solidjs/web";
 import { InRenderedRoute } from "./rendered-route.js";
-import { ComponentProps, createComponent, JSX, omit, useContext } from "solid-js";
+import { createComponent, useContext } from "solid-js";
 
 export const rootFrameId = '__kinetic_router_root_frame';
 export const frameDelegateAttribute = '__kinetic_router_frame_delegate'

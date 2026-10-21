@@ -1,7 +1,11 @@
 import { RenderedRoute } from "./rendered-route.js";
 
 /** LRU of complete history-entry stacks, oldest first. Keeping whole stacks
- * ensures a cached child always keeps its rendered ancestors alive. */
+ * ensures a cached child always keeps its rendered ancestors alive. The budget
+ * bounds both distinct rendered instances and retained entry indexes; shared
+ * ancestors count once and visible output is exempt. Successful renders refresh
+ * recency and enforce the budget without timers; incoming/outgoing stacks can
+ * coexist while rendering. Dispose only after all ownership pins are released. */
 export class RenderedRouteCache {
   readonly cache = new Map<string, readonly RenderedRoute[]>();
   readonly maxPages: number;
@@ -22,6 +26,11 @@ export class RenderedRouteCache {
     return this.cache.get(id);
   }
 
+  /** Displayed output can outlive its entry index during pending navigation. */
+  currentRoutes(): readonly RenderedRoute[] {
+    return this.current;
+  }
+
   /** A source entry may disappear while its ancestors are being reused. */
   retainForRender(routes: readonly RenderedRoute[]): () => void {
     const stack = [...routes];
@@ -37,13 +46,19 @@ export class RenderedRouteCache {
     this.current = [...renderedRoutes];
     this.cache.delete(id);
     this.cache.set(id, this.current);
+    // Incoming routes become fetch-active before preparation releases its pins.
+    // This does not abort resources and keeps their signal stable on adoption.
+    for (const rendered of this.current) {
+      rendered.lifecycle.setState('active', rendered === this.current.at(-1));
+    }
     // Transfer ownership before lifecycle abort/cleanup callbacks can navigate.
     adoptConstruction?.();
 
     for (const entryId of this.cache.keys()) {
+      // Construction pins protect ownership, but don't consume the history budget.
       // The visible stack is the newest entry and must never be evicted.
       if (this.cache.size === 1 || (
-        this.cache.size <= this.maxPages && this.pages().size <= this.maxPages
+        this.cache.size <= this.maxPages && new Set([...this.cache.values()].flat()).size <= this.maxPages
       )) break;
       this.cache.delete(entryId);
     }
@@ -51,9 +66,6 @@ export class RenderedRouteCache {
     const active = new Set(this.current);
     for (const rendered of previous) {
       if (!active.has(rendered)) rendered.lifecycle.setState('retained');
-    }
-    for (const rendered of this.current) {
-      rendered.lifecycle.setState('active', rendered === this.current.at(-1));
     }
     this.disposeUnused(previous);
   }
@@ -63,6 +75,14 @@ export class RenderedRouteCache {
     if (previous === undefined) return;
     this.cache.delete(id);
     this.disposeUnused(new Set(previous));
+  }
+
+  dispose() {
+    const previous = this.pages();
+    this.cache.clear();
+    this.current = [];
+    this.rendering.clear();
+    this.disposeUnused(previous);
   }
 
   protected pages(): Set<RenderedRoute> {

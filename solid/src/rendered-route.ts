@@ -1,4 +1,4 @@
-import { createComponent, createContext, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
+import { createComponent, createContext, createRenderEffect, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
 
@@ -33,23 +33,40 @@ type PageLifecycleState = 'preparing' | 'retained' | 'active' | 'disposed';
  * changes from invalidating resources that only track their fetch signal. */
 export function createPageLifecycle() {
   let controller: AbortController | undefined = new AbortController();
-  let disposed = false;
+  let state: PageLifecycleState = 'preparing';
+  let focused = false;
+  let requests = 0;
   // Cancellation can dispose this owner while its renderer is executing.
   const options = { ownedWrite: true };
   const [fetchSignal, setFetchSignal] = createSignal<AbortSignal | undefined>(controller.signal, options);
   const [isVisible, setVisible] = createSignal(false, options);
   const [hasFocus, setFocus] = createSignal(false, options);
-  const setState = (state: PageLifecycleState, focus = false) => {
-    if (disposed) return;
-    disposed = state === 'disposed';
+  const update = () => {
     const previous = controller;
-    const fetching = state === 'preparing' || state === 'active';
+    const fetching = state !== 'disposed' && (state === 'preparing' || state === 'active' || requests > 0);
     controller = fetching ? controller ?? new AbortController() : undefined;
     setFetchSignal(controller?.signal);
     setVisible(state === 'active');
-    setFocus(state === 'active' && focus);
+    setFocus(state === 'active' && focused);
     // Publish all state before abort callbacks can re-enter the router.
     if (controller !== previous) previous?.abort();
+  };
+  const setState = (next: PageLifecycleState, focus = false) => {
+    if (state === 'disposed') return;
+    state = next;
+    focused = focus;
+    update();
+  };
+  const requestFetch = () => {
+    requests++;
+    update();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      requests--;
+      update();
+    };
   };
   onCleanup(() => setState('disposed'));
   const status: PageStatus = {
@@ -57,7 +74,7 @@ export function createPageLifecycle() {
     fetchSignal, isVisible, hasFocus,
     isAnimating: () => false,
   };
-  return { status, setState };
+  return { status, setState, requestFetch };
 }
 
 export async function renderRoute({ route, implementation, renderArgs, signal }: {
@@ -90,7 +107,7 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
 
       runWithOwner(owner, () => {
         // Use the public context provider: owner internals are mangled in production.
-        flatten(createComponent(InRenderedRoute, {
+        const content = createComponent(InRenderedRoute, {
           value: res,
           get children() {
             return untrack(() => {
@@ -105,7 +122,11 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
               return output.html;
             });
           },
-        }));
+        });
+        // Resolve synchronously so renderer errors reject construction, then keep
+        // the provider's lazy children observed until this page owner is disposed.
+        flatten(content);
+        createRenderEffect(() => flatten(content), () => {});
       });
 
       // Application callbacks can cancel construction synchronously too.

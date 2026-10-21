@@ -10,6 +10,7 @@ type Constant = string | number | boolean | bigint | null | undefined;
 
 export abstract class ParamDef<T> {
   serde?: Serde<T>;
+  makeDefault?: () => T;
 
   constructor(serde?: Serde<T>) {
     this.serde = serde;
@@ -125,9 +126,10 @@ export function convertParamsByDefinition<ParamDefs extends AnyParamDefs>(
   params: ParamValues<ParamDefs>,
   definitions: ParamDefs,
 ): ParamMap {
-  return new Map(Object.entries(definitions).map(
-    ([key, paramDef]) => [paramDef, (params as any)[key]]
-  ))
+  return new Map(Object.entries(definitions).map(([key, paramDef]) => {
+    const value = (params as any)[key];
+    return [paramDef, value === undefined ? paramDef.makeDefault?.() : value];
+  }));
 }
 
 export function convertParamsByKey<ParamDefs extends AnyParamDefs>(
@@ -136,5 +138,5 @@ export function convertParamsByKey<ParamDefs extends AnyParamDefs>(
 ): ParamValues<ParamDefs> {
   return Object.fromEntries(Object.entries(definitions).map(
     ([key, paramDef]) => [key, params.get(paramDef)!]
-  )) as any;
+  ).filter(([, value]) => value !== undefined)) as any;
 }

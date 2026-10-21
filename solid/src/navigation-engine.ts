@@ -96,8 +96,9 @@ export type EngineNavigationResult = {
 };
 
 export interface NavigationEngine {
-  /** Called exactly once by the router, before any navigation is observed. */
-  attach(handlers: EngineHandlers): void;
+  /** Attach one Router before observing navigation. Return an idempotent cleanup
+   * that stops callbacks and releases listeners, allowing a new attachment. */
+  attach(handlers: EngineHandlers): () => void;
 
   currentEntry(): EngineEntry | undefined;
 

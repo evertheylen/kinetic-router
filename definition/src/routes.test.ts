@@ -1,7 +1,7 @@
 import { it, describe, expect } from 'vitest';
 import { param, route, root, index } from "./index.js";
 import { getSlugPath } from "./root.js";
-import type { Locator, RouteTarget } from './routes.js';
+import { resolveAliases, type Locator, type RouteTarget } from './routes.js';
 
 const userId = param.path<string>();
 const postId = param.path<number>();
@@ -38,6 +38,16 @@ it('keeps explicit Locator values typed and permits bare targets only without re
 });
 
 describe('aliasTo', () => {
+  it('normalizes defaults before alias callbacks and at the final destination', () => {
+    const target = route({ q: param.search<string>().withDefault('all'), hidden: param.hidden<number>().withDefault(42) });
+    const alias = route({ query: param.search<string>().withDefault('recent') }).aliasTo(values => ({
+      route: target, values: { q: values.query },
+    }));
+    expect(alias.locate({})).toEqual({ route: target, values: { q: 'recent', hidden: 42 } });
+    expect(resolveAliases({ route: alias, values: {} })).toEqual(alias.locate({}));
+    expect(resolveAliases({ route: target, values: {} }).values).toEqual({ q: 'all', hidden: 42 });
+  });
+
   it('locate resolves to the target route and its values', () => {
     const target = route({ id: param.hidden<number>() });
     const alias = route({ id: param.hidden<number>() }).aliasTo((p) => target.locate({ id: p.id }));

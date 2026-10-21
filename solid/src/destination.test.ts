@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { index, param, root, route, type Locator, type Route } from '@kinetic-router/definition';
 import { createEffect, createOwner, runWithOwner, useContext } from 'solid-js';
 import { Router } from './router.js';
 import { MemoryEngine } from './memory-engine.js';
 import { frameDelegateAttribute, rootFrameId, type FrameDelegate } from './frame.js';
 import { InRenderedRoute } from './rendered-route.js';
+
+const routers: Router[] = [];
+afterEach(() => { for (const router of routers.splice(0)) router.dispose(); });
 
 async function createApp(initialUrl = '/b', slow?: Promise<void>, engine = new MemoryEngine(initialUrl)) {
   const home = route({}), a = route({}), x = route({}), b = route({}), ab = route({});
@@ -25,6 +28,7 @@ async function createApp(initialUrl = '/b', slow?: Promise<void>, engine = new M
   });
   const routes = { home, a, x, detail, other, b, ab, project, projectDetail };
   const router = new Router(sitemap, { engine, maxCachedPages: 0 });
+  routers.push(router);
   const renders = vi.fn();
   for (const [name, route] of Object.entries<Route<any>>(routes)) {
     router.implement(route, {

@@ -3,7 +3,7 @@ import type { Route } from '@kinetic-router/definition';
 import { Router, type NavigationMode } from '@kinetic-router/solid/router.js';
 import { Frame } from '@kinetic-router/solid/frame.js';
 import type { Scenario, TestPage } from './scenario.js';
-import { Fingerprint } from './fingerprint.js';
+import { Fingerprint } from '@kinetic-router/testing-utils/fingerprint.js';
 
 // One scenario per document: changing scenarios opens a fresh tab/history stack.
 let router: Router;

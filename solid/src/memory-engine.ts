@@ -18,6 +18,7 @@ export type MemoryEntry = {
  * the reference implementation for NavigationEngine semantics. */
 export class MemoryEngine implements NavigationEngine {
   protected handlers: EngineHandlers | undefined;
+  protected attachment: symbol | undefined;
   protected stack: MemoryEntry[];
   protected index = 0;
   protected nextId = 0;
@@ -44,6 +45,15 @@ export class MemoryEngine implements NavigationEngine {
       throw new Error('MemoryEngine is already attached');
     }
     this.handlers = handlers;
+    const attachment = this.attachment = Symbol();
+    return () => {
+      if (this.attachment !== attachment) return;
+      const controller = this.navigationController;
+      this.handlers = undefined;
+      this.attachment = undefined;
+      this.navigationController = undefined;
+      controller?.abort();
+    };
   }
 
   currentEntry(): EngineEntry {
@@ -187,10 +197,10 @@ export class MemoryEngine implements NavigationEngine {
   protected disposeAfter(finished: Promise<unknown>, entries: MemoryEntry[]) {
     if (entries.length === 0) return;
 
+    const attachment = this.attachment;
     const dispose = () => {
-      for (const entry of entries) {
-        this.handlers?.handleDispose(entry.id);
-      }
+      if (this.attachment !== attachment) return;
+      for (const entry of entries) this.handlers?.handleDispose(entry.id);
     };
 
     void finished.then(dispose, dispose);
