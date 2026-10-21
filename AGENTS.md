@@ -28,6 +28,14 @@ CI=true pnpm --filter @kinetic-router/solid exec vitest run   # one package
 Publishing: `./publish.sh` — patch-bumps and publishes packages changed since the
 `published` git branch, then force-moves that branch. Don't run it casually.
 
+## Plans
+
+Keep implementation plans in `plans/`. Update each plan's status, progress
+checklist, open decisions/blockers, and validation results as work proceeds.
+Once fully implemented and validated, move any lasting contracts into source
+API docs/tests, delete the plan file, and update references to it. Do not retain
+completed plans as historical documentation.
+
 ## Adding a new package
 
 Use `solid/package.json` and `solid/tsconfig.json` as templates. Reference the
