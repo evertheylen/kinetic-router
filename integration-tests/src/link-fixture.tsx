@@ -23,6 +23,7 @@ export function mountLinks(element: HTMLElement) {
   const router = new Router(sitemap, {
     prefetch: query.has('press') ? { hover: false, focus: false } : true,
     prefetchCache: { maxEntries: 0 },
+    maxCachedPages: query.has('zero-cache') ? 0 : undefined,
   });
   const [target, setTarget] = createSignal(a.locate({}));
   const [mode, setMode] = createSignal<LinkMode>('push');

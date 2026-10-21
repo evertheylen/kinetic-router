@@ -29,6 +29,37 @@ function attachedEngine(initialUrl?: string) {
 const tick = () => new Promise<void>(resolve => setTimeout(resolve));
 
 describe('MemoryEngine', () => {
+  it('supplies pre-commit destination/type/info while the outgoing entry is still current', async () => {
+    const engine = new MemoryEngine('/');
+    const first = engine.currentEntry();
+    const contexts: unknown[] = [];
+    const currents: string[] = [];
+    engine.attach({ ...mockHandlers().handlers, handleBeforeCommit(event) {
+      contexts.push({ ...event, destination: event.destination.getState?.() });
+      currents.push(engine.currentEntry().id);
+      return { preservePresentation: true };
+    } });
+    const info = {};
+    await engine.navigate({ url: '/a', state: 'a', history: 'push', info }).finished;
+    const second = engine.currentEntry();
+    await engine.traverseTo(first.key, info).finished;
+    await engine.navigate({ url: '/', state: null, history: 'replace', info: { ignore: true } }).finished;
+    expect(contexts).toEqual([
+      { navigationType: 'push', destination: 'a', info },
+      { navigationType: 'traverse', destination: undefined, info },
+    ]);
+    expect(currents).toEqual([first.id, second.id]);
+  });
+
+  it('shares the default info object between the pre-commit and committed hooks', async () => {
+    const engine = new MemoryEngine('/');
+    const mock = mockHandlers();
+    let info: unknown;
+    engine.attach({ ...mock.handlers, handleBeforeCommit(event) { info = event.info; } });
+    await engine.navigate({ url: '/a', state: undefined, history: 'push' }).finished;
+    expect(mock.events[0].info).toBe(info);
+  });
+
   it('starts with a single entry for the initial url', () => {
     const engine = new MemoryEngine('/home?q=1');
 

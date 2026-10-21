@@ -73,9 +73,12 @@ export class MemoryEngine implements NavigationEngine {
       url: intent.url, state: intent.state,
     };
 
-    if (!intent.info?.ignore) {
+    const info = intent.info ?? {};
+    if (!info.ignore) {
       // pre-commit: the outgoing entry is still current
-      handlers.handleBeforeCommit?.();
+      handlers.handleBeforeCommit?.({
+        navigationType: intent.history, destination: this.toSource(entry), info,
+      });
     }
 
     const pruned: MemoryEntry[] = [];
@@ -89,7 +92,6 @@ export class MemoryEngine implements NavigationEngine {
       this.index++;
     }
 
-    const info = intent.info ?? {};
     const committed = Promise.resolve(entry);
     const signal = this.beginNavigation();
 
@@ -134,7 +136,9 @@ export class MemoryEngine implements NavigationEngine {
     }
 
     // pre-commit: the outgoing entry is still current
-    if (!info.ignore) handlers.handleBeforeCommit?.();
+    if (!info.ignore) handlers.handleBeforeCommit?.({
+      navigationType: 'traverse', destination: this.toSource(target), info,
+    });
 
     this.index = targetIndex;
     const committed = Promise.resolve(target);

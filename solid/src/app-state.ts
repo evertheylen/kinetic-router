@@ -15,6 +15,8 @@ export class AppState {
   readonly paramsByKey: ParamValues<any>;
   id: string;
   scrollTops = new Map<string, number>();
+  /** Marks a history entry, never a restorable UI interaction. */
+  transient = false;
 
   constructor(route: Route<any>, paramsByDefinition: ParamMap, id?: string, scrollTops?: Map<string, number>) {
     this.route = route;
@@ -41,7 +43,9 @@ export class AppState {
     const slugs = abstractSlugs.map(s => typeof s === 'object' ? null : s);
 
     const scrollTopsObj: JsonObject = Object.fromEntries(this.scrollTops) as JsonObject;
-    return { id: this.id, slugs, snapShotByKey: this.paramsByKey as JsonObject, $scrollTops: scrollTopsObj } satisfies Json;
+    return { id: this.id, slugs, snapShotByKey: this.paramsByKey as JsonObject, $scrollTops: scrollTopsObj,
+      ...(this.transient ? { $transient: true as const } : {}),
+    } satisfies Json;
   }
 
   static fromLocator<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, id?: string) {
@@ -88,7 +92,9 @@ export class AppState {
       }
     }
 
-    return new AppState(route, snapShotByDef, data.id, scrollTops);
+    const state = new AppState(route, snapShotByDef, data.id, scrollTops);
+    state.transient = data.$transient === true;
+    return state;
   }
 }
 

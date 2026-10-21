@@ -70,6 +70,9 @@ export type EngineNavigateEvent = {
   info: NavigationInfo,
 };
 
+/** Pre-commit context, while the outgoing entry is still current. */
+export type EngineBeforeCommit = Pick<EngineNavigateEvent, 'navigationType' | 'destination' | 'info'>;
+
 export type EngineHandlers = {
   /** Render the destination. The returned promise resolves when rendering
    * is complete (used for navigation success/failure reporting). */
@@ -84,8 +87,10 @@ export type EngineHandlers = {
    * transient page state (scroll positions) onto the outgoing entry via
    * `updateCurrentEntry` — the only moment this is possible, since the
    * Navigation API can only update the *current* entry. Engines must not
-   * call this for `ignore` navigations. */
-  handleBeforeCommit?(): void,
+   * call this for `ignore` navigations. A preservePresentation hint requests
+   * manual browser focus/scroll handling for operations that reuse the visible
+   * page. This hook does not redirect or choose a history operation. */
+  handleBeforeCommit?(event: EngineBeforeCommit): void | { preservePresentation: true },
 };
 
 /** What `NavigationEngine.navigate` returns. The Navigation API's

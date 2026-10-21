@@ -2,6 +2,7 @@ import { Fingerprint } from "@kinetic-router/testing-utils/fingerprint.js";
 import { router } from "./routing.js";
 import { homePage } from "./sitemap.js";
 import { TrainImage } from "./train-image.js";
+import { TransientDialogDemo } from "./transient-dialog.js";
 
 router.implement(homePage, {
   untrackedKeys: [],
@@ -11,6 +12,7 @@ router.implement(homePage, {
       const html = <div>
         <h1>Welcome to the homepage!</h1>
         <Fingerprint />
+        <TransientDialogDemo />
         <TrainImage page="home" />
       </div>;
 

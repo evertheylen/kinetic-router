@@ -5,7 +5,7 @@ import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator, resolveAliases } from "@kinetic-router/definition/routes.js";
 import type { AnyParamDefs } from "@kinetic-router/definition/params.js";
 import { Accessor, createSignal, getOwner, onCleanup, Setter } from "solid-js";
-import { NavigationEngine } from "./navigation-engine.js";
+import { EngineNavigationResult, NavigationEngine } from "./navigation-engine.js";
 import { NavigationApiEngine } from "./navigation-api-engine.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
 import { PreparationRegistry, type PrefetchCacheOptions } from './preparation-registry.js';
@@ -14,6 +14,17 @@ import { registerLink, type Prefetch } from './link.js';
 export type { DestinationSnapshot, NavigateOptions, NavigationMode } from './actual-router.js';
 export type { PrefetchCacheOptions } from './preparation-registry.js';
 export type { LinkMode, LinkProps, Prefetch, PrefetchOptions } from './link.js';
+
+/** A one-shot, Back-dismissible interaction on the displayed page.
+ * committed describes the opening entry; finished includes synchronous enter,
+ * not a page render. Forward/reload never recreate the interaction.
+ * close traverses to the captured predecessor, never directly calls cleanup;
+ * stale/non-topmost closes do nothing. Closing before commit suppresses enter,
+ * and cannot undo a newer entry. Concurrent closes coalesce; cancelled traversal
+ * leaves the interaction open and can be retried. */
+export type TransientHandle = EngineNavigationResult & {
+  close(): EngineNavigationResult,
+};
 
 /** Public facade for typed implementations, navigation, and Link defaults.
  * Create the Router before Links and register implementations synchronously;
@@ -105,6 +116,21 @@ export class Router<
     if (this.disposed || !this.didInit()) throw new Error('Router is not active');
 
     return this.actualRouter!.navigate(locator, options);
+  }
+
+  /** Push the current URL/state without rendering or changing page lifecycle.
+   * Requires a fully activated current page. enter and its returned cleanup run
+   * synchronously, once; cleanup runs at departure commit (children first), or
+   * before page disposal, even if destination resolution, persistence or rendering
+   * fails. Opening cancellation does not close a live interaction.
+   * Nested opens are supported with a warning: navigation away may leave extra
+   * Back steps. Managed Link/navigate pushes replace a marked entry, even expired;
+   * raw anchors do not guarantee replacement. Focus management and async UI work
+   * belong to the component. Native dialog cancel handlers should preventDefault
+   * and call close(), rather than independently closing the dialog. */
+  pushTransient(enter: () => void | (() => void)): TransientHandle {
+    if (this.disposed || !this.didInit()) throw new Error('Router is not active');
+    return this.actualRouter!.pushTransient(enter);
   }
 
   resolveDestination<ParamDefs extends AnyParamDefs>(target: Locator<ParamDefs>, mode: NavigationMode = 'push'): DestinationSnapshot {
