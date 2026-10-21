@@ -1,19 +1,21 @@
 import { Frame } from "@kinetic-router/solid/frame.js";
+import { Link } from "@kinetic-router/solid/link.js";
+import { Fingerprint } from "@kinetic-router/testing-utils/fingerprint.js";
 import { index } from "@kinetic-router/definition";
 
-import { router } from "./routing";
-import { agencyId, explore, sitemap } from "./sitemap";
-import { Counter } from "./counter";
+import { router } from "./routing.js";
+import { agencyId, explore, sitemap } from "./sitemap.js";
+import { TrainImage } from "./train-image.js";
 
-// top page
 router.implement(explore, {
   untrackedKeys: [],
   viewAs: 'mainpage',
-  async render(untrackedParams) {
-    return (params) => {
+  async render() {
+    return () => {
       const html = <div>
-        <h1>Agencies <Counter/></h1>
-        <Frame component="div" style={{ padding: '10px', margin: '10px', border: '1px solid red' }}/>
+        <h1>Agencies</h1>
+        <Fingerprint />
+        <Frame component="div" class="route-frame" />
       </div>;
 
       return { html, title: 'agencies', description: 'Agency wrapper' };
@@ -23,17 +25,20 @@ router.implement(explore, {
 
 router.implement(sitemap.explore[index], {
   untrackedKeys: [],
-  // TODO: viewAs no longer important for nested routes?
   viewAs: 'mainpage',
-  async render(untrackedParams) {
-    return (params) => {
+  async render() {
+    return () => {
       const html = (
-        <ul>
-          <li>count <Counter/></li>
-          <li><a href={router.toUrl(sitemap.explore[agencyId.$].locate({ agencyId: 'NMBS' }))}>NMBS</a></li>
-          <li><a href={router.toUrl(sitemap.explore[agencyId.$].locate({ agencyId: 'DB' }))}>DB</a></li>
-          <li><a href={router.toUrl(sitemap.explore[agencyId.$].locate({ agencyId: 'OBB' }))}>OBB</a></li>
-        </ul>
+        <section>
+          <Fingerprint />
+          <ul>
+            <li><Link route={sitemap.explore[agencyId.$].locate({ agencyId: 'NMBS' })}>NMBS</Link> — default prefetch</li>
+            <li><Link route={sitemap.explore[agencyId.$].locate({ agencyId: 'DB' })} prefetch={{ hover: 150 }}>DB</Link> — 150 ms hover</li>
+            <li><Link route={sitemap.explore[agencyId.$].locate({ agencyId: 'OBB' })} prefetch={false}>ÖBB</Link> — no prefetch</li>
+          </ul>
+          <p>The layout stays mounted between agencies. Matching fingerprints mean the same rendered instance.</p>
+          <TrainImage page="agencies" />
+        </section>
       );
 
       return { html, title: 'agencies', description: 'List of agencies' };
@@ -44,15 +49,18 @@ router.implement(sitemap.explore[index], {
 
 router.implement(sitemap.explore[agencyId.$], {
   untrackedKeys: [],
-  // TODO: viewAs no longer important for nested routes?
   viewAs: 'mainpage',
-  async render(untrackedParams) {
+  async render() {
     return (params) => {
       const html = (
-        <h2>This is {params.agencyId}</h2>
+        <section>
+          <h2>This is {params.agencyId}</h2>
+          <Fingerprint />
+          <TrainImage page={params.agencyId} />
+        </section>
       );
 
-      return { html, title: params.agencyId, get description() { return `agency ${params.agencyId}` } };
+      return { html, get title() { return params.agencyId; }, get description() { return `agency ${params.agencyId}`; } };
     }
   }
 })

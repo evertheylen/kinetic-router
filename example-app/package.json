@@ -4,11 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vite dev"
+    "dev": "vite dev",
+    "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
     "@kinetic-router/definition": "workspace:*",
     "@kinetic-router/solid": "workspace:*",
+    "@kinetic-router/testing-utils": "workspace:*",
     "@kinetic-router/url": "workspace:*",
     "@solidjs/web": "catalog:",
     "solid-js": "catalog:",
