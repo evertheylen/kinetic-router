@@ -7,6 +7,7 @@ export default defineConfig({
       'url',
       'solid',
       'lifecycle',
+      'animations',
     ],
   },
 })

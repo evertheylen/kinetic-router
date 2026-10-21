@@ -1,7 +1,7 @@
 # Example app
 
 ```sh
-pnpm --filter @kinetic-router/solid... -r build
+pnpm --filter @kinetic-router/example-app... -r build
 pnpm --filter @kinetic-router/example-app dev
 ```
 
@@ -14,8 +14,19 @@ Open http://localhost:3000 in a browser with the Navigation API.
   recreated together, rather than leaving cached pages in a replaced outlet.
 - Prefetch is enabled in `src/routing.ts`: hover/focus wait 75 ms, primary press
   starts immediately, and data-saving preferences are respected.
-- Account is lazy-loaded. Hover or keyboard-focus its menu link to load and
-  prepare it without changing the visible page or history.
+- Account and Todos are lazy-loaded. Hover or keyboard-focus their menu links to
+  load and prepare them without changing the visible page or history.
+- Todos (`/todos`) uses `Lifecycle.For` for tumbling task cards and `Lifecycle.Show`
+  for a confetti-filled empty state. Complete a task, then quickly Undo: its exit
+  reverses and its victory-note input survives. Complete all for maximum fanfare.
+  The animations package's `createCssTransition` helper animates CSS grid wrappers, so cards, their
+  spacing, and the empty banner expand/collapse without a disposal jump. The grid
+  content stays overflow-visible, so tumbling cards aren't clipped by their shrinking
+  slots; exiting items float above neighbours. No manual sizing or per-frame
+  JavaScript. Motion respects reduced-motion preferences;
+  cached pages retain their list.
+  Run `pnpm --filter @kinetic-router/example-app test:browser` for the Chromium
+  checks (install it first with `pnpm --filter @kinetic-router/example-app exec playwright install chromium`).
 - Main navigation uses `mode="menu"`. Visit Agencies → NMBS → Home, then select
   Agencies to resume NMBS. Select Agencies again to return to the list.
 - Agency links demonstrate inherited options (NMBS), a 150 ms hover override

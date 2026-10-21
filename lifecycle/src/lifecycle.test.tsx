@@ -753,6 +753,212 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(host.textContent).toBe('')
   })
 
+  it('out-in waits for every outgoing handler and disposal before mounting the next owner', async () => {
+    const [page, setPage] = createSignal('a')
+    const one = deferred(), two = deferred()
+    const events: string[] = []
+    function A() {
+      onExit(() => one.promise); onExit(() => two.promise)
+      onCleanup(() => { events.push('dispose:a') })
+      return <p>A</p>
+    }
+    function B() { events.push('mount:b'); return <p>B</p> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><B /></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    setPage('b'); await settle()
+    expect(host.textContent).toBe('A')
+    expect(events).toEqual([])
+    one.resolve(); await settle()
+    expect(events).toEqual([])
+    two.resolve()
+    await vi.waitFor(() => expect(host.textContent).toBe('B'))
+    expect(events).toEqual(['dispose:a', 'mount:b'])
+  })
+
+  it('out-in mounts only the latest request, including fallback in both directions', async () => {
+    const [page, setPage] = createSignal('a')
+    const first = deferred(), fallback = deferred()
+    const events: string[] = []
+    function A() { onExit(() => first.promise); return <p>A</p> }
+    function B() { events.push('B'); return <p>B</p> }
+    function Fallback() { events.push('fallback'); onExit(() => fallback.promise); return <p>fallback</p> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in" fallback={<Fallback />}>
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><B /></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    setPage('b'); await settle()
+    setPage('unknown'); await settle()
+    expect(events).toEqual([])
+    first.resolve()
+    await vi.waitFor(() => expect(host.textContent).toBe('fallback'))
+    expect(events).toEqual(['fallback'])
+    setPage('b'); await settle()
+    expect(host.textContent).toBe('fallback')
+    fallback.resolve()
+    await vi.waitFor(() => expect(host.textContent).toBe('B'))
+    expect(events).toEqual(['fallback', 'B'])
+  })
+
+  it('out-in reselects an exiting owner without losing state or observing stale completion', async () => {
+    const [page, setPage] = createSignal('a')
+    const gate = deferred()
+    let signal!: AbortSignal, mounts = 0
+    const incoming = vi.fn(() => <p>B</p>)
+    function A() {
+      mounts++
+      onExit(context => { signal = context.signal; return gate.promise })
+      return <input />
+    }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}>{incoming}</Lifecycle.Match>
+    </Lifecycle.Switch>)
+    const input = host.querySelector('input')!
+    input.value = 'keep'
+    setPage('b'); await settle()
+    setPage('a'); await settle()
+    expect(signal.aborted).toBe(true)
+    gate.resolve(); await settle()
+    expect(host.querySelector('input')).toBe(input)
+    expect(input.value).toBe('keep')
+    expect(mounts).toBe(1)
+    expect(incoming).not.toHaveBeenCalled()
+  })
+
+  it('out-in honors standalone entry sequencing before waiting for exit', async () => {
+    const [page, setPage] = createSignal('a')
+    const enter = deferred(), exit = deferred()
+    const exiting = vi.fn(() => exit.promise)
+    let started = false
+    function A() { onEnter(() => { started = true; return enter.promise }); onExit(exiting); return <p>A</p> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><p>B</p></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    await vi.waitFor(() => expect(started).toBe(true))
+    setPage('b'); await settle()
+    expect(exiting).not.toHaveBeenCalled()
+    expect(host.textContent).toBe('A')
+    enter.resolve()
+    await vi.waitFor(() => expect(exiting).toHaveBeenCalledOnce())
+    expect(host.textContent).toBe('A')
+    exit.resolve()
+    await vi.waitFor(() => expect(host.textContent).toBe('B'))
+  })
+
+  it('out-in updates same-branch values and handles handler-free branches without timers', async () => {
+    const [value, setValue] = createSignal<{ name: string } | false>({ name: 'old' })
+    let mounts = 0
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in" fallback={<b>fallback</b>}>
+      <Lifecycle.Match when={value()}>{item => { mounts++; return <p>{item().name}</p> }}</Lifecycle.Match>
+    </Lifecycle.Switch>)
+    const original = host.firstElementChild
+    setValue({ name: 'new' }); await settle()
+    expect(host.firstElementChild).toBe(original)
+    expect(host.textContent).toBe('new')
+    expect(mounts).toBe(1)
+    setValue(false)
+    await vi.waitFor(() => expect(host.textContent).toBe('fallback'))
+    setValue({ name: 'again' })
+    await vi.waitFor(() => expect(host.textContent).toBe('again'))
+    expect(mounts).toBe(2)
+  })
+
+  it('out-in reconciles same-turn reentry before pruning a completed exit', async () => {
+    const [page, setPage] = createSignal('a')
+    const gate = deferred()
+    let phase!: Accessor<string>
+    function A() { phase = useLifecycle().phase; onExit(() => gate.promise); return <input /> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><p>B</p></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    const input = host.firstElementChild
+    setPage('b')
+    await until(() => phase() === 'exiting', { timeout: 1000 })
+    gate.resolve(); await gate.promise
+    setPage('a')
+    await until(() => phase() === 'present', { timeout: 1000 })
+    expect(host.firstElementChild).toBe(input)
+  })
+
+  it('out-in never mounts pending content after ancestor disposal', async () => {
+    const [page, setPage] = createSignal('a')
+    const gate = deferred()
+    const incoming = vi.fn(() => <p>B</p>)
+    let signal!: AbortSignal
+    function A() { onExit(context => { signal = context.signal; return gate.promise }); return <p>A</p> }
+    const { host, dispose } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}>{incoming}</Lifecycle.Match>
+    </Lifecycle.Switch>)
+    setPage('b'); await settle()
+    dispose()
+    gate.resolve(); await settle()
+    expect(signal.aborted).toBe(true)
+    expect(incoming).not.toHaveBeenCalled()
+    expect(host.textContent).toBe('')
+  })
+
+  it('out-in does not wait for unrelated nested exit work', async () => {
+    const [page, setPage] = createSignal('a')
+    const [child, showChild] = createSignal(true)
+    const gate = deferred()
+    let signal!: AbortSignal
+    function Child() { onExit(context => { signal = context.signal; return gate.promise }); return <i>child</i> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><Lifecycle.Show when={child()}><Child /></Lifecycle.Show></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><p>B</p></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    showChild(false); await settle()
+    setPage('b')
+    await vi.waitFor(() => expect(host.textContent).toBe('B'))
+    expect(signal.aborted).toBe(true)
+    gate.resolve(); await settle()
+  })
+
+  it('out-in starts exits only after an action-held selection commits', async () => {
+    const [page, setPage] = createSignal('a')
+    const commit = deferred(), exit = deferred()
+    const exiting = vi.fn(() => exit.promise)
+    function A() { onExit(exiting); return <p>A</p> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><p>B</p></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    const select = action(function* () { setPage('b'); yield commit.promise })
+    const pending = select()
+    try {
+      await vi.waitFor(() => expect(isPending(page)).toBe(true))
+      expect(exiting).not.toHaveBeenCalled()
+      expect(host.textContent).toBe('A')
+      commit.resolve(); await pending
+      await vi.waitFor(() => expect(exiting).toHaveBeenCalledOnce())
+      expect(host.textContent).toBe('A')
+      exit.resolve()
+      await vi.waitFor(() => expect(host.textContent).toBe('B'))
+    } finally { commit.resolve(); exit.resolve(); await pending }
+  })
+
+  it('out-in releases failed exits and validates its mode', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const [page, setPage] = createSignal('a')
+    function A() { onExit(() => Promise.reject(new Error('failed'))); return <p>A</p> }
+    const { host } = mount(() => <Lifecycle.Switch mode="out-in">
+      <Lifecycle.Match when={page() === 'a'}><A /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'b'}><p>B</p></Lifecycle.Match>
+    </Lifecycle.Switch>)
+    setPage('b')
+    await vi.waitFor(() => expect(host.textContent).toBe('B'))
+    const invalid = mount(() => <Errored fallback={error => <p>{String(error())}</p>}>
+      <Lifecycle.Switch mode={'invalid' as 'out-in'}><Lifecycle.Match when={true}><p>invalid</p></Lifecycle.Match></Lifecycle.Switch>
+    </Errored>)
+    await settle()
+    expect(invalid.host.textContent).toContain('Lifecycle mode must be parallel or out-in')
+  })
+
   it('retains Switch and fallback branches, selecting the first matching Match', async () => {
     const [page, setPage] = createSignal('home')
     const gates = { home: deferred(), settings: deferred(), fallback: deferred() }

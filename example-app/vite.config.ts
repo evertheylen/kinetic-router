@@ -13,6 +13,6 @@ export default defineConfig({
     target: 'esnext',
   },
   optimizeDeps: {
-    exclude: ['@kinetic-router/definition', '@kinetic-router/url', '@kinetic-router/solid']
+    exclude: ['@kinetic-router/definition', '@kinetic-router/url', '@kinetic-router/solid', '@kinetic-router/lifecycle', '@kinetic-router/animations']
   }
 });

@@ -15,6 +15,7 @@ export default function App() {
         <ul>
           <li><Link route={homePage} mode="menu">Home</Link></li>
           <li><Link route={sitemap.account} mode="menu">Account</Link></li>
+          <li><Link route={sitemap.todos} mode="menu">Todos</Link></li>
           <li><Link route={sitemap.explore[index]} mode="menu">Agencies</Link></li>
         </ul>
       </nav>

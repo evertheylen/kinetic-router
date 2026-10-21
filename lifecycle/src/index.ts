@@ -4,5 +4,3 @@ export const Lifecycle = { For, Show, Switch, Match }
 export { onEnter, onExit, onInOut, useLifecycle } from './scope.js'
 export type { AnimationAdapter, Direction, EnterHandler, ExitHandler, InOutHandler, LifecycleState, Phase } from './scope.js'
 export type { ForProps, ShowProps, SwitchProps, MatchProps } from './flow.js'
-export { createTransition, fade, fadeScale, slide } from './animations.js'
-export type { MotionKeyframe, Transition, TransitionOptions } from './animations.js'

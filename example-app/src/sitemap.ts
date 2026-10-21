@@ -27,6 +27,7 @@ export const sitemap = root({
   [index]: route({}).aliasTo(() => homePage.locate({})),
   home: homePage,
   account: route({}),
+  todos: route({}),
   explore: {
     [index]: explore.nestedRoute({}),
     [agencyId.$]: explore.nestedRoute({ agencyId })

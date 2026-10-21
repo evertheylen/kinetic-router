@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRoot } from 'solid-js'
-import { createTransition, fade, fadeScale, slide, type Transition, type TransitionOptions } from './animations.js'
+import { createTransition, fade, fadeScale, slide, type Transition, type TransitionOptions } from './transition.js'
 
 describe('animation helper validation', () => {
   it.each([
@@ -19,6 +19,9 @@ describe('animation helper validation', () => {
 
   it.each([
     { duration: Infinity }, { duration: NaN }, { duration: -1 },
+    { duration: null }, { duration: {} }, { duration: { in: 100 } },
+    { duration: { in: 100, out: Infinity } }, { duration: { in: -1, out: 100 } },
+    { duration: { in: 100, out: 100, other: 0 } },
     { delay: Infinity }, { delay: -1 },
     { duration: Number.MAX_VALUE, delay: Number.MAX_VALUE }, { fill: 'none' },
   ])('rejects unsafe timing: %j', options => {

@@ -1,7 +1,7 @@
 # Lifecycle prototype
 
 - Keep `README.md` to usage and runnable commands. Public contracts belong beside
-  exports in `src/scope.ts`, `src/flow.ts`, and `src/animations.ts`; avoid duplicating
+  exports in `src/scope.ts`, `src/flow.ts`, and `../animations/src/`; avoid duplicating
   them here or preserving investigation history.
 - Retain inputs to Solid's real control flow (`src/retain.ts`), not detached DOM
   snapshots. Solid 2 owners are attached to their parents; `onCleanup` cannot defer
@@ -12,8 +12,9 @@
   scheduler. Promise completions invalidate work; they must not prune directly.
 - Animation changes must preserve pre-insertion styling, cancellation, and retained
   exit endpoints. Use browser interpolation only, never per-frame JS or layout
-  property animations. Existing CSS adapter examples live in `demo/main.tsx` and
-  `demo/style.css`.
+  property animations in the WAAPI keyframe helper. CSS adapters may delegate layout
+  interpolation to the browser, never per-frame JavaScript. Examples live in
+  `demo/main.tsx` and `demo/style.css`.
 
 ## Validation
 

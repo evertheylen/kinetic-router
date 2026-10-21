@@ -2,10 +2,13 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "preserve",
-    "jsxImportSource": "@solidjs/web"
+    "jsxImportSource": "@solidjs/web",
+    "types": ["vite/client", "node"]
   },
   "references": [
     { "path": "../definition/tsconfig.build.json" },
+    { "path": "../animations/tsconfig.build.json" },
+    { "path": "../lifecycle/tsconfig.build.json" },
     { "path": "../url/tsconfig.build.json" },
     { "path": "../solid/tsconfig.build.json" },
   ]

@@ -5,10 +5,13 @@
   "private": true,
   "scripts": {
     "dev": "vite dev",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "test:browser": "pnpm build && playwright test"
   },
   "dependencies": {
+    "@kinetic-router/animations": "workspace:*",
     "@kinetic-router/definition": "workspace:*",
+    "@kinetic-router/lifecycle": "workspace:*",
     "@kinetic-router/solid": "workspace:*",
     "@kinetic-router/testing-utils": "workspace:*",
     "@kinetic-router/url": "workspace:*",
@@ -18,6 +21,7 @@
     "@solidjs/vite-plugin": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

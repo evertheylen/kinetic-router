@@ -7,3 +7,8 @@ router.implementLazy(sitemap.account, () => import("./account.js").then(module =
   untrackedKeys: [],
   viewAs: 'mainpage',
 });
+
+router.implementLazy(sitemap.todos, () => import("./todos.js").then(module => module.default), {
+  untrackedKeys: [],
+  viewAs: 'mainpage',
+});

@@ -3,6 +3,7 @@ packages:
   - url
   - solid
   - lifecycle
+  - animations
   - example-app
   - integration-tests
   - testing-utils

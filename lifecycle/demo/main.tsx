@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, Show, untrack, type Element as SolidElement } from 'solid-js'
 import { render } from '@solidjs/web'
-import { createTransition, fade, fadeScale, slide, Lifecycle, onEnter, onExit, onInOut, useLifecycle, type Direction } from '../src/index.js'
+import { Lifecycle, onExit, useLifecycle, type Direction } from '../src/index.js'
+import { createAnimation, createCssTransition, createTransition, fade, fadeScale, slide, spring } from '../../animations/src/index.js'
 import './style.css'
 
 const [duration, setDuration] = createSignal(1800)
@@ -35,14 +36,6 @@ function ExitCard(props: { title: string; children?: SolidElement; fast?: boolea
   </div>
 }
 
-// Only await this element's designated finite motion, not decorative animations.
-function cssFinished(element: HTMLElement, direction: Direction, reversible: boolean) {
-  return Promise.all(element.getAnimations().filter(animation => reversible
-    ? animation instanceof CSSTransition && animation.transitionProperty === 'opacity'
-    : animation instanceof CSSAnimation && animation.animationName === `lifecycle-${direction}`,
-  ).map(animation => animation.finished))
-}
-
 function CssCard(props: { reversible: boolean }) {
   const reversible = untrack(() => props.reversible)
   const instance = untrack(mounts) + 1
@@ -51,32 +44,19 @@ function CssCard(props: { reversible: boolean }) {
   const lifecycle = useLifecycle()
   const [runs, setRuns] = createSignal<Direction[]>([])
   const [clicks, setClicks] = createSignal(0)
-  let element!: HTMLDivElement
-  const motion = reversible ? onInOut<HTMLDivElement>({
-    prepare(target, { direction }) { target.dataset.direction = direction },
-    run({ element, direction }) {
-      // Retarget CSS; aborting an old waiter must not reset the visual position.
+  const motion = createCssTransition({
+    mode: reversible ? 'inout' : 'separate',
+    properties: reversible ? ['opacity'] : [],
+    animations: reversible ? [] : ['lifecycle-in', 'lifecycle-out'],
+    apply(element, direction) {
       element.dataset.direction = direction
-      setRuns(runs => [...runs, direction])
-      return cssFinished(element, direction, true)
+      // Diagnostic log excludes the pre-insertion preparation call.
+      if (element.isConnected) setRuns(runs => [...runs, direction])
     },
-  }) : onEnter<HTMLDivElement>({
-    // The first keyframe applies before insertion, including the animation delay.
-    prepare(target) { target.dataset.direction = 'in' },
-    run({ element }) {
-      element.dataset.direction = 'in'
-      setRuns(runs => [...runs, 'in'])
-      return cssFinished(element, 'in', false)
-    },
-  })
-  if (!reversible) onExit(() => {
-    element.dataset.direction = 'out'
-    setRuns(runs => [...runs, 'out'])
-    return cssFinished(element, 'out', false)
   })
   return <div
     class={`card ${reversible ? 'css-inout' : 'css-separate'}`}
-    ref={target => { element = target; motion(target) }}
+    ref={motion}
     data-phase={lifecycle.phase()}
     data-runs={runs().join(',')}
     style={{ '--motion-duration': `${duration()}ms` }}
@@ -88,14 +68,17 @@ function CssCard(props: { reversible: boolean }) {
   </div>
 }
 
-function MotionCard(props: { separate: boolean; preset: string; hold: boolean; delay: number; milliseconds: number }) {
+function MotionCard(props: { separate: boolean; preset: string; hold: boolean; delay: number; milliseconds: number; outMilliseconds?: number }) {
   const instance = untrack(mounts) + 1
   setMounts(instance)
   onCleanup(() => setDisposals(value => value + 1))
   const preset = props.preset === 'scale' ? fadeScale : props.preset === 'slide' ? slide() : fade
   const motion = createTransition(props.separate
     ? { in: fade.inout, out: [...fade.inout].reverse() }
-    : preset, { duration: props.milliseconds, delay: props.delay, easing: 'linear' })
+    : preset, {
+      duration: props.outMilliseconds === undefined ? props.milliseconds : { in: props.milliseconds, out: props.outMilliseconds },
+      delay: props.delay, easing: 'linear',
+    })
   const { phase } = useLifecycle()
   // A manually released gate makes retention after animation completion visible.
   const hold = props.hold
@@ -125,6 +108,8 @@ function MotionDemo() {
   const [preset, setPreset] = createSignal('fade')
   const [delay, setDelay] = createSignal(250)
   const [milliseconds, setMilliseconds] = createSignal(2000)
+  const [directional, setDirectional] = createSignal(false)
+  const [outMilliseconds, setOutMilliseconds] = createSignal(1000)
   return <section><h2>Animation helper</h2>
     <p>Settings apply to new instances. Toggle mid-flight to reverse; an ordinary unmount cleans up immediately.</p>
     <label>Preset <select aria-label="Motion preset" value={preset()} onChange={e => setPreset(e.currentTarget.value)}>
@@ -134,11 +119,71 @@ function MotionDemo() {
     <label><input type="checkbox" checked={hold()} onChange={e => setHold(e.currentTarget.checked)} />Hold other work</label>
     <label>Motion duration <input type="number" value={milliseconds()} onInput={e => setMilliseconds(+e.currentTarget.value)} /></label>
     <label>Motion delay <input type="number" value={delay()} onInput={e => setDelay(+e.currentTarget.value)} /></label>
+    <label><input type="checkbox" checked={directional()} onChange={e => setDirectional(e.currentTarget.checked)} />Directional duration</label>
+    <label>Exit motion duration <input type="number" value={outMilliseconds()} onInput={e => setOutMilliseconds(+e.currentTarget.value)} /></label>
     <nav><button onClick={() => show(value => !value)}>Toggle motion</button>
       <button onClick={() => mount(value => !value)}>Unmount motion control</button></nav>
     <Show when={mounted()}><Lifecycle.Show when={visible()}>
-      <MotionCard separate={separate()} preset={preset()} hold={hold()} delay={delay()} milliseconds={milliseconds()} />
+      <MotionCard separate={separate()} preset={preset()} hold={hold()} delay={delay()} milliseconds={milliseconds()}
+        outMilliseconds={directional() ? outMilliseconds() : undefined} />
     </Lifecycle.Show></Show>
+  </section>
+}
+
+function ReactiveCard(props: { position: number }) {
+  const motion = createAnimation(() => ({ transform: `translateX(${props.position}px)` }), { duration: 5000, easing: 'linear' })
+  return <div class="card reactive-card" ref={motion}>Reactive native target</div>
+}
+
+function SpringCard() {
+  const motion = createTransition({ inout: [
+    { transform: 'translateX(0px)' }, { transform: 'translateX(100px)' },
+  ] }, spring())
+  return <div class="card spring-card" ref={motion}>Precompiled spring</div>
+}
+
+function NativeTargetsDemo() {
+  const [position, setPosition] = createSignal(0)
+  const [mounted, mount] = createSignal(true)
+  const [visible, show] = createSignal(false)
+  return <section><h2>Reactive targets and springs</h2>
+    <button onClick={() => setPosition(value => value === 0 ? 200 : 0)}>Move target</button>
+    <button onClick={() => mount(value => !value)}>Unmount target</button>
+    <Show when={mounted()}><ReactiveCard position={position()} /></Show>
+    <button onClick={() => show(value => !value)}>Toggle spring</button>
+    <Lifecycle.Show when={visible()}><SpringCard /></Lifecycle.Show>
+  </section>
+}
+
+function SequenceCard(props: { title: string }) {
+  const motion = createTransition(fade, { duration: 5000, easing: 'linear' })
+  const { phase } = useLifecycle()
+  const [pending, setPending] = createSignal(false)
+  let release: (() => void) | undefined
+  onExit(({ signal }) => {
+    setPending(true)
+    return new Promise<void>(resolve => {
+      const finish = () => { setPending(false); signal.removeEventListener('abort', finish); resolve() }
+      release = finish
+      signal.addEventListener('abort', finish, { once: true })
+    })
+  })
+  return <div class="card sequence-card" ref={motion} data-name={props.title} data-phase={phase()} data-pending={String(pending())}>
+    <strong>{props.title}</strong><input aria-label="Sequence local state" />
+    <button onClick={() => release?.()}>Release sequence work</button>
+  </div>
+}
+
+function SequenceDemo() {
+  const [page, setPage] = createSignal('A')
+  return <section><h2>Out-in switch</h2>
+    <p>The next branch mounts only after this branch's animation and independent work finish.</p>
+    <nav>{['A', 'B', 'C', 'fallback'].map(name => <button onClick={() => setPage(name)}>Sequence {name}</button>)}</nav>
+    <Lifecycle.Switch mode="out-in" fallback={<SequenceCard title="fallback" />}>
+      <Lifecycle.Match when={page() === 'A'}><SequenceCard title="A" /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'B'}><SequenceCard title="B" /></Lifecycle.Match>
+      <Lifecycle.Match when={page() === 'C'}><SequenceCard title="C" /></Lifecycle.Match>
+    </Lifecycle.Switch>
   </section>
 }
 
@@ -197,6 +242,8 @@ function Demo() {
     </section>
 
     <MotionDemo />
+    <NativeTargetsDemo />
+    <SequenceDemo />
 
     <section><h2>Independent nested flows</h2>
       <p>Toggling the parent only animates the parent. Toggling the child changes its own Show and starts its 350ms exit, even while the parent is exiting.</p>

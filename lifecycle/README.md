@@ -1,6 +1,6 @@
 # @kinetic-router/lifecycle (prototype)
 
-Lifecycle-aware control flow and native animations for Solid 2. Components keep
+Lifecycle-aware control flow for Solid 2. Components keep
 their DOM, reactive state, and event handlers while exiting; restoring them before
 exit completes preserves the same instance.
 
@@ -10,7 +10,8 @@ Solid 2 release candidate. No router dependency or automatic page transitions.
 ## Use
 
 ```tsx
-import { Lifecycle, createTransition, fade } from '@kinetic-router/lifecycle'
+import { Lifecycle } from '@kinetic-router/lifecycle'
+import { createTransition, fade } from '@kinetic-router/animations'
 
 function Panel() {
   const motion = createTransition(fade, { duration: 180 })
@@ -20,15 +21,8 @@ function Panel() {
 <Lifecycle.Show when={open()}><Panel /></Lifecycle.Show>
 ```
 
-Presets: `fade`, `fadeScale`, and `slide({ x: 0, y: 16 })`. Bind each ref to one
-element. Animations reverse smoothly, respect reduced motion, and clean up
-automatically. Only opacity and transforms are supported; interpolation is native
-WAAPI, with no per-frame JavaScript.
-
-For custom motion, pass `{ inout: [hiddenFrame, visibleFrame] }`, or separate
-`{ in: [...], out: [...] }` keyframes. Separate entry finishes before exit starts.
-Options are `duration` (200ms), `delay` (0ms), and `easing` (`ease-out`), captured
-at setup. Register `onEnter`, `onExit`, or `onInOut` for other async lifecycle work.
+Animation helpers live in [`@kinetic-router/animations`](../animations/README.md).
+Register `onEnter`, `onExit`, or `onInOut` for other async lifecycle work.
 
 Lists and conditional branches work too:
 
@@ -37,13 +31,16 @@ Lists and conditional branches work too:
   {(item, index) => <Row item={item()} index={index()} />}
 </Lifecycle.For>
 
-<Lifecycle.Switch fallback={<NotFound />}>
+<Lifecycle.Switch mode="out-in" fallback={<NotFound />}>
   <Lifecycle.Match when={page() === 'home'}><Home /></Lifecycle.Match>
   <Lifecycle.Match when={page() === 'settings'}><Settings /></Lifecycle.Match>
 </Lifecycle.Switch>
 ```
 
 - List keys must be unique. Item/index arguments are always accessors.
+- Switch defaults to parallel branches. `mode="out-in"` waits for outgoing work
+  and disposal before mounting the latest selection; selecting an exiting branch
+  again restores its existing owner/state.
 - Data changes trigger transitions. Hiding a parent does not animate every nested
   row out; nested controls respond to their own data changes.
 - Use lifecycle-aware controls at every removal point that needs retention.
@@ -52,8 +49,8 @@ Lists and conditional branches work too:
   Retained content remains interactive: manage focus, `inert`, and ARIA as needed.
 
 See [the demo](demo/main.tsx) for CSS-only effects and interactive examples.
-Detailed contracts live beside the [hooks](src/scope.ts),
-[controls](src/flow.ts), and [animation helper](src/animations.ts).
+Detailed contracts live beside the [hooks](src/scope.ts)
+and [controls](src/flow.ts).
 
 ## Run
 

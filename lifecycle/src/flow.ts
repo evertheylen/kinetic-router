@@ -1,5 +1,5 @@
 import { children, type Accessor, type Element as SolidElement } from 'solid-js'
-import { retain, type Selection } from './retain.js'
+import { retain, type RetentionMode, type Selection } from './retain.js'
 
 type ConditionalChildren<T> = SolidElement | ((value: Accessor<NonNullable<T>>) => SolidElement)
 
@@ -70,10 +70,19 @@ export function Match<T>(props: MatchProps<T>): SolidElement {
   return { [match]: true, props } as unknown as SolidElement
 }
 
-/** Stable Match descriptors only; selects the first truthy branch. Exiting branches may coexist. */
+/**
+ * Stable Match descriptors only; selects the first truthy branch.
+ * Default parallel allows outgoing and incoming branches to coexist. Out-in waits
+ * for all outgoing hooks AND owner disposal before mounting the latest selection
+ * (including fallback). Intermediate selections never mount. Reselecting a still-
+ * exiting branch aborts its exit and restores the same owner/state immediately.
+ * Same-branch value updates do not start exits. Final unmount never mounts queued
+ * content; nested boundaries remain independent and do not delay ancestor exits.
+ */
 export interface SwitchProps {
   children: SolidElement
   fallback?: SolidElement
+  mode?: RetentionMode
 }
 
 export function Switch(props: SwitchProps): SolidElement {
@@ -97,5 +106,5 @@ export function Switch(props: SwitchProps): SolidElement {
     return selected
       ? conditional(selected.descriptor.props.children, () => branch()!.value)
       : props.fallback
-  })
+  }, () => props.mode ?? 'parallel')
 }

@@ -209,6 +209,219 @@ test('ordinary unmount cancels native animation and removes the preference liste
   expect(await animation.evaluate(animation => animation.playState)).toBe('idle')
 })
 
+test('CSS adapter ignores unrelated decorations and descendant effects', async ({ page }) => {
+  await page.addStyleTag({ content: `
+    @keyframes unrelated { from { outline-color: red; } to { outline-color: blue; } }
+    .css-inout { animation: unrelated 60s linear infinite; }
+    .css-inout input { animation: unrelated 60s linear; }
+  ` })
+  const toggle = page.getByRole('button', { name: 'Toggle bidirectional' })
+  await toggle.click()
+  const card = page.locator('.css-inout')
+  const finishTransition = () => card.evaluate(element => {
+    for (const animation of element.getAnimations()) if (animation instanceof CSSTransition) animation.finish()
+  })
+  await finishTransition()
+  await toggle.click()
+  await expect(card).toHaveAttribute('data-phase', 'exiting')
+  await finishTransition()
+  await expect(card).toHaveCount(0)
+})
+
+test('CSS cancellation settles exit without an unhandled rejection', async ({ page }) => {
+  const toggle = page.getByRole('button', { name: 'Toggle bidirectional' })
+  await toggle.click()
+  const card = page.locator('.css-inout')
+  await card.evaluate(element => element.getAnimations().forEach(animation => animation.finish()))
+  await toggle.click()
+  await card.evaluate(element => element.getAnimations().forEach(animation => animation.cancel()))
+  await expect(card).toHaveCount(0)
+})
+
+test('CSS reduced motion skips delays even without cooperating media rules', async ({ page }) => {
+  await page.addStyleTag({ content: '.css-separate[data-direction] { animation-duration: 10s; animation-delay: 10s; }' })
+  const toggle = page.getByRole('button', { name: 'Toggle separate' })
+  await toggle.click()
+  const card = page.locator('.css-separate')
+  await expect(card).toHaveCSS('opacity', '0')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(card).toHaveCSS('opacity', '1')
+  await toggle.click()
+  await expect(card).toHaveCount(0)
+})
+
+test('even explicitly named infinite CSS animations cannot pin a boundary', async ({ page }) => {
+  await page.addStyleTag({ content: '.css-separate[data-direction] { animation-iteration-count: infinite; }' })
+  const toggle = page.getByRole('button', { name: 'Toggle separate' })
+  await toggle.click()
+  await toggle.click()
+  await expect(page.locator('.css-separate')).toHaveCount(0)
+})
+
+test('directional durations retime one native effect without changing its progress or delay', async ({ page }) => {
+  await page.getByLabel('Directional duration', { exact: true }).check()
+  await page.getByLabel('Exit motion duration', { exact: true }).fill('1000')
+  await page.getByLabel('Motion delay', { exact: true }).fill('1000')
+  const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
+  await toggle.click()
+  const card = page.locator('.motion-card')
+  const animation = await card.evaluateHandle(element => {
+    const animation = element.getAnimations()[0]!
+    animation.pause(); animation.currentTime = 3500
+    return animation
+  })
+  for (const duration of [1000, 5000, 1000]) {
+    await toggle.click()
+    await expect.poll(() => animation.evaluate(animation => animation.effect!.getTiming().duration)).toBe(duration)
+    await animation.evaluate(animation => animation.pause())
+    expect(await card.evaluate((element, animation) => element.getAnimations()[0] === animation, animation)).toBe(true)
+    const opacity = await card.evaluate(element => Number(getComputedStyle(element).opacity))
+    expect(opacity).toBeGreaterThan(0.35)
+    expect(opacity).toBeLessThan(0.65)
+    expect(await animation.evaluate(animation => animation.effect!.getTiming().delay)).toBe(1000)
+  }
+  await animation.evaluate(animation => animation.finish())
+  await expect(card).toHaveCount(0)
+})
+
+for (const inward of [0, 5000]) {
+  test(`zero directional duration keeps the correct endpoint (entry ${inward}ms)`, async ({ page }) => {
+    await page.getByLabel('Directional duration', { exact: true }).check()
+    await page.getByLabel('Motion duration', { exact: true }).fill(String(inward))
+    await page.getByLabel('Exit motion duration', { exact: true }).fill(inward === 0 ? '5000' : '0')
+    await page.getByLabel('Motion delay', { exact: true }).fill('0')
+    await page.getByLabel('Hold other work', { exact: true }).check()
+    const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
+    await toggle.click()
+    const card = page.locator('.motion-card')
+    await card.evaluate(element => element.getAnimations()[0]!.finish())
+    await expect(card).toHaveCSS('opacity', '1')
+    await toggle.click()
+    if (inward === 0) {
+      const opacity = await card.evaluate(element => Number(getComputedStyle(element).opacity))
+      expect(opacity).toBeGreaterThan(0.8)
+    }
+    await card.evaluate(element => element.getAnimations()[0]!.finish())
+    await expect(card).toHaveCSS('opacity', '0')
+    await toggle.click()
+    await card.evaluate(element => element.getAnimations()[0]!.finish())
+    await expect(card).toHaveCSS('opacity', '1')
+  })
+}
+
+test('separate entry and exit use their own native durations', async ({ page }) => {
+  await page.getByLabel('Directional duration', { exact: true }).check()
+  await page.getByLabel('Separate motion', { exact: true }).check()
+  await page.getByLabel('Exit motion duration', { exact: true }).fill('1000')
+  const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
+  await toggle.click()
+  const card = page.locator('.motion-card')
+  expect(await card.evaluate(element => element.getAnimations()[0]!.effect!.getTiming().duration)).toBe(5000)
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await toggle.click()
+  await expect.poll(() => card.evaluate(element => element.getAnimations()[0]!.effect!.getTiming().duration)).toBe(1000)
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await expect(card).toHaveCount(0)
+})
+
+test('reactive targets retarget from the current native presentation outside a lifecycle boundary', async ({ page }) => {
+  const card = page.locator('.reactive-card')
+  expect(await card.evaluate(element => element.getAnimations()[0]!.effect!.getTiming().duration)).toBe(0)
+  await page.getByRole('button', { name: 'Move target', exact: true }).click()
+  const old = await card.evaluateHandle(element => {
+    const animation = element.getAnimations()[0]!
+    animation.pause(); animation.currentTime = 2500
+    return animation
+  })
+  await page.getByRole('button', { name: 'Move target', exact: true }).click()
+  expect(await old.evaluate(animation => animation.playState)).toBe('idle')
+  const origin = await card.evaluate(element => {
+    const effect = element.getAnimations()[0]!.effect as KeyframeEffect
+    return new DOMMatrixReadOnly(String(effect.getKeyframes()[0]!.transform)).m41
+  })
+  expect(origin).toBeCloseTo(100, 0)
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await expect(card).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+})
+
+test('the first reactive target applies before insertion even when remounting at a different target', async ({ page }) => {
+  await page.getByRole('button', { name: 'Unmount target', exact: true }).click()
+  await page.getByRole('button', { name: 'Move target', exact: true }).click()
+  const first = page.evaluate(() => new Promise<number>(resolve => {
+    const observer = new MutationObserver(() => {
+      const element = document.querySelector('.reactive-card')
+      if (!element) return
+      observer.disconnect()
+      resolve(new DOMMatrixReadOnly(getComputedStyle(element).transform).m41)
+    })
+    observer.observe(document.body, { subtree: true, childList: true })
+  }))
+  await page.getByRole('button', { name: 'Unmount target', exact: true }).click()
+  expect(await first).toBe(200)
+})
+
+test('reactive targets skip motion on preference changes and clean up on ordinary disposal', async ({ page }) => {
+  const card = page.locator('.reactive-card')
+  await page.getByRole('button', { name: 'Move target', exact: true }).click()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(card).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 200, 0)')
+  await page.getByRole('button', { name: 'Move target', exact: true }).click()
+  await expect(card).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+  const animation = await card.evaluateHandle(element => element.getAnimations()[0]!)
+  await page.getByRole('button', { name: 'Unmount target', exact: true }).click()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  expect(await animation.evaluate(animation => animation.playState)).toBe('idle')
+})
+
+test('compiled spring easing overshoots and reverses on the same native timeline', async ({ page }) => {
+  const toggle = page.getByRole('button', { name: 'Toggle spring', exact: true })
+  await toggle.click()
+  const card = page.locator('.spring-card')
+  const animation = await card.evaluateHandle(element => {
+    const animation = element.getAnimations()[0]!
+    animation.pause()
+    animation.currentTime = Number(animation.effect!.getTiming().duration) * 0.2
+    return animation
+  })
+  expect(await animation.evaluate(animation => (animation.effect!.getTiming().easing ?? '').startsWith('linear('))).toBe(true)
+  expect(await card.evaluate(element => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41)).toBeGreaterThan(100)
+  await toggle.click()
+  await expect.poll(() => animation.evaluate(animation => animation.playbackRate)).toBe(-1)
+  expect(await card.evaluate((element, animation) => element.getAnimations()[0] === animation, animation)).toBe(true)
+  await animation.evaluate(animation => animation.finish())
+  await expect(card).toHaveCount(0)
+})
+
+test('out-in mounts only the latest branch after native motion AND other work finish', async ({ page }) => {
+  const card = page.locator('.sequence-card')
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  const old = await card.elementHandle()
+  await page.getByRole('button', { name: 'Sequence B', exact: true }).click()
+  await page.getByRole('button', { name: 'Sequence C', exact: true }).click()
+  await expect(card).toHaveCount(1)
+  await expect(card).toHaveAttribute('data-name', 'A')
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await expect(card).toHaveAttribute('data-pending', 'true')
+  await card.getByRole('button', { name: 'Release sequence work', exact: true }).click({ force: true })
+  await expect(card).toHaveCount(1)
+  await expect(card).toHaveAttribute('data-name', 'C')
+  expect(await old!.evaluate(element => element.isConnected)).toBe(false)
+})
+
+test('out-in reselects an exiting instance and preserves local input state', async ({ page }) => {
+  const card = page.locator('.sequence-card')
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  const old = await card.elementHandle()
+  await card.getByRole('textbox').fill('keep me')
+  await page.getByRole('button', { name: 'Sequence B', exact: true }).click()
+  await expect(card).toHaveAttribute('data-phase', 'exiting')
+  await page.getByRole('button', { name: 'Sequence A', exact: true }).click()
+  await expect(card).toHaveAttribute('data-phase', 'present')
+  await expect(card.getByRole('textbox')).toHaveValue('keep me')
+  expect(await card.evaluate((element, old) => element === old, old)).toBe(true)
+})
+
 for (const preset of ['scale', 'slide']) {
   test(`${preset} uses only explicit opacity/transform frames`, async ({ page }) => {
     await page.getByLabel('Motion preset', { exact: true }).selectOption(preset)

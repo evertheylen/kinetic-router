@@ -5,6 +5,7 @@
     "incremental": false,
     "noEmit": true,
     "types": ["vite/client"],
+    "paths": { "@kinetic-router/lifecycle": ["../src/index.ts"] },
     "jsx": "preserve",
     "jsxImportSource": "@solidjs/web"
   },
