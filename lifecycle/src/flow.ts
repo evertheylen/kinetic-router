@@ -9,6 +9,13 @@ function conditional<T>(child: ConditionalChildren<T>, value: Accessor<NonNullab
     : child as SolidElement
 }
 
+/**
+ * Keys default to item identity and must be unique. Reorders, same-key replacement,
+ * and reentry during exit preserve the instance; removal followed by entry does not.
+ * Item/index are always accessors, unlike native Solid 2 For's default item mode.
+ * Exiting rows retain their last selected values and previous rendered slots.
+ * No For fallback is implemented.
+ */
 export interface ForProps<T> {
   each: readonly T[] | null | undefined | false
   by?: (item: T) => unknown
@@ -22,6 +29,11 @@ export function For<T>(props: ForProps<T>): SolidElement {
   )
 }
 
+/**
+ * One content instance across truthy values; optional child callback gets an accessor.
+ * Content and fallback are separate retained boundaries and may coexist during exit.
+ * No keyed variant or out-in sequencing is implemented.
+ */
 export interface ShowProps<T> {
   when: T | null | undefined | false
   children: ConditionalChildren<T>
@@ -42,6 +54,7 @@ export function Show<T>(props: ShowProps<T>): SolidElement {
 }
 
 const match = Symbol('Lifecycle.Match')
+/** The selected branch's child callback receives an accessor, retaining its last value on exit. */
 export interface MatchProps<T> {
   when: T | null | undefined | false
   children: ConditionalChildren<T>
@@ -57,6 +70,7 @@ export function Match<T>(props: MatchProps<T>): SolidElement {
   return { [match]: true, props } as unknown as SolidElement
 }
 
+/** Stable Match descriptors only; selects the first truthy branch. Exiting branches may coexist. */
 export interface SwitchProps {
   children: SolidElement
   fallback?: SolidElement

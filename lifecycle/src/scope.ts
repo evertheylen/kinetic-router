@@ -4,15 +4,30 @@ import {
   type Accessor, type Owner,
 } from 'solid-js'
 
+/** Requested presence, not animation progress: exiting may still be finishing entry. */
 export type Phase = 'present' | 'exiting' | 'disposed'
 export type Direction = 'in' | 'out'
 type Completion = void | PromiseLike<unknown>
+/**
+ * Register synchronously during descendant setup. Runs after committed rendering,
+ * untracked and ownerless; capture context/hooks in setup, not in the callback.
+ * Return a promise to retain the boundary. Undo side effects on abort yourself.
+ * Throws/rejections are logged and count as completion unless the run was aborted.
+ * There is no timeout: uncancelled, never-settling work retains the owner forever.
+ */
 export type ExitHandler = (context: { signal: AbortSignal }) => Completion
 export type EnterHandler = ExitHandler
 export type InOutHandler = (context: { direction: Direction; signal: AbortSignal }) => Completion
 export interface LifecycleState { phase: Accessor<Phase> }
 
-/** Bind the returned ref to one element. Preparation must be synchronous. */
+/**
+ * Bind the returned ref to one element. prepare runs synchronously and ownerless
+ * before insertion, only once; run applies subsequent targets after refs are ready.
+ * Use preparation for first-frame styles (including delays), not deferred callbacks.
+ * An enter adapter skips preparation if registered in an already-exiting boundary.
+ * CSS adapters should await only designated finite animations. Retarget transitions
+ * on reversal; aborting an old waiter must not cancel/reset the visual transition.
+ */
 export interface AnimationAdapter<T extends Element> {
   prepare: (element: T, context: { direction: Direction }) => void
   run: (context: { element: T; direction: Direction; signal: AbortSignal }) => Completion
@@ -22,7 +37,12 @@ type Kind = 'enter' | 'exit' | 'inout'
 type Run = { controller: AbortController; state: 'queued' | 'running' | 'done' }
 type Registration = { kind: Kind; handler: InOutHandler; owner: Owner; run?: Run }
 
-/** One retained row or branch. Only its owning flow changes its presence. */
+/**
+ * One retained row or branch; only its owning flow changes its presence.
+ * Hooks share the nearest boundary, including through portals. Nested flows have
+ * independent scopes: no ancestor-exit propagation or cross-boundary waiting.
+ * Late registrations join current work; final owner disposal aborts immediately.
+ */
 export class Scope {
   readonly state: LifecycleState
   private disposed = false
@@ -151,7 +171,11 @@ export function useLifecycle(): LifecycleState {
   return currentScope().state
 }
 
-/** Register synchronously in setup; reentry aborts the current exit. */
+/**
+ * Register synchronously in setup. Reentry aborts the exit; subsequent exits get
+ * fresh signals. All current handlers on this boundary must finish before removal.
+ * An ordinary conditional or final unmount bypasses retention and only cleans up.
+ */
 export function onExit(handler: ExitHandler): void {
   currentScope().register('exit', handler)
 }
@@ -176,14 +200,24 @@ function animationHook<T extends Element>(kind: 'enter' | 'inout', handler: InOu
   }
 }
 
-/** Standalone enter work finishes before ordinary exits on this boundary start. */
+/**
+ * Runs on initial entry and reentry after a completed enter, but not when first
+ * registered in an already-exiting boundary. Removal does not abort a running enter;
+ * ordinary exits wait for it. Restoring before it finishes cancels the queued exit
+ * without restarting entry. Final owner disposal aborts all work.
+ */
 export function onEnter(handler: EnterHandler): void
 export function onEnter<T extends Element>(adapter: AnimationAdapter<T>): (element: T) => void
 export function onEnter<T extends Element>(handler: EnterHandler | AnimationAdapter<T>) {
   return animationHook('enter', handler)
 }
 
-/** Direction changes abort the previous run without waiting for its promise. */
+/**
+ * Starts toward in (out for late registration in an exiting boundary). Each change
+ * aborts the previous run without waiting for it; only the latest presence matters.
+ * Unlike ordinary exits, it does not wait for standalone enters. Adapters supply
+ * visual continuity; stale promise completions cannot remove a reentered instance.
+ */
 export function onInOut(handler: InOutHandler): void
 export function onInOut<T extends Element>(adapter: AnimationAdapter<T>): (element: T) => void
 export function onInOut<T extends Element>(handler: InOutHandler | AnimationAdapter<T>) {

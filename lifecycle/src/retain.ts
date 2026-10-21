@@ -37,8 +37,10 @@ export function retain<T>(
     if (!disposed) setRevision(value => value + 1)
   }
 
-  // User effects run after rendering: refs and descendant registrations are ready
-  // before handlers run or disposal is checked. Async completions only invalidate.
+  // Reconcile committed selections in the render phase, then invoke/prune here.
+  // Refs, descendant registrations, and all superseded abort cleanup are ready.
+  // Async completions only invalidate: direct pruning or a second microtask/flush
+  // scheduler could race a same-turn reentry or a render held behind an action.
   createEffect(revision, () => {
     for (const entry of order) entry.scope.runPending()
     const next = order.filter(entry => {

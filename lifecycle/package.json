@@ -14,7 +14,8 @@
     "dev": "vite demo --host 127.0.0.1",
     "build:demo": "tsc -p demo/tsconfig.json && vite build demo",
     "test:browser": "pnpm build:demo && playwright test",
-    "test:browser:dev": "LIFECYCLE_DEV=1 playwright test"
+    "test:browser:dev": "LIFECYCLE_DEV=1 playwright test",
+    "test:browser:container": "bash ./test-browser-container.sh"
   },
   "peerDependencies": {
     "solid-js": "catalog:"

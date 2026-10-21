@@ -1,6 +1,6 @@
-import { createSignal, onCleanup, untrack, type Element as SolidElement } from 'solid-js'
+import { createSignal, onCleanup, Show, untrack, type Element as SolidElement } from 'solid-js'
 import { render } from '@solidjs/web'
-import { Lifecycle, onEnter, onExit, onInOut, useLifecycle, type Direction } from '../src/index.js'
+import { createTransition, fade, fadeScale, slide, Lifecycle, onEnter, onExit, onInOut, useLifecycle, type Direction } from '../src/index.js'
 import './style.css'
 
 const [duration, setDuration] = createSignal(1800)
@@ -17,29 +17,17 @@ function wait(milliseconds: number, signal: AbortSignal) {
 }
 
 function ExitCard(props: { title: string; children?: SolidElement; fast?: boolean }) {
-  let element!: HTMLDivElement
+  const motion = createTransition({ out: [
+    { opacity: 1, transform: 'translateX(0)' }, { opacity: 0.25, transform: 'translateX(12px)' },
+  ] }, { duration: props.fast ? 175 : 250 })
   const instance = untrack(mounts) + 1
   setMounts(instance)
   onCleanup(() => setDisposals(value => value + 1))
   const lifecycle = useLifecycle()
   const [clicks, setClicks] = createSignal(0)
-  onExit(async ({ signal }) => {
-    const milliseconds = props.fast ? 350 : duration()
-    const animation = element.animate(
-      [{ opacity: 1, transform: 'translateX(0)' }, { opacity: 0.25, transform: 'translateX(12px)' }],
-      { duration: milliseconds / 2, fill: 'forwards' },
-    )
-    const cancel = () => animation.cancel()
-    signal.addEventListener('abort', cancel, { once: true })
-    try {
-      // Independent arbitrary async work, not just an animation-completion contract.
-      await Promise.all([animation.finished, wait(milliseconds, signal)])
-    } finally {
-      signal.removeEventListener('abort', cancel)
-      animation.cancel()
-    }
-  })
-  return <div class="card" ref={element} data-phase={lifecycle.phase()}>
+  // Independent work still retains the card after its short animation finishes.
+  onExit(({ signal }) => wait(props.fast ? 350 : duration(), signal))
+  return <div class="card" ref={motion} data-phase={lifecycle.phase()}>
     <header><strong>{props.title}</strong><code>#{instance} · {lifecycle.phase()}</code></header>
     <label>Local state <input aria-label={`${props.title} state`} placeholder="Type; remove; restore before exit ends" /></label>
     <button onClick={() => setClicks(value => value + 1)}>Still interactive: {clicks()}</button>
@@ -100,6 +88,60 @@ function CssCard(props: { reversible: boolean }) {
   </div>
 }
 
+function MotionCard(props: { separate: boolean; preset: string; hold: boolean; delay: number; milliseconds: number }) {
+  const instance = untrack(mounts) + 1
+  setMounts(instance)
+  onCleanup(() => setDisposals(value => value + 1))
+  const preset = props.preset === 'scale' ? fadeScale : props.preset === 'slide' ? slide() : fade
+  const motion = createTransition(props.separate
+    ? { in: fade.inout, out: [...fade.inout].reverse() }
+    : preset, { duration: props.milliseconds, delay: props.delay, easing: 'linear' })
+  const { phase } = useLifecycle()
+  // A manually released gate makes retention after animation completion visible.
+  const hold = props.hold
+  const [pending, setPending] = createSignal(false)
+  let release: (() => void) | undefined
+  onExit(({ signal }) => {
+    if (!hold) return
+    setPending(true)
+    return new Promise<void>(resolve => {
+      const finish = () => { setPending(false); signal.removeEventListener('abort', finish); resolve() }
+      release = finish
+      signal.addEventListener('abort', finish, { once: true })
+    })
+  })
+  return <div class="card motion-card" ref={motion} data-phase={phase()} data-pending={String(pending())}>
+    <header><strong>Native animation helper</strong><code>#{instance}</code></header>
+    <input aria-label="Motion state" placeholder="State survives reversal" />
+    <button onClick={() => release?.()}>Release other work</button>
+  </div>
+}
+
+function MotionDemo() {
+  const [visible, show] = createSignal(false)
+  const [mounted, mount] = createSignal(true)
+  const [separate, setSeparate] = createSignal(false)
+  const [hold, setHold] = createSignal(false)
+  const [preset, setPreset] = createSignal('fade')
+  const [delay, setDelay] = createSignal(250)
+  const [milliseconds, setMilliseconds] = createSignal(2000)
+  return <section><h2>Animation helper</h2>
+    <p>Settings apply to new instances. Toggle mid-flight to reverse; an ordinary unmount cleans up immediately.</p>
+    <label>Preset <select aria-label="Motion preset" value={preset()} onChange={e => setPreset(e.currentTarget.value)}>
+      <option value="fade">Fade</option><option value="scale">Fade scale</option><option value="slide">Slide</option>
+    </select></label>
+    <label><input type="checkbox" checked={separate()} onChange={e => setSeparate(e.currentTarget.checked)} />Separate motion</label>
+    <label><input type="checkbox" checked={hold()} onChange={e => setHold(e.currentTarget.checked)} />Hold other work</label>
+    <label>Motion duration <input type="number" value={milliseconds()} onInput={e => setMilliseconds(+e.currentTarget.value)} /></label>
+    <label>Motion delay <input type="number" value={delay()} onInput={e => setDelay(+e.currentTarget.value)} /></label>
+    <nav><button onClick={() => show(value => !value)}>Toggle motion</button>
+      <button onClick={() => mount(value => !value)}>Unmount motion control</button></nav>
+    <Show when={mounted()}><Lifecycle.Show when={visible()}>
+      <MotionCard separate={separate()} preset={preset()} hold={hold()} delay={delay()} milliseconds={milliseconds()} />
+    </Lifecycle.Show></Show>
+  </section>
+}
+
 function Demo() {
   const initialItems = [{ id: 1, name: 'Alpha' }, { id: 2, name: 'Beta' }, { id: 3, name: 'Gamma' }]
   const [items, setItems] = createSignal(initialItems)
@@ -153,6 +195,8 @@ function Demo() {
       <button onClick={() => showBidirectional(value => !value)}>Toggle bidirectional</button>
       <Lifecycle.Show when={bidirectional()}><CssCard reversible={true} /></Lifecycle.Show>
     </section>
+
+    <MotionDemo />
 
     <section><h2>Independent nested flows</h2>
       <p>Toggling the parent only animates the parent. Toggling the child changes its own Show and starts its 350ms exit, even while the parent is exiting.</p>
