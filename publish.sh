@@ -8,32 +8,38 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-pnpm -r clean
-pnpm -r build
-
-# 2. Ensure 'published' branch exists (creates it if it doesn't)
-if ! git show-ref --verify --quiet refs/heads/published; then
-  echo "?? 'published' branch not found. Creating it from current HEAD..."
-  git branch published
+# 2. Select changed packages and their dependents, or all packages on first release.
+FILTER="*"
+if git show-ref --verify --quiet refs/heads/published; then
+  FILTER="...[published]"
 fi
 
-# 3. Identify changed packages and their dependents
-# The filter "...[published]" finds everything changed since that branch
-# plus any packages that depend on the changed ones.
-FILTER="...[published]"
-EXCLUSIONS="--filter !example-app"
-CHANGED=$(pnpm ls --filter "$FILTER" $EXCLUSIONS --depth -1 --json)
+# Snapshot public package names so the release commit cannot change the selection.
+CHANGED=$(pnpm ls --filter "$FILTER" --depth -1 --json | node -e '
+  const packages = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+  for (const pkg of packages) {
+    if (!pkg.private) console.log(pkg.name);
+  }
+')
 
-if [ "$CHANGED" == "[]" ] || [ -z "$CHANGED" ]; then
-  echo "✅ No changes detected since the last publish."
+if [ -z "$CHANGED" ]; then
+  echo "✅ No publishable packages changed since the last publish."
   exit 0
 fi
 
+FILTERS=()
+while IFS= read -r package; do
+  FILTERS+=(--filter "$package")
+done <<< "$CHANGED"
+
+# 3. Build before changing versions or history.
+pnpm -r clean
+pnpm -r build
+
 echo "📦 Changes detected. Bumping versions and publishing..."
 
-# 4. Bump versions only for the affected scope
-# This will update package.json files locally
-pnpm --filter "$FILTER" $EXCLUSIONS -r exec pnpm version patch
+# 4. Bump the selected packages together, without per-package commits or tags.
+pnpm "${FILTERS[@]}" -r version patch --no-git-tag-version
 
 # 5. Commit the version bumps to your current branch
 git add .
@@ -41,7 +47,7 @@ git commit -m "chore: version bump for release"
 
 # 6. Publish the changed packages
 # --no-git-checks is used because we just made a commit locally
-pnpm --filter "$FILTER" $EXCLUSIONS -r exec pnpm publish --no-git-checks --access public
+pnpm "${FILTERS[@]}" -r publish --no-git-checks --access public
 
 # 7. Update the 'published' branch to the current commit
 git branch -f published HEAD
