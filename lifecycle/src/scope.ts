@@ -1,5 +1,5 @@
 import {
-  createContext, createSignal, getOwner, isDisposed, onCleanup,
+  createContext, createRenderEffect, createSignal, getOwner, isDisposed, onCleanup,
   runWithOwner, useContext,
   type Accessor, type Owner,
 } from 'solid-js'
@@ -9,8 +9,10 @@ export type Phase = 'present' | 'exiting' | 'disposed'
 export type Direction = 'in' | 'out'
 type Completion = void | PromiseLike<unknown>
 /**
- * Register synchronously during descendant setup. Runs after committed rendering,
- * untracked and ownerless; capture context/hooks in setup, not in the callback.
+ * Register synchronously during descendant setup. Joins the boundary's work when
+ * its owner's first render commits; an inner Loading can postpone this. Uncommitted
+ * hooks neither run nor retain the boundary. Runs after rendering, untracked and
+ * ownerless; capture context/hooks in setup, not in the callback.
  * Return a promise to retain the boundary. Undo side effects on abort yourself.
  * Throws/rejections are logged and count as completion unless the run was aborted.
  * There is no timeout: uncancelled, never-settling work retains the owner forever.
@@ -79,9 +81,14 @@ export class Scope {
     const owner = getOwner()
     if (!owner) throw new Error('Lifecycle hooks require a reactive owner')
     const registration: Registration = { kind, handler, owner }
-    this.handlers.add(registration)
-    this.queue(registration)
-    this.changed()
+    // Schedule even the first render effect: the synchronous initial form runs
+    // before Loading knows whether descendants suspend. Admission must precede
+    // the retain effect's invocation/pruning, but stay behind this owner's Loading.
+    createRenderEffect(() => undefined, () => {
+      this.handlers.add(registration)
+      this.queue(registration)
+      this.changed()
+    }, { schedule: true })
     onCleanup(() => {
       this.handlers.delete(registration)
       this.cancel(registration)
@@ -173,7 +180,7 @@ export function useLifecycle(): LifecycleState {
 
 /**
  * Register synchronously in setup. Reentry aborts the exit; subsequent exits get
- * fresh signals. All current handlers on this boundary must finish before removal.
+ * fresh signals. All committed handlers on this boundary must finish before removal.
  * An ordinary conditional or final unmount bypasses retention and only cleans up.
  */
 export function onExit(handler: ExitHandler): void {
@@ -201,10 +208,10 @@ function animationHook<T extends Element>(kind: 'enter' | 'inout', handler: InOu
 }
 
 /**
- * Runs on initial entry and reentry after a completed enter, but not when first
- * registered in an already-exiting boundary. Removal does not abort a running enter;
- * ordinary exits wait for it. Restoring before it finishes cancels the queued exit
- * without restarting entry. Final owner disposal aborts all work.
+ * Runs on initial committed entry and reentry after a completed enter. Skips entry
+ * if its first render commits in an already-exiting boundary. Removal does not abort
+ * a running enter; ordinary exits wait for it. Restoring before it finishes cancels
+ * the queued exit without restarting entry. Final owner disposal aborts all work.
  */
 export function onEnter(handler: EnterHandler): void
 export function onEnter<T extends Element>(adapter: AnimationAdapter<T>): (element: T) => void

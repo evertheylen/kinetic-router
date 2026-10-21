@@ -43,7 +43,8 @@ export function retain<T>(
   }
 
   // Reconcile committed selections in the render phase, then invoke/prune here.
-  // Refs, descendant registrations, and all superseded abort cleanup are ready.
+  // Committed descendants have admitted their hooks; suspended ones haven't.
+  // Refs and all superseded abort cleanup are ready before invocation.
   // Async completions only invalidate: direct pruning or a second microtask/flush
   // scheduler could race a same-turn reentry or a render held behind an action.
   createEffect(revision, () => {

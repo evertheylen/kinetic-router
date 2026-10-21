@@ -132,6 +132,147 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     }
   })
 
+  it.each(['enter', 'inout'] as const)('prepares %s before insertion but waits for an inner Loading commit to run', async kind => {
+    const load = deferred()
+    const calls: string[] = []
+    function Content() {
+      const value = createMemo(() => load.promise.then(() => 'loaded'))
+      const hook = kind === 'enter' ? onEnter : onInOut
+      const motion = hook<HTMLParagraphElement>({
+        prepare(element) {
+          calls.push(`prepare:${element.isConnected}`)
+          element.style.opacity = '0'
+        },
+        run({ element, direction }) {
+          calls.push(`${direction}:${element.isConnected}:${element.style.opacity}`)
+        },
+      })
+      return <p ref={motion}>{value()}</p>
+    }
+    const { host } = mount(() => <Lifecycle.Show when={true}>
+      <Loading fallback={<span>loading</span>}><Content /></Loading>
+    </Lifecycle.Show>)
+    try {
+      await settle()
+      expect(host.textContent).toBe('loading')
+      expect(calls).toEqual(['prepare:false'])
+      load.resolve()
+      await vi.waitFor(() => expect(calls).toEqual(['prepare:false', 'in:true:0']))
+      expect(host.textContent).toBe('loaded')
+    } finally { load.resolve(); await settle() }
+  })
+
+  it('does not let uncommitted hooks block committed work or removal of their boundary', async () => {
+    const [visible, show] = createSignal(true)
+    const load = deferred(), exit = deferred()
+    const child = vi.fn()
+    const parentEnter = vi.fn(), parentExit = vi.fn(() => exit.promise)
+    function Content() {
+      const value = createMemo(() => load.promise.then(() => 'loaded'))
+      onEnter(child); onInOut(child); onExit(child)
+      return <p>{value()}</p>
+    }
+    function Parent() {
+      onEnter(parentEnter); onExit(parentExit)
+      return <Loading fallback={<span>loading</span>}><Content /></Loading>
+    }
+    const { host } = mount(() => <Lifecycle.Show when={visible()}><Parent /></Lifecycle.Show>)
+    try {
+      await settle()
+      expect(parentEnter).toHaveBeenCalledOnce()
+      expect(child).not.toHaveBeenCalled()
+      show(false); await settle()
+      expect(parentExit).toHaveBeenCalledOnce()
+      expect(host.textContent).toBe('loading')
+      exit.resolve()
+      await vi.waitFor(() => expect(host.textContent).toBe(''))
+      load.resolve(); await settle()
+      expect(child).not.toHaveBeenCalled()
+    } finally { load.resolve(); exit.resolve(); await settle() }
+  })
+
+  it.each([false, true])('uses current presence when an inner Loading commits (reentered: %s)', async reentered => {
+    const [visible, show] = createSignal(true)
+    const load = deferred(), parentExit = deferred(), childExit = deferred()
+    const calls: string[] = []
+    function Content() {
+      let element!: HTMLParagraphElement
+      const value = createMemo(() => load.promise.then(() => 'loaded'))
+      onEnter(() => { calls.push(`enter:${element.isConnected}`) })
+      onExit(() => { calls.push(`exit:${element.isConnected}`); return childExit.promise })
+      onInOut(({ direction }) => {
+        calls.push(`${direction}:${element.isConnected}`)
+        return direction === 'out' ? childExit.promise : undefined
+      })
+      return <p ref={element}>{value()}</p>
+    }
+    function Parent() {
+      onExit(() => parentExit.promise)
+      return <Loading fallback={<span>loading</span>}><Content /></Loading>
+    }
+    const { host } = mount(() => <Lifecycle.Show when={visible()}><Parent /></Lifecycle.Show>)
+    try {
+      await settle()
+      show(false); await settle()
+      if (reentered) { show(true); await settle() }
+      expect(calls).toEqual([])
+      load.resolve()
+      await vi.waitFor(() => expect(calls).toEqual(reentered
+        ? ['enter:true', 'in:true'] : ['exit:true', 'out:true']))
+      parentExit.resolve(); await settle()
+      expect(host.textContent).toBe('loaded')
+      childExit.resolve(); await settle()
+      expect(host.textContent).toBe(reentered ? 'loaded' : '')
+    } finally { load.resolve(); parentExit.resolve(); childExit.resolve(); await settle() }
+  })
+
+  it('discards hooks on final unmount before their inner Loading commits', async () => {
+    const load = deferred()
+    const handler = vi.fn(), cleaned = vi.fn()
+    function Content() {
+      const value = createMemo(() => load.promise.then(() => 'loaded'))
+      onEnter(handler); onInOut(handler); onExit(handler)
+      onCleanup(cleaned)
+      return <p>{value()}</p>
+    }
+    const { host, dispose } = mount(() => <Lifecycle.Show when={true}>
+      <Loading fallback={<span>loading</span>}><Content /></Loading>
+    </Lifecycle.Show>)
+    try {
+      await settle()
+      expect(handler).not.toHaveBeenCalled()
+      dispose()
+      expect(cleaned).toHaveBeenCalledOnce()
+      load.resolve(); await settle()
+      expect(host.textContent).toBe('')
+      expect(handler).not.toHaveBeenCalled()
+    } finally { load.resolve(); await settle() }
+  })
+
+  it('admits newly committed hooks before pruning an exit completed in the same turn', async () => {
+    const [visible, show] = createSignal(true)
+    const [child, showChild] = createSignal(false)
+    const parentExit = deferred(), childExit = deferred()
+    const calls: boolean[] = []
+    function Child() {
+      let element!: HTMLParagraphElement
+      onExit(() => { calls.push(element.isConnected); return childExit.promise })
+      return <p ref={element}>late child</p>
+    }
+    function Parent() {
+      onExit(() => parentExit.promise)
+      return <>{child() && <Child />}</>
+    }
+    const { host } = mount(() => <Lifecycle.Show when={visible()}><Parent /></Lifecycle.Show>)
+    show(false); await settle()
+    parentExit.resolve(); await parentExit.promise
+    showChild(true); await settle()
+    expect(calls).toEqual([true])
+    expect(host.textContent).toBe('late child')
+    childExit.resolve(); await settle()
+    expect(host.textContent).toBe('')
+  })
+
   it('starts enter and inout work independently of a pending Loading sibling', async () => {
     const load = deferred()
     const calls: string[] = []
@@ -345,7 +486,7 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     const parentExit = deferred(), childWork = deferred()
     const entering = vi.fn(), exiting = vi.fn()
     const directions: string[] = []
-    let signal!: AbortSignal
+    let signal!: AbortSignal, parentPhase!: Accessor<string>
     function Child() {
       const enter = onEnter<HTMLDivElement>({ prepare: entering, run: entering })
       const motion = onInOut<HTMLDivElement>({
@@ -360,6 +501,7 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
       return <div ref={element => { enter(element); motion(element) }}>late child</div>
     }
     function Parent() {
+      parentPhase = useLifecycle().phase
       onExit(() => parentExit.promise)
       return <Lifecycle.Show when={child()}><Child /></Lifecycle.Show>
     }
@@ -369,7 +511,8 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(entering).toHaveBeenCalledTimes(2)
     expect(directions).toEqual(['prepare:in:false', 'run:in:true'])
     expect(host.textContent).toBe('late child')
-    parentExit.resolve(); await settle()
+    parentExit.resolve()
+    await until(() => parentPhase() === 'disposed', { timeout: 1000 })
     expect(host.textContent).toBe('')
     expect(signal.aborted).toBe(true)
     expect(exiting).not.toHaveBeenCalled()

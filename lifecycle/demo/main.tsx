@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, Show, untrack, type Element as SolidElement } from 'solid-js'
+import { createMemo, createSignal, Loading, onCleanup, Show, untrack, type Element as SolidElement } from 'solid-js'
 import { render } from '@solidjs/web'
 import { Lifecycle, onExit, useLifecycle, type Direction } from '../src/index.js'
 import { createAnimation, createCssTransition, createTransition, fade, fadeScale, slide, spring } from '../../animations/src/index.js'
@@ -130,6 +130,29 @@ function MotionDemo() {
   </section>
 }
 
+function LoadingMotionDemo() {
+  const [visible, show] = createSignal(false)
+  const [separate, setSeparate] = createSignal(false)
+  let release: (() => void) | undefined
+  function Content() {
+    const loaded = createMemo(() => new Promise<string>(resolve => {
+      release = () => resolve('Motion loaded')
+    }))
+    return <Loading fallback={<p>Loading motion…</p>}>
+      <MotionCard separate={separate()} preset="fade" hold={false} delay={250} milliseconds={500} />
+      <CssCard reversible={!separate()} />
+      <p>{loaded()}</p>
+    </Loading>
+  }
+  return <section><h2>Suspended motion</h2>
+    <p>First frames are prepared while loading; lifecycle work starts only when the content commits.</p>
+    <label><input type="checkbox" checked={separate()} onChange={e => setSeparate(e.currentTarget.checked)} />Separate suspended motion</label>
+    <nav><button onClick={() => show(value => !value)}>Toggle suspended motion</button>
+      <button onClick={() => release?.()}>Resolve motion loading</button></nav>
+    <Lifecycle.Show when={visible()}><Content /></Lifecycle.Show>
+  </section>
+}
+
 function ReactiveCard(props: { position: number }) {
   const motion = createAnimation(() => ({ transform: `translateX(${props.position}px)` }), { duration: 5000, easing: 'linear' })
   return <div class="card reactive-card" ref={motion}>Reactive native target</div>
@@ -242,6 +265,7 @@ function Demo() {
     </section>
 
     <MotionDemo />
+    <LoadingMotionDemo />
     <NativeTargetsDemo />
     <SequenceDemo />
 

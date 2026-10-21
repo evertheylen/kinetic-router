@@ -28,6 +28,63 @@ test('prepares a hidden first frame, including the entrance delay', async ({ pag
   await expect(card).toHaveCSS('opacity', '1')
 })
 
+for (const separate of [false, true]) {
+  test(`nested Loading preserves first frames and starts motion after reveal (${separate ? 'separate' : 'inout'})`, async ({ page }) => {
+    await page.getByLabel('Exit duration', { exact: true }).fill('500')
+    await page.getByLabel('Separate suspended motion', { exact: true }).setChecked(separate)
+    const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Suspended motion', exact: true }) })
+    await section.getByRole('button', { name: 'Toggle suspended motion', exact: true }).click()
+    await expect(section.getByText('Loading motion…', { exact: true })).toBeVisible()
+    // Longer than both 500ms animations plus their 250ms entrance delays:
+    // playback during suspension would have finished before the reveal.
+    await page.waitForTimeout(1000)
+    const firstFrame = section.evaluate(section => new Promise<number[]>(resolve => {
+      const observer = new MutationObserver(() => {
+        const native = section.querySelector('.motion-card')
+        const css = section.querySelector('.css-inout, .css-separate')
+        if (!native || !css) return
+        observer.disconnect()
+        requestAnimationFrame(() => resolve([native, css].map(element => Number(getComputedStyle(element).opacity))))
+      })
+      observer.observe(section, { childList: true, subtree: true })
+    }))
+    await section.getByRole('button', { name: 'Resolve motion loading', exact: true }).click()
+    const [nativeOpacity, cssOpacity] = await firstFrame
+    expect(nativeOpacity).toBe(0)
+    expect(cssOpacity).toBeLessThan(0.1)
+    const native = section.locator('.motion-card'), css = section.locator('.css-inout, .css-separate')
+    // This diagnostic is recorded only by a connected CSS run, not preparation.
+    await expect(css).toHaveAttribute('data-runs', 'in')
+    await expect.poll(() => native.evaluate(element => element.getAnimations()[0]!.playState)).toBe('running')
+    await native.evaluate(element => {
+      const animation = element.getAnimations()[0]!
+      animation.pause(); animation.currentTime = 500 // delay + half the active duration
+    })
+    expect(await native.evaluate(element => Number(getComputedStyle(element).opacity))).toBeCloseTo(0.5, 1)
+    await section.evaluate(element => element.getAnimations({ subtree: true }).forEach(animation => animation.finish()))
+    await expect(native).toHaveCSS('opacity', '1')
+    await expect(css).toHaveCSS('opacity', '1')
+    await section.getByRole('button', { name: 'Toggle suspended motion', exact: true }).click()
+    await expect(css).toHaveAttribute('data-runs', 'in,out')
+    await section.evaluate(element => element.getAnimations({ subtree: true }).forEach(animation => animation.finish()))
+    await expect(section.locator('.card')).toHaveCount(0)
+  })
+}
+
+test('removing a pending Loading boundary does not wait for or later mount its animations', async ({ page }) => {
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Suspended motion', exact: true }) })
+  const toggle = section.getByRole('button', { name: 'Toggle suspended motion', exact: true })
+  await toggle.click()
+  await expect(section.getByText('Loading motion…', { exact: true })).toBeVisible()
+  await toggle.click()
+  await expect(section.getByText('Loading motion…', { exact: true })).toHaveCount(0)
+  await section.getByRole('button', { name: 'Resolve motion loading', exact: true }).click()
+  await expect(section.locator('.card')).toHaveCount(0)
+  await toggle.click()
+  await section.getByRole('button', { name: 'Resolve motion loading', exact: true }).click()
+  await expect(section.locator('.card')).toHaveCount(2)
+})
+
 test('reverses the same native animation repeatedly without snapping or remounting', async ({ page }) => {
   const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
   await toggle.click()
