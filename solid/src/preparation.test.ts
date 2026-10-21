@@ -5,7 +5,7 @@ import { ActualRouter } from './actual-router.js';
 import { Router } from './router.js';
 import { SolidImplementationMap } from './implementation-map.js';
 import { MemoryEngine } from './memory-engine.js';
-import { frameDelegateAttribute, rootFrameId } from './frame.js';
+import { outletDelegateAttribute, rootOutletId } from './outlet.js';
 import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
 import { PreparationRegistry, type PrefetchCacheOptions } from './preparation-registry.js';
 import { RenderedRouteCache } from './rendered-route-cache.js';
@@ -55,7 +55,7 @@ async function app(options: {
           if (name === 'layout') {
             const outlet = document.createElement('div');
             html.append(outlet);
-            rendered.subFrame = { setElement: node => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() };
+            rendered.subOutlet = { setElement: node => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() };
           } else html.append(document.createElement('input'));
           return { html, get title() { return name === 'outside' ? name : `${name} ${params.id}`; } };
         };
@@ -65,17 +65,17 @@ async function app(options: {
       impls.implementLazy(beta, () => options.loadBeta!(implementation), { untrackedKeys: implementation.untrackedKeys });
     } else impls.implement({ layout, alpha, beta, outside }[name] as Route<any>, implementation);
   }
-  const frame = document.createElement('main');
-  frame.id = rootFrameId;
-  Object.assign(frame, { [frameDelegateAttribute]: {
-    setElement: (node: Node) => frame.replaceChildren(node), clear: () => frame.replaceChildren(),
+  const outlet = document.createElement('main');
+  outlet.id = rootOutletId;
+  Object.assign(outlet, { [outletDelegateAttribute]: {
+    setElement: (node: Node) => outlet.replaceChildren(node), clear: () => outlet.replaceChildren(),
   } });
-  document.body.replaceChildren(frame);
+  document.body.replaceChildren(outlet);
   await router.init();
   flush();
   const prepare = (locator = beta.locate({ id: 'bob' })) =>
     router.acquirePreparation(router.resolveDestination(locator))!;
-  return { router, engine, output, contexts, cleanups, frame, prepare, routes: { layout, alpha, beta, outside } };
+  return { router, engine, output, contexts, cleanups, outlet, prepare, routes: { layout, alpha, beta, outside } };
 }
 
 it('defaults to three unused preparations for thirty seconds', () => {
@@ -102,8 +102,8 @@ it('keeps factory defaults stable from a destination snapshot through preparatio
 it('shares equivalent hidden values, stages only the new suffix, and leaves all live state untouched', async () => {
   const a = await app();
   const activeLayout = a.output.layout[0];
-  const activeNode = a.frame.firstChild;
-  const input = a.frame.querySelector('input')!;
+  const activeNode = a.outlet.firstChild;
+  const input = a.outlet.querySelector('input')!;
   input.focus();
   const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   const history = a.engine.entries();
@@ -122,8 +122,8 @@ it('shares equivalent hidden values, stages only the new suffix, and leaves all 
   expect((backstage as HTMLElement).inert).toBe(true);
   expect((child.renderArgs.params.reactiveProxyObject as { id: string }).id).toBe('bob');
   expect((activeLayout.renderArgs.params.reactiveProxyObject as { id: string }).id).toBe('alice');
-  expect(a.frame.firstChild).toBe(activeNode);
-  expect(a.frame.textContent).toBe('layout alicealpha alice');
+  expect(a.outlet.firstChild).toBe(activeNode);
+  expect(a.outlet.textContent).toBe('layout alicealpha alice');
   expect(document.activeElement).toBe(input);
   expect(document.title).toBe('alpha alice');
   expect(scroll).not.toHaveBeenCalled();
@@ -185,11 +185,11 @@ it('takes navigation ownership before speculative release and adopts under the a
   await navigation.finished;
   flush();
   expect(a.output.beta).toHaveLength(1);
-  expect(a.frame.firstChild).toBe(parent.renderOutput!.html);
-  expect(a.frame.querySelector('[data-page="beta"]')).toBe(prepared.routes[1].renderOutput!.html);
+  expect(a.outlet.firstChild).toBe(parent.renderOutput!.html);
+  expect(a.outlet.querySelector('[data-page="beta"]')).toBe(prepared.routes[1].renderOutput!.html);
   expect(a.router.rrCache.get(a.engine.currentEntry().id)?.[1]).toBe(prepared.routes[1]);
   expect(a.engine.entries()).toHaveLength(1);
-  expect(a.frame.textContent).toBe('layout bobbeta bob');
+  expect(a.outlet.textContent).toBe('layout bobbeta bob');
   expect(document.title).toBe('beta bob');
   expect(prepared.routes[1].renderArgs.pageStatus.hasFocus()).toBe(true);
   expect(document.querySelector('[data-kinetic-router-backstage]')).toBeNull();
@@ -265,12 +265,12 @@ it('adopts under the same parent after intervening reactive parameter changes wi
   expect((child.renderArgs.params.reactiveProxyObject as { id: string }).id).toBe('bob');
   await a.router.navigate(a.routes.beta.locate({ id: 'bob' })).finished;
   flush();
-  expect(a.frame.firstChild).toBe(parent.renderOutput!.html);
+  expect(a.outlet.firstChild).toBe(parent.renderOutput!.html);
   expect(a.output.beta).toHaveLength(1);
-  expect(a.frame.querySelector('[data-page="beta"]')).toBe(child.renderOutput!.html);
+  expect(a.outlet.querySelector('[data-page="beta"]')).toBe(child.renderOutput!.html);
   await a.router.navigate(a.routes.beta.locate({ id: 'dan' })).finished;
   flush();
-  expect(a.frame.textContent).toBe('layout danbeta dan');
+  expect(a.outlet.textContent).toBe('layout danbeta dan');
   expect(a.output.beta).toHaveLength(1);
 });
 
@@ -280,15 +280,15 @@ it('preserves compatible prepared output when an unfinished navigation is supers
   const target = a.routes.beta.locate({ id: 'bob' });
   const lease = a.prepare(target);
   const prepared = await lease.ready;
-  const activeNode = a.frame.firstChild;
+  const activeNode = a.outlet.firstChild;
   const interrupted = a.router.navigate(target, { forceNewInstance: true });
   try {
     await vi.waitFor(() => expect(a.contexts.beta).toHaveLength(2));
     const navigation = a.router.navigate(target);
     lease.release();
     await navigation.finished;
-    expect(a.frame.firstChild).toBe(activeNode);
-    expect(a.frame.querySelector('[data-page="beta"]')).toBe(prepared.routes[1].renderOutput!.html);
+    expect(a.outlet.firstChild).toBe(activeNode);
+    expect(a.outlet.querySelector('[data-page="beta"]')).toBe(prepared.routes[1].renderOutput!.html);
     expect(a.output.layout).toHaveLength(1);
     expect(a.output.beta).toHaveLength(1);
   } finally {
@@ -310,7 +310,7 @@ it('cancels navigation-owned construction promptly when no speculative owner rem
   gate.resolve();
   await expect(navigation.finished).rejects.toMatchObject({ name: 'AbortError' });
   expect(a.output.beta).toHaveLength(0);
-  expect(a.frame.textContent).toBe('outside');
+  expect(a.outlet.textContent).toBe('outside');
 });
 
 it('does not cancel a still-requested preparation when its navigation is superseded', async () => {
@@ -325,7 +325,7 @@ it('does not cancel a still-requested preparation when its navigation is superse
   const prepared = await lease.ready;
   await expect(navigation.finished).rejects.toMatchObject({ name: 'AbortError' });
   flush();
-  expect(a.frame.textContent).toBe('outside');
+  expect(a.outlet.textContent).toBe('outside');
   expect(prepared.routes[1].renderArgs.pageStatus.isVisible()).toBe(false);
   expect(document.title).toBe('outside');
   lease.release();
@@ -349,7 +349,7 @@ it.each(['lazy', 'renderer'] as const)('handles %s failure, shares implementatio
   await expect(first.ready).rejects.toBe(error);
   await expect(second.ready).rejects.toBe(error);
   flush();
-  expect(a.frame.textContent).toBe('layout alicealpha alice');
+  expect(a.outlet.textContent).toBe('layout alicealpha alice');
   expect(document.title).toBe('alpha alice');
   if (phase === 'renderer') expect(a.cleanups.beta).toBe(2);
   // Failed work is removed, not cached as a permanently rejected preparation.
@@ -466,15 +466,15 @@ it.each(['different-parent', 'new-active-parent'] as const)('rejects incompatibl
   if (scenario === 'different-parent') await a.router.navigate(a.routes.outside.locate({})).finished;
   await a.router.navigate(a.routes.alpha.locate({ id: 'carol' })).finished;
   const activeParent = a.output.layout.at(-1)!;
-  const activeNode = a.frame.firstChild;
+  const activeNode = a.outlet.firstChild;
   await a.router.navigate(a.routes.beta.locate({ id: 'bob' })).finished;
   flush();
-  expect(a.frame.firstChild).toBe(activeNode);
+  expect(a.outlet.firstChild).toBe(activeNode);
   expect(a.output.layout.at(-1)).toBe(activeParent);
   expect(a.output.beta).toHaveLength(2);
   expect(prepared.signal.aborted).toBe(true);
   expect(a.output.beta[1].renderArgs.params.parent).toBe(activeParent.renderArgs.params);
-  expect(a.frame.textContent).toBe('layout bobbeta bob');
+  expect(a.outlet.textContent).toBe('layout bobbeta bob');
   lease.release();
   expect(a.output.beta[1].renderArgs.pageStatus.isVisible()).toBe(true);
 });
@@ -544,10 +544,10 @@ it('releases speculation immediately when the facade owning Solid root is dispos
       return () => ({ html: document.createElement('div'), title: 'slow' });
     },
   });
-  const frame = document.createElement('div');
-  frame.id = rootFrameId;
-  Object.assign(frame, { [frameDelegateAttribute]: { setElement: (node: Node) => frame.replaceChildren(node), clear: () => frame.replaceChildren() } });
-  document.body.replaceChildren(frame);
+  const outlet = document.createElement('div');
+  outlet.id = rootOutletId;
+  Object.assign(outlet, { [outletDelegateAttribute]: { setElement: (node: Node) => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() } });
+  document.body.replaceChildren(outlet);
   await vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
   const lease = router.prepare(slow.locate({}));
   await vi.waitFor(() => expect(context).toBeDefined());

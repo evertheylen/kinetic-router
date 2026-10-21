@@ -4,7 +4,7 @@ import { createComponent, createOwner, createSignal, Errored, flush, onCleanup, 
 import { render } from '@solidjs/web';
 import { Router } from './router.js';
 import { MemoryEngine } from './memory-engine.js';
-import { frameDelegateAttribute, rootFrameId } from './frame.js';
+import { outletDelegateAttribute, rootOutletId } from './outlet.js';
 import { Link, type LinkProps, type Prefetch } from './link.js';
 import type { PagePreparationContext } from './page.js';
 
@@ -43,12 +43,12 @@ async function app(prefetch?: Prefetch, slow = false, fail = false) {
       },
     });
   }
-  const frame = document.createElement('main');
-  frame.id = rootFrameId;
-  Object.assign(frame, { [frameDelegateAttribute]: {
-    setElement: (node: Node) => frame.replaceChildren(node), clear: () => frame.replaceChildren(),
+  const outlet = document.createElement('main');
+  outlet.id = rootOutletId;
+  Object.assign(outlet, { [outletDelegateAttribute]: {
+    setElement: (node: Node) => outlet.replaceChildren(node), clear: () => outlet.replaceChildren(),
   } });
-  document.body.replaceChildren(frame);
+  document.body.replaceChildren(outlet);
   const link = (props: LinkProps<any> = { route: a }) => {
     const host = document.createElement('div');
     document.body.append(host);

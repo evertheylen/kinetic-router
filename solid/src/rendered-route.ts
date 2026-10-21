@@ -5,7 +5,7 @@ import { Route } from "@kinetic-router/definition/routes.js";
 import { Page, PageStatus } from "./page.js";
 import { ParamStorage } from "./params.js";
 import { SolidRoot } from "./utils.js";
-import type { FrameDelegate } from "./frame.js";
+import type { OutletDelegate } from "./outlet.js";
 
 
 export type RenderedRoute = {
@@ -18,7 +18,7 @@ export type RenderedRoute = {
   renderOutput?: {html: Node, title: string },
   owner: SolidRoot,
   lifecycle: ReturnType<typeof createPageLifecycle>,
-  subFrame: FrameDelegate | undefined;
+  subOutlet: OutletDelegate | undefined;
 };
 
 export const InRenderedRoute = createContext<RenderedRoute | null>(null);
@@ -102,7 +102,7 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
         renderArgs: { ...renderArgs, pageStatus },
         owner,
         lifecycle,
-        subFrame: undefined,  // to be set later
+        subOutlet: undefined,  // to be set later
       };
 
       runWithOwner(owner, () => {

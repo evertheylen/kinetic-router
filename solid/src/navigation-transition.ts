@@ -49,7 +49,7 @@ export class NavigationTransition {
     if (lease) {
       const candidate = await lease.ready;
       signal.throwIfAborted();
-      // Owners/frames cannot be reparented: the prepared suffix must have been
+      // Owners/outlets cannot be reparented: the prepared suffix must have been
       // constructed under the exact ancestors this navigation will reuse.
       if (candidate.reusedCount === reused.length
         && reused.every((route, i) => candidate.routes[i] === route)) {

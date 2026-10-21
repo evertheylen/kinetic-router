@@ -3,7 +3,7 @@ import { index, param, root, route, type Locator, type Route } from '@kinetic-ro
 import { createEffect, createOwner, runWithOwner, useContext } from 'solid-js';
 import { Router } from './router.js';
 import { MemoryEngine } from './memory-engine.js';
-import { frameDelegateAttribute, rootFrameId, type FrameDelegate } from './frame.js';
+import { outletDelegateAttribute, rootOutletId, type OutletDelegate } from './outlet.js';
 import { InRenderedRoute } from './rendered-route.js';
 
 const routers: Router[] = [];
@@ -43,7 +43,7 @@ async function createApp(initialUrl = '/b', slow?: Promise<void>, engine = new M
             const rendered = useContext(InRenderedRoute)!;
             const outlet = document.createElement('div');
             html.append(outlet);
-            rendered.subFrame = { setElement: node => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() };
+            rendered.subOutlet = { setElement: node => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() };
           }
           return { html, title: name };
         };
@@ -51,9 +51,9 @@ async function createApp(initialUrl = '/b', slow?: Promise<void>, engine = new M
     });
   }
   const el = document.createElement('div');
-  el.id = rootFrameId;
-  const frame: FrameDelegate = { setElement: node => el.replaceChildren(node), clear: () => el.replaceChildren() };
-  Object.assign(el, { [frameDelegateAttribute]: frame });
+  el.id = rootOutletId;
+  const outlet: OutletDelegate = { setElement: node => el.replaceChildren(node), clear: () => el.replaceChildren() };
+  Object.assign(el, { [outletDelegateAttribute]: outlet });
   document.body.replaceChildren(el);
   await vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
   const menu = (locator: Locator<any>) => router.navigate(locator, { mode: 'menu' });

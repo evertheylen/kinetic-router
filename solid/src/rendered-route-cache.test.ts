@@ -25,7 +25,7 @@ function page(parent?: RenderedRoute) {
   const rendered: RenderedRoute = {
     route: definition, implementation, owner: params.owner, lifecycle,
     renderArgs: { params, pageStatus: lifecycle.status }, renderOutput: { html, title: '' },
-    subFrame: undefined,
+    subOutlet: undefined,
   };
   created.push(rendered);
   return { rendered, html, cleanup };

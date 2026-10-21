@@ -7,7 +7,7 @@ import { locatorToUrl, serializePathParams, SerializedPathParams, urlToLocator }
 
 import { Page } from "./page.js";
 import { AppState, SerializedAppState } from "./app-state.js";
-import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame.js";
+import { OutletDelegate, outletDelegateAttribute, rootOutletId } from "./outlet.js";
 import { createParamStorage, ParamStorage } from "./params.js";
 import { renderRoute, RenderedRoute } from "./rendered-route.js";
 import { SolidImplementationMap } from "./implementation-map.js";
@@ -30,7 +30,7 @@ export type NavigateOptions = Pick<NavigationInfo, 'forceNewInstance'> & {
 
 /** Isolated construction and its consumer interest. Adoption gives history
  * ownership without ending that interest; dispose releases it. Only the new
- * suffix is mounted in Backstage, without live frame or parameter side effects. */
+ * suffix is mounted in Backstage, without live outlet or parameter side effects. */
 export type PreparedNavigation = {
   readonly routes: readonly RenderedRoute[],
   readonly reusedCount: number,
@@ -90,7 +90,7 @@ export class ActualRouter<
   protected _currentLocator: Accessor<Locator<any> | undefined>;
   protected _setCurrentLocator: Setter<Locator<any> | undefined>;
 
-  rootFrame!: FrameDelegate;
+  rootOutlet!: OutletDelegate;
 
   constructor(
     sitemap: RootSitemap,
@@ -117,15 +117,15 @@ export class ActualRouter<
     //@ts-ignore
     window.__router = this;
 
-    const rootFrameElement = document.getElementById(rootFrameId);
-    if (rootFrameElement === null) {
-      throw new Error('No root frame found');
+    const rootOutletElement = document.getElementById(rootOutletId);
+    if (rootOutletElement === null) {
+      throw new Error('No root outlet found');
     }
 
-    this.rootFrame = (rootFrameElement as any)[frameDelegateAttribute];
+    this.rootOutlet = (rootOutletElement as any)[outletDelegateAttribute];
 
-    if (this.rootFrame === undefined) {
-      throw new Error('No delegate on root frame found');
+    if (this.rootOutlet === undefined) {
+      throw new Error('No delegate on root outlet found');
     }
 
     // setup after initial navigation stuff to avoid weird unwanted behaviour
@@ -468,7 +468,7 @@ export class ActualRouter<
     const stagedRoutes = new Map<number, RenderedRoute>();
     const backstage = Backstage();
     let stageIndex = reused.length;
-    let stageFrame: FrameDelegate | undefined = {
+    let stageOutlet: OutletDelegate | undefined = {
       setElement: node => backstage.replaceChildren(node), clear: () => backstage.replaceChildren(),
     };
     let releaseRoutes = this.rrCache.retainForRender(reused);
@@ -550,9 +550,9 @@ export class ActualRouter<
           stagedRoutes.set(i, rendered);
           while (stagedRoutes.has(stageIndex)) {
             const next = stagedRoutes.get(stageIndex)!;
-            this.assertFrame(stageFrame, next.route);
-            stageFrame.setElement(next.renderOutput!.html);
-            stageFrame = next.subFrame;
+            this.assertOutlet(stageOutlet, next.route);
+            stageOutlet.setElement(next.renderOutput!.html);
+            stageOutlet = next.subOutlet;
             stageIndex++;
             signal.throwIfAborted();
           }
@@ -573,14 +573,14 @@ export class ActualRouter<
     }
   }
 
-  /** The only phase allowed to touch live frames, parameters and current state. */
+  /** The only phase allowed to touch live outlets, parameters and current state. */
   protected activateNavigation(state: AppState, prepared: PreparedNavigation, signal: AbortSignal): void {
     signal = AbortSignal.any([signal, prepared.signal]);
     signal.throwIfAborted();
-    let frame: FrameDelegate | undefined = this.rootFrame;
+    let outlet: OutletDelegate | undefined = this.rootOutlet;
     for (const rendered of prepared.routes) {
-      this.assertFrame(frame, rendered.route);
-      frame = rendered.subFrame;
+      this.assertOutlet(outlet, rendered.route);
+      outlet = rendered.subOutlet;
     }
     // Solid 2 batches signal writes until the end of this synchronous phase.
     for (const rendered of prepared.routes.slice(0, prepared.reusedCount)) {
@@ -591,14 +591,14 @@ export class ActualRouter<
       }
     }
     for (const rendered of prepared.routes.slice(prepared.reusedCount)) rendered.renderArgs.params.activate();
-    frame = this.rootFrame;
+    outlet = this.rootOutlet;
     for (const rendered of prepared.routes) {
       signal.throwIfAborted();
-      frame!.setElement(rendered.renderOutput!.html);
-      frame = rendered.subFrame;
+      outlet!.setElement(rendered.renderOutput!.html);
+      outlet = rendered.subOutlet;
     }
     signal.throwIfAborted();
-    frame?.clear();
+    outlet?.clear();
     this.restoreScrollPositions(state);
     signal.throwIfAborted();
     this.currentState = state;
@@ -607,11 +607,11 @@ export class ActualRouter<
     this._setCurrentLocator(state.locator);
   }
 
-  protected assertFrame(frame: FrameDelegate | undefined, route: Route<any>): asserts frame is FrameDelegate {
-    if (frame === undefined) {
+  protected assertOutlet(outlet: OutletDelegate | undefined, route: Route<any>): asserts outlet is OutletDelegate {
+    if (outlet === undefined) {
       const slugPath = getSlugPath(this.sitemap, route)!;
       const slugPathStr = slugPathToString(slugPath);
-      throw new Error(`Cant render ${slugPathStr}: no frame!`);
+      throw new Error(`Cant render ${slugPathStr}: no outlet!`);
     }
   }
 

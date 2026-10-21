@@ -15,7 +15,7 @@ changing interaction semantics.
   Preference changes cancel disallowed work and restart ongoing hover/focus delays
   when lifted. Missing APIs and slow `effectiveType` values do not suppress work;
   `respectSaveData: false` must not bypass disabled triggers.
-- Backstage preparation must not alter history, live frames/parameters, title,
+- Backstage preparation must not alter history, live outlets/parameters, title,
   scroll, or focus. Equivalent destinations share work and resolved defaults,
   including hidden values. No-op destinations need no preparation.
 - Navigation takes ownership before Link cleanup releases its interest. Other

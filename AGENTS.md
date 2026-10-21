@@ -76,8 +76,8 @@ There is no `<Route>` component or `useNavigate`. The model is:
    `render(untrackedParams, { signal, pageStatus })` returns (async) a function
    `(reactiveParams, pageStatus) => { html, title, ...ExtraOutput }`.
    Registered via `router.implement(route, page)` or `implementLazy`.
-4. **Frames** (`solid/src/frame.ts`): outlets. The root frame carries id
-   `__kinetic_router_root_frame` and a `FrameDelegate` attached to its DOM element.
+4. **Outlets** (`solid/src/outlet.ts`): containers for page content. The root outlet
+   carries id `__kinetic_router_root_outlet` and an `OutletDelegate` attached to its DOM element.
 5. **Links** (`solid/src/link.ts`): standalone `<Link route={...}>` captures the
    single active Router when mounted; do not expose a router-bound component.
    Plain `<a href={router.toUrl(route.locate({...}))}>` remains supported, but discouraged.
@@ -91,7 +91,7 @@ There is no `<Route>` component or `useNavigate`. The model is:
   asynchronously in a `queueMicrotask`; `currentLocator()` is signal-backed.
 - `ActualRouter` (`actual-router.ts`) — the engine-agnostic core: resolves entries to
   `AppState`s, finds reusable route prefixes (`diff.ts`), prepares isolated
-  output, and activates it through the frame chain.
+  output, and activates it through the outlet chain.
 - **`NavigationEngine`** (`navigation-engine.ts`) — the history-layer abstraction.
   The engine owns the history stack (entries, ids, states); the router owns rendering
   and caches rendered routes *by entry id*. Implementations:
@@ -126,7 +126,7 @@ There is no `<Route>` component or `useNavigate`. The model is:
   `vitest.config.ts` forces `resolve.conditions: ['browser', 'development']` and
   inlines `solid-js` — without this, `createEffect` silently does nothing in tests.
 - **Router tests don't need JSX**: pages can return plain DOM nodes (happy-dom), and
-  the root frame is faked by attaching a `FrameDelegate` to a div with the root frame
+  the root outlet is faked by attaching an `OutletDelegate` to a div with the root outlet
   id (see `solid/src/router.test.ts`).
 - Solid 2.0 API differences: `createEffect(compute, effect)` takes two functions;
   `createOwner`/`runWithOwner` are used directly (rendered routes manage their own

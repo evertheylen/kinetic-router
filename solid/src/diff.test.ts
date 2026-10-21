@@ -16,7 +16,7 @@ function rendered(definition: Route<any>, values: Record<string, any>, untracked
   const result: RenderedRoute = {
     route: definition, implementation, owner: params.owner, lifecycle,
     renderArgs: { params, pageStatus: lifecycle.status },
-    renderOutput: undefined, subFrame: undefined,
+    renderOutput: undefined, subOutlet: undefined,
   };
   created.push(result);
   return result;

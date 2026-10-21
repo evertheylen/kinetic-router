@@ -2,7 +2,7 @@
 
 A type-safe client-side router for SolidJS, built on the browser's Navigation API.
 Declare routes separately from their page implementations, then navigate with
-ordinary-looking links and render pages through `<Frame>` outlets.
+ordinary-looking links and render pages through `<Outlet>` components.
 
 ## What it offers
 
@@ -20,12 +20,12 @@ not implemented yet.
 
 ## A small example
 
-Define a route, implement its page, and mount a frame:
+Define a route, implement its page, and mount an outlet:
 
 ```tsx
 import { index, param, root, route } from '@kinetic-router/definition';
 import { render } from '@solidjs/web';
-import { Frame } from '@kinetic-router/solid/frame.js';
+import { Outlet } from '@kinetic-router/solid/outlet.js';
 import { Link } from '@kinetic-router/solid/link.js';
 import { Router } from '@kinetic-router/solid/router.js';
 
@@ -46,11 +46,11 @@ router.implement(home, {
   },
 });
 
-render(() => <Frame component="main" />, document.getElementById('root')!);
+render(() => <Outlet component="main" />, document.getElementById('root')!);
 ```
 
 Here `name` is a typed search parameter, and the link updates it without a full
-page load. Larger apps can use nested frames, lazy page implementations, and
+page load. Larger apps can use nested outlets, lazy page implementations, and
 `mode="menu"` links that resume the last visit to a section.
 
 See [example-app](example-app/) for a working demo. Detailed option and lifecycle

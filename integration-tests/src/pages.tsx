@@ -1,7 +1,7 @@
 import { render } from '@solidjs/web';
 import type { Route } from '@kinetic-router/definition';
 import { Router, type NavigationMode } from '@kinetic-router/solid/router.js';
-import { Frame } from '@kinetic-router/solid/frame.js';
+import { Outlet } from '@kinetic-router/solid/outlet.js';
 import type { Scenario, TestPage } from './scenario.js';
 import { Fingerprint } from '@kinetic-router/testing-utils/fingerprint.js';
 
@@ -57,7 +57,7 @@ export function mount(setup: Awaited<ReturnType<Scenario['setup']>>, element: HT
     try { await window.navigation[direction]().finished; }
     finally { pendingNavigations--; }
   }
-  router = new Router(setup.sitemap); // real NavigationApiEngine and Solid Frame
+  router = new Router(setup.sitemap); // real NavigationApiEngine and Solid Outlet
   for (const [route, implementation] of setup.pages) router.implement(route, implementation);
   render(() => <>
     <nav aria-label="History">
@@ -65,7 +65,7 @@ export function mount(setup: Awaited<ReturnType<Scenario['setup']>>, element: HT
       <button onClick={() => traverse('forward')}>Forward</button>
       {setup.controls?.map(control => <button onClick={() => control.run()}>{control.label}</button>)}
     </nav>
-    <Frame component="main" />
+    <Outlet component="main" />
   </>, element);
   return () => router.currentLocator() !== undefined && pendingNavigations === 0 && !window.navigation.transition;
 }

@@ -1,6 +1,6 @@
 import { index, param, root, route } from '@kinetic-router/definition';
 import { Router, type LinkMode, type Prefetch } from '@kinetic-router/solid/router.js';
-import { Frame } from '@kinetic-router/solid/frame.js';
+import { Outlet } from '@kinetic-router/solid/outlet.js';
 import { Link } from '@kinetic-router/solid/link.js';
 import type { Page, PagePreparationContext } from '@kinetic-router/solid/page.js';
 import { createSignal, flush, onCleanup } from 'solid-js';
@@ -94,7 +94,7 @@ export function mountLinks(element: HTMLElement) {
     </nav>
     <button onClick={() => gate.resolve()}>Release renders</button>
     <button onClick={() => setVisible(false)}>Unmount primary</button>
-    <Frame component="main" />
+    <Outlet component="main" />
   </>, element);
   const fixture = { router, routes: { home, a, detail, b, draft }, contexts, constructed, disposed, events, draftTokens,
     get imports() { return imports; }, get draftDefaults() { return nextDraft; },

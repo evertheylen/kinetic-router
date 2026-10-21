@@ -3,7 +3,7 @@ import { param, root, route, type Locator } from '@kinetic-router/definition';
 import { createEffect, flush, onCleanup, useContext } from 'solid-js';
 import { ActualRouter, type PreparedNavigation } from './actual-router.js';
 import { AppState } from './app-state.js';
-import { frameDelegateAttribute, rootFrameId } from './frame.js';
+import { outletDelegateAttribute, rootOutletId } from './outlet.js';
 import { SolidImplementationMap } from './implementation-map.js';
 import { MemoryEngine } from './memory-engine.js';
 import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
@@ -67,14 +67,14 @@ it('cancels sibling construction on failure even when the caller has not aborted
   expect(childCleanup).toHaveBeenCalledOnce();
 });
 
-function installRootFrame() {
-  const frame = document.createElement('div');
-  frame.id = rootFrameId;
-  Object.assign(frame, { [frameDelegateAttribute]: {
-    setElement: (node: Node) => frame.replaceChildren(node), clear: () => frame.replaceChildren(),
+function installRootOutlet() {
+  const outlet = document.createElement('div');
+  outlet.id = rootOutletId;
+  Object.assign(outlet, { [outletDelegateAttribute]: {
+    setElement: (node: Node) => outlet.replaceChildren(node), clear: () => outlet.replaceChildren(),
   } });
-  document.body.replaceChildren(frame);
-  return frame;
+  document.body.replaceChildren(outlet);
+  return outlet;
 }
 
 async function createApp(betaReady?: Promise<void>) {
@@ -105,7 +105,7 @@ async function createApp(betaReady?: Promise<void>) {
           if (name === 'layout') {
             const outlet = document.createElement('div');
             html.append(outlet);
-            current.subFrame = { setElement: node => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() };
+            current.subOutlet = { setElement: node => outlet.replaceChildren(node), clear: () => outlet.replaceChildren() };
           } else {
             html.append(document.createElement('input'));
           }
@@ -114,15 +114,15 @@ async function createApp(betaReady?: Promise<void>) {
       },
     });
   }
-  const frame = installRootFrame();
+  const outlet = installRootOutlet();
   await router.init();
   flush();
-  return { router, engine, frame, routes: { layout, alpha, beta }, rendered, initialParams, cleanups };
+  return { router, engine, outlet, routes: { layout, alpha, beta }, rendered, initialParams, cleanups };
 }
 
 it('finishes the transition when persisting committed state throws, without changing visible output', async () => {
   const app = await createApp();
-  const before = app.frame.firstChild;
+  const before = app.outlet.firstChild;
   const outgoingId = app.engine.currentEntry().id;
   const update = app.engine.updateCurrentEntry.bind(app.engine);
   const failure = new Error('Cannot persist state');
@@ -133,12 +133,12 @@ it('finishes the transition when persisting committed state throws, without chan
   try {
     await expect(app.router.navigate(app.routes.beta.locate({ id: 'bob' })).finished).rejects.toBe(failure);
     expect(app.router.hasPendingNavigation).toBe(false);
-    expect(app.frame.firstChild).toBe(before);
+    expect(app.outlet.firstChild).toBe(before);
     expect(app.router.currentLocator()?.values).toEqual({ id: 'alice' });
     expect(app.rendered.beta).toBeUndefined();
     spy.mockRestore();
     await app.router.navigate(app.routes.beta.locate({ id: 'bob' })).finished;
-    expect(app.frame.textContent).toBe('layout bobbeta bob');
+    expect(app.outlet.textContent).toBe('layout bobbeta bob');
   } finally { spy.mockRestore(); app.router.dispose(); }
 });
 
@@ -149,18 +149,18 @@ it('does not mistake failed initialization for cancellation during transition cl
   const failure = new DOMException('Application failure', 'AbortError');
   implementations.implement(home, { untrackedKeys: [], async render() { throw failure; } });
   const router = new TestRouter(sitemap, implementations, new MemoryEngine('/home'));
-  installRootFrame();
+  installRootOutlet();
   try {
     await expect(router.init()).rejects.toBe(failure);
     expect(router.hasPendingNavigation).toBe(false);
   } finally { router.dispose(); }
 });
 
-it('constructs staged destination output without changing live params, frames, focus, title, scroll or history', async () => {
+it('constructs staged destination output without changing live params, outlets, focus, title, scroll or history', async () => {
   const app = await createApp();
   const activeStack = app.router.rrCache.get(app.engine.currentEntry().id)!;
-  const activeNode = app.frame.firstChild;
-  const input = app.frame.querySelector('input')!;
+  const activeNode = app.outlet.firstChild;
+  const input = app.outlet.querySelector('input')!;
   input.focus();
   const controller = new AbortController();
   const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
@@ -171,8 +171,8 @@ it('constructs staged destination output without changing live params, frames, f
     expect(prepared.routes[0]).toBe(activeStack[0]);
     expect(app.initialParams.beta).toBe('bob');
     expect((app.rendered.layout!.renderArgs.params.reactiveProxyObject as { id: string }).id).toBe('alice');
-    expect(app.frame.firstChild).toBe(activeNode);
-    expect(app.frame.textContent).toBe('layout alicealpha alice');
+    expect(app.outlet.firstChild).toBe(activeNode);
+    expect(app.outlet.textContent).toBe('layout alicealpha alice');
     expect(document.activeElement).toBe(input);
     expect(document.title).toBe('alpha alice');
     expect(scroll).not.toHaveBeenCalled();
@@ -192,7 +192,7 @@ it('constructs staged destination output without changing live params, frames, f
     expect(fetching.aborted).toBe(true);
     expect(beta.renderArgs.pageStatus.shouldFetch()).toBe(false);
     expect(app.cleanups).toEqual({ layout: 0, alpha: 0, beta: 1 });
-    expect(app.frame.firstChild).toBe(activeNode);
+    expect(app.outlet.firstChild).toBe(activeNode);
     expect(document.title).toBe('alpha alice');
   } finally {
     controller.abort();
@@ -203,7 +203,7 @@ it('constructs staged destination output without changing live params, frames, f
 it('cannot activate disposed construction even if the caller has not aborted its request', async () => {
   const app = await createApp();
   const activeStack = app.router.rrCache.get(app.engine.currentEntry().id)!;
-  const before = app.frame.innerHTML;
+  const before = app.outlet.innerHTML;
   const controller = new AbortController();
   const target = app.routes.beta.locate({ id: 'bob' });
   const prepared = await app.router.prepare(target, activeStack.slice(0, 1), controller.signal);
@@ -214,8 +214,8 @@ it('cannot activate disposed construction even if the caller has not aborted its
   catch (caught) { error = caught; }
   expect(error).toMatchObject({ name: 'AbortError' });
   flush();
-  expect(app.frame.innerHTML).toBe(before);
-  expect(app.frame.textContent).toBe('layout alicealpha alice');
+  expect(app.outlet.innerHTML).toBe(before);
+  expect(app.outlet.textContent).toBe('layout alicealpha alice');
   expect(app.router.currentLocator()?.route).toBe(app.routes.alpha);
   expect(app.cleanups).toEqual({ layout: 0, alpha: 0, beta: 1 });
 });
@@ -227,7 +227,7 @@ it('defers live parent updates until activation, then reconnects prepared inheri
   const navigation = app.router.navigate(app.routes.beta.locate({ id: 'bob' }));
   await navigation.committed;
   expect((parent!.renderArgs.params.reactiveProxyObject as { id: string }).id).toBe('alice');
-  expect(app.frame.textContent).toBe('layout alicealpha alice');
+  expect(app.outlet.textContent).toBe('layout alicealpha alice');
   expect(document.title).toBe('alpha alice');
   gate.resolve();
   await navigation.finished;
@@ -235,13 +235,13 @@ it('defers live parent updates until activation, then reconnects prepared inheri
   expect(app.rendered.layout).toBe(parent);
   expect(app.initialParams.beta).toBe('bob');
   expect(app.rendered.beta!.renderArgs.params.parent).toBe(parent!.renderArgs.params);
-  expect(app.frame.textContent).toBe('layout bobbeta bob');
+  expect(app.outlet.textContent).toBe('layout bobbeta bob');
   expect(document.title).toBe('beta bob');
   const beta = app.rendered.beta;
   await app.router.navigate(app.routes.beta.locate({ id: 'carol' })).finished;
   flush();
   expect(app.rendered.beta).toBe(beta);
-  expect(app.frame.textContent).toBe('layout carolbeta carol');
+  expect(app.outlet.textContent).toBe('layout carolbeta carol');
   expect(document.title).toBe('beta carol');
   expect(app.cleanups).toEqual({ layout: 0, alpha: 0, beta: 0 });
 });
@@ -264,7 +264,7 @@ it('preserves structurally equal parameter values when reusing a page', async ()
       };
     },
   });
-  installRootFrame();
+  installRootOutlet();
   await router.init();
   flush();
   expect(params.payload).toBe(original);
@@ -292,13 +292,13 @@ it('transfers ownership before fetch-abort callbacks can supersede activation', 
   const beta = app.rendered.beta;
   expect(app.initialParams.beta).toBe('bob');
   expect(app.cleanups).toEqual({ layout: 0, alpha: 0, beta: 0 });
-  expect(app.frame.textContent).toBe('layout carolbeta carol');
+  expect(app.outlet.textContent).toBe('layout carolbeta carol');
   expect(app.router.currentLocator()?.values).toEqual({ id: 'carol' });
   expect(document.title).toBe('beta carol');
   await app.engine.back().finished;
   flush();
   expect(app.rendered.beta).toBe(beta);
-  expect(app.frame.textContent).toBe('layout bobbeta bob');
+  expect(app.outlet.textContent).toBe('layout bobbeta bob');
   expect(document.title).toBe('beta bob');
   expect(app.cleanups).toEqual({ layout: 0, alpha: 0, beta: 0 });
 });

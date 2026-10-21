@@ -10,7 +10,7 @@ Open http://localhost:3000 in a browser with the Navigation API.
 
 - Components import `Link` from `@kinetic-router/solid/link.js`; the Router created
   in `src/routing.ts` supplies navigation and defaults automatically.
-- App-level module updates reload the page so the Router and root Frame are
+- App-level module updates reload the page so the Router and root Outlet are
   recreated together, rather than leaving cached pages in a replaced outlet.
 - Prefetch is enabled in `src/routing.ts`: hover/focus wait 75 ms, primary press
   starts immediately, and data-saving preferences are respected.
