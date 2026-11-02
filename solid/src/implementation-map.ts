@@ -1,7 +1,7 @@
 import { ImplementationMap } from "@kinetic-router/definition/implementation-map.js";
 import { Page, StaticPage } from "./page.js";
 import { Route } from "@kinetic-router/definition/routes.js";
-import { AnyParamDefs, ParamDef, ParamValues } from "@kinetic-router/definition/params.js";
+import { AnyParamDefs, ParamValues } from "@kinetic-router/definition/params.js";
 
 export class SolidImplementationMap<
   out ExtraStaticData extends object = {},
@@ -9,19 +9,17 @@ export class SolidImplementationMap<
 > extends ImplementationMap<Page<ExtraOutput, any, any>, StaticPage<any> & ExtraStaticData> {
   public override checkStaticPartOfImpl(route: Route, staticImpl: StaticPage<any> & ExtraStaticData): void {
 
-    // check if untrackedKeys is used correctly
-    const isParamDefUntracked = new Map<ParamDef<any>, boolean>();
-
-    for (const [key, pd] of Object.entries(route.paramDefs as AnyParamDefs)) {
-      isParamDefUntracked.set(pd, staticImpl.untrackedKeys.includes(key))
-    }
-    
-    for (const ancestorRoute of route.nestedInRoutes) {
-      for (const [key, pd] of Object.entries(route.paramDefs as AnyParamDefs)) {
-        const routeUntracked = isParamDefUntracked.get(pd)!;
-        const ancestorUntracked = this.getStaticPartOfImplementation(ancestorRoute)!.untrackedKeys.includes(key);
-        if (routeUntracked !== ancestorUntracked) {
-          throw new Error(`Route defines ${key} as ${routeUntracked ? 'untracked' : 'reactive'}, but ancestor route defines it as ${ancestorUntracked ? 'untracked' : 'reactive'}`);
+    // Inherited values are shared by definition identity, not by local key.
+    for (const ancestor of route.nestedInRoutes) {
+      const ancestorImpl = this.getStaticPartOfImplementation(ancestor);
+      for (const [ancestorKey, ancestorDef] of Object.entries(ancestor.paramDefs as AnyParamDefs)) {
+        for (const [key, definition] of Object.entries(route.paramDefs as AnyParamDefs)) {
+          if (definition !== ancestorDef) continue;
+          const routeUntracked = staticImpl.untrackedKeys.includes(key);
+          const ancestorUntracked = ancestorImpl.untrackedKeys.includes(ancestorKey);
+          if (routeUntracked !== ancestorUntracked) {
+            throw new Error(`Route defines ${key} as ${routeUntracked ? 'untracked' : 'reactive'}, but ancestor route defines it as ${ancestorUntracked ? 'untracked' : 'reactive'}`);
+          }
         }
       }
     }

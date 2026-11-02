@@ -2,7 +2,9 @@ import type { JSX } from "@solidjs/web";
 
 /** Reactive lifecycle accessors, not an automatic resource/freshness policy.
  * Backstage output can fetch while invisible and unfocused. Gate autofocus,
- * analytics, and other activation-only effects on visibility or page focus. */
+ * analytics, and other activation-only effects on visibility or page focus.
+ * In dumb SSR, fetching lasts only for the one-shot render; visibility, focus
+ * and animation are always false. See dumb-ssr.ts for the server contract. */
 export type PageStatus = {
   /** True while preparing, visible, or requested by a preparation consumer.
    * Unrequested retained pages stop fetching; disposal ends every request. */
@@ -26,6 +28,7 @@ export type PageStatus = {
 
 /** Available before the async factory runs. `signal` cancels construction only;
  * use pageStatus.fetchSignal() for resources that can resume after retention.
+ * Dumb SSR uses a single render lifetime for both signals.
  * Register Solid cleanup synchronously, before awaiting application work.
  * Arbitrary promises/fetches are not automatically cancelled: pass the signal
  * to signal-aware loaders and handle their aborts. */

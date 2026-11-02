@@ -14,9 +14,13 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [{ name: 'chromium', use: devices['Desktop Chrome'] }],
-  webServer: {
+  webServer: [{
     command: 'pnpm exec vite preview --host 127.0.0.1 --port 4173 --strictPort',
     cwd: fileURLToPath(new URL('.', import.meta.url)),
     url: baseURL,
-  },
+  }, {
+    command: 'node ssr-server.mjs',
+    cwd: fileURLToPath(new URL('.', import.meta.url)),
+    url: 'http://127.0.0.1:4174/go/home',
+  }],
 });

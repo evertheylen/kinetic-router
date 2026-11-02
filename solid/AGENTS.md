@@ -5,6 +5,10 @@ Public API contracts belong beside the exported types in `src/link.ts`,
 Check `src/link.test.ts` and `../integration-tests/tests/link.e2e.ts` before
 changing interaction semantics.
 
+- Dumb SSR contracts: `src/dumb-ssr.ts` and `docs/dumb-ssr.md`. Keep Router
+  client-only and the scoped context independent of the server entry. Use the
+  separate Node/server Vitest project; happy-dom cannot prove server safety.
+  Never introduce hydration, global server Routers, or a replacement scheduler.
 - Run caller Link handlers before internal actions and honor `preventDefault()`.
   Modified clicks, other targets, and downloads must retain native behavior.
 - Keep hover, keyboard/assistive focus, and press interests independent. A normal

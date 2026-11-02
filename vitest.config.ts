@@ -6,6 +6,7 @@ export default defineConfig({
       'definition',
       'url',
       'solid',
+      'solid/vitest.server.config.ts',
     ],
   },
 })

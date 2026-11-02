@@ -1,10 +1,12 @@
 import { isEqual } from '@dovetail-js/utils/equal.js';
 import { Route, type Locator, type RouteTarget } from '@kinetic-router/definition/routes.js';
 import type { AnyParamDefs } from '@kinetic-router/definition/params.js';
-import { createComponent, createMemo, createRenderEffect, createSignal, merge, omit, onCleanup, untrack } from 'solid-js';
-import { dynamic, type JSX } from '@solidjs/web';
+import { createComponent, createMemo, createRenderEffect, createSignal, getOwner, merge, omit, onCleanup, untrack, useContext } from 'solid-js';
+import { dynamic, isServer, type JSX } from '@solidjs/web';
 import type { Router, NavigationMode } from './router.js';
 import type { PreparationLease } from './preparation-registry.js';
+import { locatorToUrl } from '@kinetic-router/url';
+import { DumbSsrContext, withoutClientHandlers } from './dumb-ssr-context.js';
 
 export type LinkMode = NavigationMode;
 /** Speculative interaction settings. Delays are finite, nonnegative milliseconds;
@@ -42,8 +44,18 @@ let activeLink: Link | undefined;
 /** A real anchor with reactive URL, children, attributes, refs, and Solid handlers.
  * Caller handlers run first and can prevent internal actions; modified clicks,
  * downloads, and other targets keep native behavior. The active Router is
- * captured once on mount; existing Links never switch to a replacement Router. */
+ * captured once on mount; existing Links never switch to a replacement Router.
+ * Dumb SSR emits native anchors only: no refs/handlers/prefetch; menu uses its
+ * declared destination rather than browser visit state. */
 export const Link: Link = props => {
+  const server = isServer && getOwner() ? useContext(DumbSsrContext) : null;
+  if (server) {
+    const target = props.route;
+    const locator = target instanceof Route ? { route: target, values: {} } : target;
+    return createComponent(Anchor, merge(withoutClientHandlers(omit(props, 'route', 'mode', 'prefetch', 'href')), {
+      href: locatorToUrl(server.sitemap, locator),
+    }));
+  }
   const implementation = activeLink;
   if (!implementation) throw new Error('Create a Router before rendering Link');
   return createComponent(implementation, props);
