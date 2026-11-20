@@ -66,6 +66,8 @@ test('the adapter can distinguish an invalid URL from a rendering failure', asyn
 
 test('replaces every SSR node once with fresh DOM, then loads client data; preserves document/head/root and native history', async ({ page }) => {
   const bootstrap = await pauseBootstrap(page);
+  const nextLink = page.getByRole('link', { name: 'Next' });
+  await expect(nextLink).toHaveAttribute('href', '/go/next');
   const api = Promise.withResolvers<void>();
   await page.route('**/api/public/**', async route => { await api.promise; await route.continue(); });
   await page.evaluate(() => {
@@ -96,7 +98,8 @@ test('replaces every SSR node once with fresh DOM, then loads client data; prese
   await expect(page.getByRole('heading')).toHaveText('Client home');
   await expect(page).toHaveTitle('Client home <&>');
   await expect(page.getByLabel('Notes')).toBeEnabled();
-  await page.getByRole('link', { name: 'Next' }).click();
+  await expect(nextLink).toHaveAttribute('href', '/go/next');
+  await nextLink.click();
   await expect(page.getByRole('heading')).toHaveText('Client next');
   await page.goBack();
   await expect(page.getByRole('heading')).toHaveText('Client home');

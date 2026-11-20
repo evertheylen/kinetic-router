@@ -46,6 +46,7 @@ export class NavigationApiEngine implements NavigationEngine {
       }
 
       // the listener runs pre-commit: the outgoing entry is still current
+      if (handlers.shouldIntercept?.(event.destination) === false) return;
       const presentation = handlers.handleBeforeCommit?.({
         navigationType: event.navigationType, destination: event.destination, info,
       });

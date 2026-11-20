@@ -1,10 +1,10 @@
-import type { RootSitemap } from '@kinetic-router/definition/root.js';
+import type { Locator } from '@kinetic-router/definition/routes.js';
 import { createContext, omit } from 'solid-js';
 import type { JSX } from '@solidjs/web';
 
 /** @internal Request-local routing only; never a browser Router. */
 export const DumbSsrContext = createContext<{
-  sitemap: RootSitemap,
+  toUrl(locator: Locator<any>): string,
   renderOutlet: () => JSX.Element,
 } | null>(null);
 

@@ -139,6 +139,23 @@ it('composes lazy nested pages, app/leaf outlets, live metadata, aliases and par
   expect(contexts.every(context => context.signal.aborted)).toBe(true);
 });
 
+it('matches and renders Links under the same base path', async () => {
+  const settings = route({ tab: param.search<string>() });
+  const sitemap = root({ settings });
+  const pages = new SolidImplementationMap(sitemap);
+  pages.implement(settings, { untrackedKeys: [], async render() {
+    return ({ tab }) => ({
+      html: createComponent(Link, { route: settings.locate({ tab: 'next tab' }), children: tab }),
+      title: 'Settings',
+    });
+  } });
+  const options = { sitemap, pages, basePath: '/tools/app/' };
+  const result = await renderDumbSsr({ ...options, url: url('/tools/app/settings?tab=current#details') });
+  expect(result.html).toBe('<a href="/tools/app/settings?tab=next+tab">current</a>');
+  await expect(renderDumbSsr({ ...options, url: url('/tools/application/settings?tab=current') }))
+    .rejects.toBeInstanceOf(DumbSsrUrlError);
+});
+
 it('rejects missing registrations, unmatched/invalid URLs and absent required URL values before factories', async () => {
   const f = fixture();
   await expect(renderDumbSsr({ ...f, url: url('/missing') })).rejects.toBeInstanceOf(DumbSsrUrlError);

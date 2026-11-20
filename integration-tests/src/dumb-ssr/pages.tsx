@@ -7,7 +7,8 @@ import type { PagePreparationContext } from '@kinetic-router/solid/page.js';
 import { onCleanup } from 'solid-js';
 
 export const home = route({}), next = route({});
-export const sitemap = root({ go: { home, next } });
+export const basePath = '/go';
+export const sitemap = root({ home, next });
 export type Metadata = { description: string };
 
 // The same registration function works with a browser Router or server map.

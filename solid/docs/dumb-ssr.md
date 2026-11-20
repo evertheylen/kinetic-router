@@ -36,7 +36,11 @@ const { html, title, description } = await renderDumbSsr({
 Keep a shared map's registrations unchanged while requests are running.
 
 The explicit URL is matched using the normal sitemap, aliases and parameter
-defaults. The result is the complete app markup plus the **leaf page's** title
+defaults. If the app is mounted under a prefix, pass the same `basePath` (e.g.
+`'/tools/app'`) to `renderDumbSsr` and the browser `Router`. SSR Links then include
+that prefix. Configure the host to serve direct visits under the mount as well.
+
+The result is the complete app markup plus the **leaf page's** title
 and application-defined `ExtraOutput`. If `app` is omitted, the matched page
 stack renders directly. Otherwise `app` must contain a root `Outlet`; each
 matched layout must supply its child `Outlet`. Leaf outlets are empty. Missing

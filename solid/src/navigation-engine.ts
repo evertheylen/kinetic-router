@@ -23,10 +23,10 @@ export type NavigationInfo = {
 /** A structural view on a history entry, just enough for the router to
  * reconstruct an AppState from the best available source of information.
  * Both NavigationHistoryEntry and NavigationDestination satisfy this shape.
- * `url` is a URL string (absolute or document-relative) or parsed path+search. */
+ * `url` is a URL string (absolute or document-relative) or its parsed components. */
 export type EntrySource = {
   readonly id?: string | null,
-  readonly url?: { pathname: string, search: string } | string | null,
+  readonly url?: { pathname: string, search: string, hash?: string } | string | null,
   getState?(): unknown,
 };
 
@@ -74,6 +74,11 @@ export type EngineNavigateEvent = {
 export type EngineBeforeCommit = Pick<EngineNavigateEvent, 'navigationType' | 'destination' | 'info'>;
 
 export type EngineHandlers = {
+  /** Engines that can leave navigation to the host should consult this hook
+   * before intercepting a destination. False means leave it to the host without
+   * reporting a navigation to the router. `ignore` bypasses this hook. */
+  shouldIntercept?(destination: EntrySource): boolean,
+
   /** Render the destination. The returned promise resolves when rendering
    * is complete (used for navigation success/failure reporting). */
   handleNavigate(event: EngineNavigateEvent): Promise<void>,

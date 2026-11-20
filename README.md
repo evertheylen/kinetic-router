@@ -7,6 +7,7 @@ ordinary-looking links and render pages through `<Outlet>` components.
 ## What it offers
 
 - Typed sitemaps, aliases, and path, search, and hidden parameters.
+- Mount the same sitemap at `/` or a subpath with `new Router(sitemap, { basePath: '/tools/app' })`.
 - Async and lazy-loaded pages, nested layouts, and inherited parameters.
 - `<Link>` and programmatic navigation, with push, replace, and menu/resume modes.
 - Cached page instances that preserve DOM state across Back/Forward navigation.

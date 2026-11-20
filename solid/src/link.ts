@@ -5,7 +5,6 @@ import { createComponent, createMemo, createRenderEffect, createSignal, getOwner
 import { dynamic, isServer, type JSX } from '@solidjs/web';
 import type { Router, NavigationMode } from './router.js';
 import type { PreparationLease } from './preparation-registry.js';
-import { locatorToUrl } from '@kinetic-router/url';
 import { DumbSsrContext, withoutClientHandlers } from './dumb-ssr-context.js';
 
 export type LinkMode = NavigationMode;
@@ -53,7 +52,7 @@ export const Link: Link = props => {
     const target = props.route;
     const locator = target instanceof Route ? { route: target, values: {} } : target;
     return createComponent(Anchor, merge(withoutClientHandlers(omit(props, 'route', 'mode', 'prefetch', 'href')), {
-      href: locatorToUrl(server.sitemap, locator),
+      href: server.toUrl(locator),
     }));
   }
   const implementation = activeLink;

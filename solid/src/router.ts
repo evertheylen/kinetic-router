@@ -1,7 +1,6 @@
 import { RootSitemap } from "@kinetic-router/definition/root.js";
 import { SolidImplementationMap } from "./implementation-map.js";
 import { ActualRouter, type DestinationSnapshot, type NavigateOptions, type NavigationMode } from "./actual-router.js";
-import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator, resolveAliases } from "@kinetic-router/definition/routes.js";
 import type { AnyParamDefs } from "@kinetic-router/definition/params.js";
 import { Accessor, createSignal, getOwner, onCleanup, Setter } from "solid-js";
@@ -10,6 +9,7 @@ import { NavigationApiEngine } from "./navigation-api-engine.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
 import { PreparationRegistry, type PrefetchCacheOptions } from './preparation-registry.js';
 import { registerLink, type Prefetch } from './link.js';
+import { createRouteUrls } from './route-urls.js';
 
 export type { DestinationSnapshot, NavigateOptions, NavigationMode } from './actual-router.js';
 export type { PrefetchCacheOptions } from './preparation-registry.js';
@@ -50,8 +50,17 @@ export class Router<
   protected didInit: Accessor<boolean>;
   protected setDidInit: Setter<boolean>;
   protected disposed = false;
+  private readonly urls: ReturnType<typeof createRouteUrls>;
 
   constructor(sitemap: RootSitemap, options?: {
+    /** Mount the unchanged sitemap at an absolute URL pathname (e.g. `/tools/app`).
+     * Use a URL-encoded path without an origin, query, fragment, or dot segments.
+     * Trailing slashes are ignored; omit, `''`, or `'/'` to mount at the site root.
+     * Both `/tools/app` and `/tools/app/` match the sitemap index; generated index
+     * URLs end in `/`. Mounted URL rewrites and menu links retain fragments and
+     * unrelated query parameters; the locator controls declared search values.
+     * The browser engine leaves URLs outside the mount to the browser. */
+    basePath?: string,
     /** The history layer to use. Defaults to the browser's Navigation API.
      * Tests can use MemoryEngine; other integrations can supply their own. */
     engine?: NavigationEngine,
@@ -68,6 +77,7 @@ export class Router<
     /** Speculative loading is disabled unless enabled here or on a Link. */
     prefetch?: Prefetch,
   }) {
+    this.urls = createRouteUrls(sitemap, options?.basePath);
     const rrCache = new RenderedRouteCache(options?.maxCachedPages);
     const preparations = new PreparationRegistry(options?.prefetchCache);
     this.sitemap = sitemap;
@@ -94,7 +104,7 @@ export class Router<
       try {
         this.implMap.check();
         const engine = options?.engine ?? new NavigationApiEngine();
-        const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache, preparations);
+        const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache, preparations, this.urls);
         this.actualRouter = router;
         const initialization = router.init();
         // The engine is attached; navigation need not wait for the first page's
@@ -151,13 +161,17 @@ export class Router<
     return this.actualRouter!.activateDestination(snapshot, info);
   }
 
+  /** Generate a root-relative URL with the configured basePath and serialized
+   * search params. Throws if browser URL normalization would leave the mount.
+   * Usable before initialization; append `#id` for a native anchor. */
   toUrl(locator: Locator<any>) {
-    // Also usable before asynchronous init (e.g. for an initial anchor href).
-    return locatorToUrl(this.sitemap, locator);
+    return this.urls.toUrl(locator);
   }
 
+  /** Match the pathname and search params. Throws for an unmatched URL,
+   * including URLs outside the configured basePath. Fragments are not route inputs. */
   toLocator(url: URL) {
-    return urlToLocator(this.sitemap, url);
+    return this.urls.toLocator(url);
   }
 
   currentLocator() {

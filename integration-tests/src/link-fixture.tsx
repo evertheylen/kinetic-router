@@ -19,8 +19,9 @@ export function mountLinks(element: HTMLElement) {
   const draftTokens: (number | undefined)[] = [];
   let aliasTarget = a;
   const alias = route({}).aliasTo(() => aliasTarget.locate({}));
-  const sitemap = root({ 'link-test': { home, a: { [index]: a, detail }, b, results, draft } });
+  const sitemap = root({ home, a: { [index]: a, detail }, b, results, draft });
   const router = new Router(sitemap, {
+    basePath: '/link-test',
     prefetch: query.has('press') ? { hover: false, focus: false } : true,
     prefetchCache: { maxEntries: 0 },
     maxCachedPages: query.has('zero-cache') ? 0 : undefined,
@@ -55,7 +56,7 @@ export function mountLinks(element: HTMLElement) {
   router.implement(results, {
     untrackedKeys: [],
     async render() {
-      return params => ({ title: 'results', html: <section><h1>Results</h1><output data-testid="default-query">{params.q}</output></section> });
+      return params => ({ title: 'results', html: <section><h1 id="results">Results</h1><output data-testid="default-query">{params.q}</output></section> });
     },
   });
   router.implement(draft, {
@@ -92,6 +93,8 @@ export function mountLinks(element: HTMLElement) {
       <Link data-testid="default-new-tab" route={results} target="_blank">Default query in new tab</Link>
       <a data-testid="default-plain" href={router.toUrl(results.locate({}))}>Plain default query</a>
       <a data-testid="draft-plain" href={router.toUrl(draft.locate({ token: 0 }))}>New draft</a>
+      <a data-testid="results-fragment" href={router.toUrl(results.locate({ q: 'plain link' })) + '#results'}>Results section</a>
+      <a data-testid="outside-mount" href="/link-testing/home">Leave the app</a>
     </nav>
     <button onClick={() => gate.resolve()}>Release renders</button>
     <button onClick={() => setVisible(false)}>Unmount primary</button>

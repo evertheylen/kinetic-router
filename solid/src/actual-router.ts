@@ -3,7 +3,7 @@ import { isEqual } from "@dovetail-js/utils/equal.js";
 import { getSlugPath, isSlugPathPrefix, RootSitemap, slugLookup, slugPathToString } from "@kinetic-router/definition/root.js";
 import { AnyParamDefs, convertParamsByDefinition, convertParamsByKey } from "@kinetic-router/definition/params.js";
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
-import { locatorToUrl, serializePathParams, SerializedPathParams, urlToLocator } from "@kinetic-router/url";
+import { serializePathParams, SerializedPathParams } from "@kinetic-router/url";
 
 import { Page } from "./page.js";
 import { AppState, SerializedAppState } from "./app-state.js";
@@ -19,6 +19,11 @@ import type { TransientHandle } from './router.js';
 import { Backstage } from './backstage.js';
 import { PreparationRegistry, type PreparationLease } from './preparation-registry.js';
 import { NavigationTransition, type NavigationTransitionOptions } from './navigation-transition.js';
+import { createRouteUrls } from './route-urls.js';
+
+function parseEntryUrl(url: EntrySource['url']) {
+  return typeof url === 'string' ? new URL(url, window.location.href) : url ?? undefined;
+}
 
 /** push (default) adds an entry, or replaces a transient-marked current entry;
  * replace replaces the current entry.
@@ -84,6 +89,7 @@ export class ActualRouter<
 
   readonly rrCache: RenderedRouteCache;
 
+  protected readonly urls: ReturnType<typeof createRouteUrls>;
   protected readonly preparations: PreparationRegistry;
   protected readonly implLoads = new Map<Route<any>, Promise<Page<ExtraOutput, any, any>>>();
   protected readonly preparationHandoffs = new WeakMap<NavigationInfo, PreparationLease>();
@@ -118,12 +124,14 @@ export class ActualRouter<
     engine: NavigationEngine,
     rrCache = new RenderedRouteCache(),
     preparations = new PreparationRegistry(),
+    urls = createRouteUrls(sitemap),
   ) {
     this.sitemap = sitemap;
     this.implMap = implMap;
     this.engine = engine;
     this.rrCache = rrCache;
     this.preparations = preparations;
+    this.urls = urls;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
     [this.navigationVersion, this.setNavigationVersion] = createSignal(0);
@@ -150,6 +158,10 @@ export class ActualRouter<
 
     // setup after initial navigation stuff to avoid weird unwanted behaviour
     this.detachEngine = this.engine.attach({
+      shouldIntercept: this.urls.basePath ? destination => {
+        const url = parseEntryUrl(destination.url);
+        return url !== undefined && this.urls.contains(url.pathname);
+      } : undefined,
       handleNavigate: (event) => {
         const rendering = this.handleNavigateEvent(event);
         // Engine-initiated navigation can be fire-and-forget too.
@@ -174,19 +186,14 @@ export class ActualRouter<
   }
 
   protected async initializeEntry() {
-    const state = this.getState(this.engine.currentEntry()!)!;
-    
-    const newLocator: Locator<any> = {
-      route: state.route, values: convertParamsByKey(state.paramsByDefinition, state.route.paramDefs)
-    };
+    const entry = this.engine.currentEntry()!;
+    const state = this.getState(entry)!;
+    const newUrl = this.urls.toUrl(state.locator, parseEntryUrl(entry.url));
 
-    const newUrl = this.resolveDestination(newLocator, 'replace').url;
-    const serializedState = state.serialize(this.sitemap);
-
-    if (this.engine.currentEntry()?.url !== newUrl) {
+    if (entry.url !== newUrl) {
       const res = this.engine.navigate({
         // set ignore=true to avoid weird behaviour not aligned with "first load"
-        url: newUrl, state: serializedState, history: 'replace', info: { ignore: true }
+        url: newUrl, state: state.serialize(this.sitemap), history: 'replace', info: { ignore: true }
       });
       const committedEntry = await res.committed;
 
@@ -229,7 +236,7 @@ export class ActualRouter<
       const url = predecessor.url;
       if (!url) throw new Error('Current entry has no URL');
       const opening = record.opening = this.engine.navigate({
-        url: typeof url === 'string' ? url : url.pathname + url.search,
+        url: typeof url === 'string' ? url : url.pathname + url.search + (url.hash ?? ''),
         state: { ...state, $transient: true }, history: 'push', info,
       });
       const releasePending = () => {
@@ -318,8 +325,8 @@ export class ActualRouter<
     ) };
     const resolved = resolveAliases(target);
     const root = { route: resolved.route, values: { ...resolved.values } };
-    const snapshot = (locator: Locator<any>, operation: DestinationOperation): DestinationSnapshot => ({
-      target, mode, locator, url: locatorToUrl(this.sitemap, locator), operation,
+    const snapshot = (locator: Locator<any>, operation: DestinationOperation, entry?: EngineEntry): DestinationSnapshot => ({
+      target, mode, locator, url: this.urls.toUrl(locator, parseEntryUrl(entry?.url)), operation,
     });
     const push = this.isTransientEntry(this.engine.currentEntry()) ? 'replace' : 'push';
     if (mode !== 'menu') return snapshot(root, { type: mode === 'push' ? push : mode });
@@ -336,10 +343,10 @@ export class ActualRouter<
     const currentLocator = current && this.entryLocator(current, true);
     const entries = this.engine.entries();
     const traverse = (entry: EngineEntry, locator: Locator<any>) =>
-      snapshot(locator, { type: 'traverse', id: entry.id, key: entry.key });
+      snapshot(locator, { type: 'traverse', id: entry.id, key: entry.key }, entry);
 
     if (current && currentLocator && matchesRootInstance(currentLocator)) {
-      if (currentLocator.route === root.route) return snapshot(currentLocator, { type: 'no-op' });
+      if (currentLocator.route === root.route) return snapshot(currentLocator, { type: 'no-op' }, current);
       // Nearest preceding root, never a later/forward root or a layout parent.
       for (const entry of entries.toReversed()) {
         if (entry.index >= current.index) continue;
@@ -565,33 +572,22 @@ export class ActualRouter<
     return rendering;
   }
 
-    /** Make an AppState based on the best source of information */
-    protected getState(entry: EntrySource) {
-      if (entry.getState !== undefined) {
-        const rawState = entry.getState();
-        // null happens for entries created without state (e.g. native link
-        // clicks); treat it like a missing state and fall back to the URL
-        if (rawState !== undefined && rawState !== null) {
-          const state = AppState.deserialize(this.sitemap, rawState as SerializedAppState);
-          // Serialized state can still carry a temporary or replaced entry id.
-          if (entry.id) state.id = entry.id;
-          if (state.route instanceof Alias) {
-            const resolved = AppState.fromLocator(resolveAliases(state.locator), state.id);
-            resolved.scrollTops = state.scrollTops;
-            resolved.transient = state.transient;
-            return resolved;
-          }
-          return state;
-        }
-      }
+  protected getState(entry: EntrySource) {
+    const url = parseEntryUrl(entry.url);
+    const rawState = entry.getState?.();
+    // Native links can leave null state; fall back to matching the URL.
+    if (rawState == null) return url && AppState.fromLocator(this.urls.toLocator(url), entry.id ?? undefined);
 
-      if (entry.url) {
-        return AppState.fromLocator(
-          urlToLocator(this.sitemap, typeof entry.url === 'string' ? new URL(entry.url, window.location.href) : entry.url),
-          entry.id ?? undefined
-        );
-      }
-    }
+    if (url) this.urls.assertInBasePath(url.pathname);
+    const state = AppState.deserialize(this.sitemap, rawState as SerializedAppState);
+    // Serialized state can still carry a temporary or replaced entry id.
+    if (entry.id) state.id = entry.id;
+    if (!(state.route instanceof Alias)) return state;
+    const resolved = AppState.fromLocator(resolveAliases(state.locator), state.id);
+    resolved.scrollTops = state.scrollTops;
+    resolved.transient = state.transient;
+    return resolved;
+  }
 
     protected captureScrollPositions(): Map<string, number> {
       return new Map([['window', window.scrollY]]);

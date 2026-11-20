@@ -1,11 +1,11 @@
 import { HiddenParamDef, convertParamsByDefinition, convertParamsByKey, type AnyParamDefs } from '@kinetic-router/definition/params.js';
 import type { RootSitemap } from '@kinetic-router/definition/root.js';
-import { urlToLocator } from '@kinetic-router/url';
 import { renderToStream, ssr, type JSX } from '@solidjs/web';
 import { createComponent, createMemo, createRoot, getOwner, NoHydration, onCleanup, runWithOwner } from 'solid-js';
 import { DumbSsrContext } from './dumb-ssr-context.js';
 import type { SolidImplementationMap } from './implementation-map.js';
 import type { PageStatus } from './page.js';
+import { createRouteUrls } from './route-urls.js';
 
 /** Matching/deserialization or missing required URL inputs, before page execution.
  * Adapters may distinguish this from implementation/render failures; HTTP status,
@@ -18,6 +18,8 @@ export type DumbSsrOptions<ExtraStaticData extends object = {}, ExtraOutput exte
   sitemap: RootSitemap,
   pages: SolidImplementationMap<ExtraStaticData, ExtraOutput>,
   url: URL,
+  /** Use the same path as the browser Router's `basePath` for matching and Links. */
+  basePath?: string,
   /** Optional app shell containing a root Outlet. Omit to render the page stack. */
   app?: () => JSX.Element,
   signal?: AbortSignal,
@@ -38,13 +40,14 @@ export type DumbSsrOptions<ExtraStaticData extends object = {}, ExtraOutput exte
  * the HTTP document. Browsers must render fresh DOM, replacing the app root's old
  * children with Solid render's third argument; see ../docs/dumb-ssr.md. */
 export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput extends object>({
-  sitemap, pages, url, app, signal,
+  sitemap, pages, url, basePath, app, signal,
 }: DumbSsrOptions<ExtraStaticData, ExtraOutput>): Promise<{ html: string, title: string } & ExtraOutput> {
   signal?.throwIfAborted();
   pages.check();
+  const { toLocator, toUrl } = createRouteUrls(sitemap, basePath);
   let locator;
   try {
-    locator = urlToLocator(sitemap, url);
+    locator = toLocator(url);
     for (const [key, definition] of Object.entries(locator.route.paramDefs as AnyParamDefs)) {
       if (!(definition instanceof HiddenParamDef) && !definition.makeDefault && locator.values[key] === undefined) {
         throw new Error(`Missing required URL parameter: ${key}`);
@@ -68,7 +71,7 @@ export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput 
     if (index === routes.length) return undefined;
     const route = routes[index];
     return createComponent(DumbSsrContext, {
-      value: { sitemap, renderOutlet: () => renderPage(index + 1) },
+      value: { toUrl, renderOutlet: () => renderPage(index + 1) },
       get children() {
         controller.signal.throwIfAborted();
         const instance = instanceCount++;
@@ -135,7 +138,7 @@ export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput 
         const stream = renderToStream(() => createComponent(NoHydration, {
           get children() {
             return createComponent(DumbSsrContext, {
-              value: { sitemap, renderOutlet: () => renderPage(0) },
+              value: { toUrl, renderOutlet: () => renderPage(0) },
               get children() { return app ? app() : renderPage(0); },
             });
           },

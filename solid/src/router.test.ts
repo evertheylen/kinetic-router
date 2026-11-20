@@ -8,6 +8,7 @@ import { index, param, route, root } from '@kinetic-router/definition';
 import { createSignal, onCleanup, useContext } from 'solid-js';
 
 import { Router } from './router.js';
+import { AppState } from './app-state.js';
 import { MemoryEngine, type MemoryEntry } from './memory-engine.js';
 import { OutletDelegate, outletDelegateAttribute, rootOutletId } from './outlet.js';
 import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
@@ -142,6 +143,122 @@ function createNestedApp(
   const ready = vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
   return { router, engine, routes, outlet, counters, cleanups, rendered, contexts, ready };
 }
+
+describe('Router basePath', () => {
+  const page = { untrackedKeys: [] as const, async render() {
+    return () => ({ html: document.createElement('section'), title: 'page' });
+  } };
+
+  it('matches both mount root spellings and preserves the query and fragment during initialization and traversal', async () => {
+    const home = route({}), settings = route({ tab: param.search<string>() });
+    const sitemap = root({ [index]: home, settings });
+    const engine = new MemoryEngine('/tools/app?source=email#top');
+    const router = new Router(sitemap, { engine, basePath: '/tools/app/' });
+    routers.push(router);
+    router.implement(home, page);
+    router.implement(settings, page);
+    installRootOutlet();
+    const url = (path: string) => new URL(path, 'https://example.test');
+    for (const path of ['/tools/app', '/tools/app/']) {
+      expect(router.toLocator(url(path)).route).toBe(home);
+    }
+    for (const path of ['/tools/application/settings', '/settings', '/tools/app%2Fsettings']) {
+      expect(() => router.toLocator(url(path))).toThrow('outside basePath');
+    }
+    const target = settings.locate({ tab: 'some value' });
+    expect(router.toUrl(home.locate({}))).toBe('/tools/app/');
+    expect(router.resolveDestination(target).url).toBe('/tools/app/settings?tab=some+value');
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
+    expect(engine.entries()[0].url).toBe('/tools/app/?source=email#top');
+
+    const transient = router.pushTransient(() => {});
+    await transient.finished;
+    expect(engine.entries()[1].url).toBe('/tools/app/?source=email#top');
+    await transient.close().finished;
+    await router.navigate(target).finished;
+    expect(engine.entries()[1].url).toBe('/tools/app/settings?tab=some+value');
+    expect(engine.currentEntry().getState?.()).toMatchObject({ slugs: ['settings'] });
+    expect(router.currentLocator()?.values).toEqual({ tab: 'some value' });
+    const homeVisit = router.resolveDestination(home.locate({}), 'menu');
+    expect(homeVisit.url).toBe('/tools/app/?source=email#top');
+    await router.activateDestination(homeVisit).finished;
+    expect(router.currentLocator()?.route).toBe(home);
+  });
+
+  it.each(['alias', 'saved state'] as const)('keeps unrelated query values but uses search params from the resolved %s', async source => {
+    let defaultTab = 'summary';
+    const home = route({}), settings = route({ tab: param.search<string>().withDefault(() => defaultTab) });
+    const legacy = route({}).aliasTo(() => settings.locate({}));
+    const sitemap = root({ home, settings, legacy });
+    const path = source === 'alias' ? 'legacy' : 'settings';
+    const engine = new MemoryEngine(`/tools/app/${path}?tab=stale&source=email&source=campaign#details`);
+    if (source === 'saved state') {
+      engine.updateCurrentEntry(AppState.fromLocator(settings.locate({})).serialize(sitemap));
+    }
+    const router = new Router(sitemap, { engine, basePath: '/tools/app' });
+    routers.push(router);
+    router.implement(home, page);
+    router.implement(settings, page);
+    installRootOutlet();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(settings));
+    expect(engine.entries()[0].url).toBe('/tools/app/settings?source=email&source=campaign#details');
+    await router.navigate(home.locate({})).finished;
+
+    defaultTab = 'activity';
+    const snapshot = router.resolveDestination(settings.locate({}), 'menu');
+    expect(snapshot.operation.type).toBe('traverse');
+    expect(snapshot.url).toBe('/tools/app/settings?source=email&source=campaign&tab=summary#details');
+    expect(router.toLocator(new URL(snapshot.url, 'https://example.test')).values).toEqual({ tab: 'summary' });
+    await router.activateDestination(snapshot).finished;
+    expect(router.currentLocator()?.values).toEqual({ tab: 'summary' });
+  });
+
+  it('rejects generated URLs that normalize outside the mount before touching history', async () => {
+    const id = param.path<string>();
+    const settings = route({ id });
+    const initialUrl = '/tools/app/team/settings';
+    const engine = new MemoryEngine(initialUrl);
+    const router = new Router(root({ [id.$]: { settings } }), { engine, basePath: '/tools/app' });
+    routers.push(router);
+    router.implement(settings, page);
+    installRootOutlet();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(settings));
+
+    for (const value of ['..', '%2E%2E', '../application']) {
+      const target = settings.locate({ id: value });
+      expect(() => router.toUrl(target)).toThrow('outside basePath');
+      expect(() => router.navigate(target)).toThrow('outside basePath');
+    }
+    expect(engine.entries().map(entry => entry.url)).toEqual([initialUrl]);
+    const valid = settings.locate({ id: 'id-..' });
+    expect(router.toUrl(valid)).toBe('/tools/app/id-../settings');
+    await router.navigate(valid).finished;
+    expect(router.currentLocator()?.values).toEqual({ id: 'id-..' });
+  });
+
+  it('rejects invalid mount paths', () => {
+    const sitemap = root({ home: route({}) });
+    for (const basePath of ['tools/app', '//tools/app', '/tools?x=1', '/tools#app', '/tools/..', '/\\tools']) {
+      expect(() => new Router(sitemap, { basePath })).toThrow(/basePath must be an absolute URL pathname/);
+    }
+  });
+
+  it.each([undefined, '', '/'])('keeps legacy URL normalization when basePath is %s', async basePath => {
+    const home = route({}), away = route({});
+    const url = '/home?source=email#top';
+    const engine = new MemoryEngine(url);
+    const router = new Router(root({ home, away }), { engine, basePath });
+    routers.push(router);
+    router.implement(home, page);
+    router.implement(away, page);
+    installRootOutlet();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
+    expect(engine.entries()[0].url).toBe('/home');
+    await engine.navigate({ url, history: 'push', state: undefined }).finished;
+    await router.navigate(away.locate({})).finished;
+    expect(router.resolveDestination(home.locate({}), 'menu').url).toBe('/home');
+  });
+});
 
 describe('Router on a MemoryEngine', () => {
   beforeEach(() => {

@@ -60,10 +60,10 @@ describe('MemoryEngine', () => {
     expect(mock.events[0].info).toBe(info);
   });
 
-  it('starts with a single entry for the initial url', () => {
-    const engine = new MemoryEngine('/home?q=1');
+  it('resolves a relative initial URL consistently in the listing and the current entry', () => {
+    const engine = new MemoryEngine('home?q=1');
 
-    expect(engine.entries()).toHaveLength(1);
+    expect(engine.entries().map(entry => entry.url)).toEqual(['/home?q=1']);
     expect(engine.currentIndex()).toBe(0);
 
     const current = engine.currentEntry();
@@ -112,7 +112,7 @@ describe('MemoryEngine', () => {
     const { engine, events } = attachedEngine('/');
     const initialId = engine.currentEntry().id!;
 
-    const res = engine.navigate({ url: '/a', state: { foo: 1 }, history: 'push' });
+    const res = engine.navigate({ url: 'a', state: { foo: 1 }, history: 'push' });
     const committed = await res.committed;
     await res.finished;
 

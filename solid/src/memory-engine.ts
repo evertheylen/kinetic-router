@@ -7,6 +7,16 @@ import {
   NavigationIntent,
 } from "./navigation-engine.js";
 
+const memoryOrigin = 'https://memory.invalid';
+
+function resolveMemoryUrl(url: string) {
+  const resolved = new URL(url, memoryOrigin);
+  // Keep local URLs root-relative, except when they would be read as a host.
+  return resolved.href.startsWith(memoryOrigin + '/') && !resolved.pathname.startsWith('//')
+    ? resolved.href.slice(memoryOrigin.length)
+    : resolved.href;
+}
+
 export type MemoryEntry = {
   readonly id: string,
   readonly key: string,
@@ -15,7 +25,8 @@ export type MemoryEntry = {
 };
 
 /** An in-memory history stack. Useful for headless testing and tooling; also
- * the reference implementation for NavigationEngine semantics. */
+ * the reference implementation for NavigationEngine semantics. Relative URLs
+ * resolve against a fixed root, not the host document. */
 export class MemoryEngine implements NavigationEngine {
   protected handlers: EngineHandlers | undefined;
   protected attachment: symbol | undefined;
@@ -26,7 +37,7 @@ export class MemoryEngine implements NavigationEngine {
 
   constructor(initialUrl: string = '/') {
     const id = this.mintId();
-    this.stack = [{ id, key: `key:${id}`, url: initialUrl, state: undefined }];
+    this.stack = [{ id, key: `key:${id}`, url: resolveMemoryUrl(initialUrl), state: undefined }];
   }
 
   /** The full history stack, for inspection in tests/tooling. */
@@ -70,7 +81,7 @@ export class MemoryEngine implements NavigationEngine {
     const id = this.mintId();
     const entry: MemoryEntry = {
       id, key: intent.history === 'replace' ? from.key : `key:${id}`,
-      url: intent.url, state: intent.state,
+      url: resolveMemoryUrl(intent.url), state: intent.state,
     };
 
     const info = intent.info ?? {};
@@ -176,14 +187,12 @@ export class MemoryEngine implements NavigationEngine {
   }
 
   protected toSource(entry: MemoryEntry): EngineEntry {
-    // urls are stored as given (usually relative); parse them against a
-    // dummy base so consumers get a uniform { pathname, search } shape
-    const parsed = new URL(entry.url, 'memory://app');
+    const { pathname, search, hash } = new URL(entry.url, memoryOrigin);
     return {
       id: entry.id,
       key: entry.key,
       index: this.stack.indexOf(entry),
-      url: { pathname: parsed.pathname, search: parsed.search },
+      url: { pathname, search, ...(hash ? { hash } : {}) },
       getState: () => entry.state,
     };
   }

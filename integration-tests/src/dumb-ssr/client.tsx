@@ -1,7 +1,7 @@
 import { render } from '@solidjs/web';
 import { onCleanup } from 'solid-js';
 import { Router } from '@kinetic-router/solid/router.js';
-import { App, registerPages, sitemap, type Metadata } from './pages.js';
+import { App, basePath, registerPages, sitemap, type Metadata } from './pages.js';
 
 const root = document.getElementById('root');
 const status = document.getElementById('bootstrap-status');
@@ -38,7 +38,7 @@ function start() {
   try {
     dispose = render(() => {
       onCleanup(() => disposedRoots++);
-      const router = new Router<{}, Metadata>(sitemap);
+      const router = new Router<{}, Metadata>(sitemap, { basePath });
       registerPages(router, {
         disposed: () => disposedPages++,
         async load(name, context) {
