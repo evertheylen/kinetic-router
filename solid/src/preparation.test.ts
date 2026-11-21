@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { param, root, route, type Locator, type Route } from '@kinetic-router/definition';
-import { createEffect, createOwner, flush, onCleanup, runWithOwner, useContext } from 'solid-js';
+import { createEffect, createRoot, flush, onCleanup, useContext } from 'solid-js';
 import { ActualRouter } from './actual-router.js';
 import { Router } from './router.js';
 import { SolidImplementationMap } from './implementation-map.js';
@@ -529,8 +529,10 @@ it('releases speculation immediately when the facade owning Solid root is dispos
     }
   }
   const home = route({}), slow = route({});
-  const owner = createOwner();
-  const router = runWithOwner(owner, () => new TestFacade(root({ home, slow }), { engine: new MemoryEngine('/home') }));
+  const { router, dispose } = createRoot(dispose => ({
+    router: new TestFacade(root({ home, slow }), { engine: new MemoryEngine('/home') }),
+    dispose,
+  }));
   const gate = Promise.withResolvers<void>();
   let context: PagePreparationContext | undefined;
   const cleanup = vi.fn();
@@ -552,7 +554,7 @@ it('releases speculation immediately when the facade owning Solid root is dispos
   const lease = router.prepare(slow.locate({}));
   await vi.waitFor(() => expect(context).toBeDefined());
   lease.release();
-  owner.dispose();
+  dispose();
   expect(context!.signal.aborted).toBe(true);
   expect(cleanup).toHaveBeenCalledOnce();
   gate.resolve();

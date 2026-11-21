@@ -59,6 +59,7 @@ export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput 
   const values = convertParamsByDefinition(locator.values, locator.route.paramDefs);
   const routes = [...locator.route.nestedInRoutes, locator.route];
   const controller = new AbortController();
+  const renderSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   type Output = { html: JSX.Element, title: string } & ExtraOutput;
   const metadata = new Map<number, Output>();
   let instanceCount = 0;
@@ -73,10 +74,10 @@ export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput 
     return createComponent(DumbSsrContext, {
       value: { toUrl, renderOutlet: () => renderPage(index + 1) },
       get children() {
-        controller.signal.throwIfAborted();
+        renderSignal.throwIfAborted();
         const instance = instanceCount++;
         const lifetime = new AbortController();
-        const pageSignal = AbortSignal.any([controller.signal, lifetime.signal]);
+        const pageSignal = AbortSignal.any([renderSignal, lifetime.signal]);
         const status: PageStatus = {
           shouldFetch: () => !pageSignal.aborted,
           fetchSignal: () => pageSignal.aborted ? undefined : pageSignal,
@@ -121,20 +122,13 @@ export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput 
     });
   };
 
-  let cancel = () => {};
-  let dispose = () => {};
-  try {
-    // Solid owns async scheduling/disposal. Normalize its non-rejecting stream
-    // errors and cancellation (which can otherwise leave awaiting it pending).
-    const html = await new Promise<string>((resolve, reject) => {
-      cancel = () => {
-        reject(signal!.reason);
-        controller.abort(signal!.reason);
-      };
-      signal?.addEventListener('abort', cancel, { once: true });
-      signal?.throwIfAborted();
-      createRoot(disposeRoot => {
-        dispose = disposeRoot;
+  // The outer root also cleans up when renderToStream throws before returning.
+  const html = await createRoot(dispose => {
+    const completed = new Promise<string>((resolve, reject) => {
+      renderSignal.throwIfAborted();
+      // If the app aborts and then throws, report the cancellation, not the throw.
+      const fail = (error: unknown) => reject(renderSignal.aborted ? renderSignal.reason : error);
+      try {
         const stream = renderToStream(() => createComponent(NoHydration, {
           get children() {
             return createComponent(DumbSsrContext, {
@@ -144,30 +138,37 @@ export async function renderDumbSsr<ExtraStaticData extends object, ExtraOutput 
           },
         }), {
           noScripts: true,
-          signal: controller.signal,
+          signal: renderSignal,
           onError(error, context) {
-            if (context.handling !== 'fallback') reject(error);
+            // The stream can resolve with partial HTML after a fatal render error.
+            if (context.handling !== 'fallback') fail(error);
           },
         });
-        Promise.resolve(stream).then(resolve, reject);
-      });
+        void Promise.resolve(stream).then(markup => {
+          // The caller can abort during Solid's final cleanup.
+          if (renderSignal.aborted) reject(renderSignal.reason);
+          else resolve(markup);
+        }, reject);
+      } catch (error) {
+        fail(error);
+      }
     });
-    const rendered = new Set<number>();
-    let leaf: Output | undefined;
-    const markup = html.replace(new RegExp(`<!--${marker}:(\\d+):(\\d+)-->`, 'g'), (_match, routeIndex, instance) => {
-      const index = Number(routeIndex);
-      if (rendered.has(index)) throw new Error('Multiple Outlets render the same matched child page');
-      rendered.add(index);
-      if (index === routes.length - 1) leaf = metadata.get(Number(instance));
-      return '';
+    return completed.finally(() => {
+      controller.abort();
+      dispose();
     });
-    if (rendered.size !== routes.length || !leaf) {
-      throw new Error('Dumb SSR requires an Outlet for every matched child page');
-    }
-    return { ...leaf, html: markup };
-  } finally {
-    signal?.removeEventListener('abort', cancel);
-    controller.abort();
-    dispose();
+  });
+  const rendered = new Set<number>();
+  let leaf: Output | undefined;
+  const markup = html.replace(new RegExp(`<!--${marker}:(\\d+):(\\d+)-->`, 'g'), (_match, routeIndex, instance) => {
+    const index = Number(routeIndex);
+    if (rendered.has(index)) throw new Error('Multiple Outlets render the same matched child page');
+    rendered.add(index);
+    if (index === routes.length - 1) leaf = metadata.get(Number(instance));
+    return '';
+  });
+  if (rendered.size !== routes.length || !leaf) {
+    throw new Error('Dumb SSR requires an Outlet for every matched child page');
   }
+  return { ...leaf, html: markup };
 }

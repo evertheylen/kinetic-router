@@ -10,8 +10,8 @@ and assume node is configured with `--enable-source-maps` so there's no need for
 |---|---|---|
 | `@kinetic-router/definition` | `definition/` | Framework-agnostic DSL for declaring routes, params, and sitemaps. No runtime routing. |
 | `@kinetic-router/url` | `url/` | `Locator` ⇄ URL (de)serialization. Depends on `definition`. |
-| `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js`, `@solidjs/web`, both 2.0 prereleases). |
-| `example-app` | `example-app/` | Vite + `vite-plugin-solid` demo (private). `pnpm --filter example-app dev`. |
+| `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js` and `@solidjs/web`, both Solid 2.x). |
+| `example-app` | `example-app/` | Vite + `@solidjs/vite-plugin` demo (private). `pnpm --filter @kinetic-router/example-app dev`. |
 
 Keep history behind `NavigationEngine`: future iOS support should use engine injection,
 not platform-specific branches in the router core.
@@ -137,8 +137,8 @@ There is no `<Route>` component or `useNavigate`. The model is:
   the root outlet is faked by attaching an `OutletDelegate` to a div with the root outlet
   id (see `solid/src/router.test.ts`).
 - Solid 2.0 API differences: `createEffect(compute, effect)` takes two functions;
-  `createOwner`/`runWithOwner` are used directly (rendered routes manage their own
-  owners, see `rendered-route.ts`).
+  rendered routes use public `createRoot`/`getOwner`/`runWithOwner` APIs to keep
+  their own scopes across async preparation (see `params.ts` and `rendered-route.ts`).
 - `Router` init is async (`queueMicrotask`): register all `implement()` calls
   synchronously after construction; in tests, wait until `currentLocator()` is defined.
 - `urlToLocator` expects `{ pathname, search }` (or a `URL` object). Tests in

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { index, param, root, route, type Locator, type Route } from '@kinetic-router/definition';
-import { createEffect, createOwner, runWithOwner, useContext } from 'solid-js';
+import { createEffect, createRoot, useContext } from 'solid-js';
 import { Router } from './router.js';
 import { MemoryEngine } from './memory-engine.js';
 import { outletDelegateAttribute, rootOutletId, type OutletDelegate } from './outlet.js';
@@ -365,17 +365,19 @@ describe('destination resolution and menu navigation', () => {
     let finish!: () => void;
     const gate = new Promise<void>(resolve => { finish = resolve; });
     const { router, routes } = await createApp('/b', gate);
-    const owner = createOwner();
     const operations: string[] = [];
-    runWithOwner(owner, () => createEffect(
-      () => router.resolveDestination(routes.a.locate({}), 'menu').operation.type,
-      operation => { operations.push(operation); },
-    ));
+    const dispose = createRoot(dispose => {
+      createEffect(
+        () => router.resolveDestination(routes.a.locate({}), 'menu').operation.type,
+        operation => { operations.push(operation); },
+      );
+      return dispose;
+    });
     await vi.waitFor(() => expect(operations.at(-1)).toBe('push'));
     const navigation = router.navigate(routes.detail.locate({}));
     try {
       await navigation.committed;
       await vi.waitFor(() => expect(operations.at(-1)).toBe('replace'));
-    } finally { finish(); await navigation.finished; owner.dispose(); }
+    } finally { dispose(); finish(); await navigation.finished; }
   });
 });

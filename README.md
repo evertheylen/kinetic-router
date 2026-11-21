@@ -17,9 +17,9 @@ ordinary-looking links and render pages through `<Outlet>` components.
 - Optional [dumb SSR](solid/docs/dumb-ssr.md): public HTML followed by a fresh
   client render, without hydration or server-state transfer.
 
-Requires Solid 2.0 release candidates and the Navigation API (Chrome 102+, Safari 26.2+,
-Firefox 147+). There is no History API fallback. Animated page transitions are
-not implemented yet.
+Requires Solid 2 (`solid-js` and `@solidjs/web` 2.0.3 or newer within 2.x) and
+the Navigation API (Chrome 102+, Safari 26.2+, Firefox 147+). There is no
+History API fallback. Animated page transitions are not implemented yet.
 
 ## A small example
 

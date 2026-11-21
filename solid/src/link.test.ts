@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { index, param, root, route, type Route } from '@kinetic-router/definition';
-import { createComponent, createOwner, createSignal, Errored, flush, onCleanup, runWithOwner } from 'solid-js';
+import { createComponent, createRoot, createSignal, Errored, flush, onCleanup } from 'solid-js';
 import { render } from '@solidjs/web';
 import { Router } from './router.js';
 import { MemoryEngine } from './memory-engine.js';
@@ -24,9 +24,11 @@ async function app(prefetch?: Prefetch, slow = false, fail = false) {
   const results = route({ q: param.search<string>().withDefault('all') });
   const sitemap = root({ home, a: { [index]: a, detail }, b, hidden, results });
   const engine = new MemoryEngine('/home');
-  const owner = createOwner();
-  cleanups.push(() => owner.dispose());
-  const router = runWithOwner(owner, () => new Router(sitemap, { engine, prefetch, prefetchCache: { maxEntries: 0 } }));
+  const { router, disposeRoot } = createRoot(disposeRoot => ({
+    router: new Router(sitemap, { engine, prefetch, prefetchCache: { maxEntries: 0 } }),
+    disposeRoot,
+  }));
+  cleanups.push(disposeRoot);
   const contexts: Record<string, PagePreparationContext[]> = { home: [], a: [], detail: [], b: [], hidden: [], results: [] };
   const disposed = { home: 0, a: 0, detail: 0, b: 0, hidden: 0, results: 0 };
   const gate = Promise.withResolvers<void>();
@@ -66,7 +68,7 @@ async function app(prefetch?: Prefetch, slow = false, fail = false) {
   initial.dispose();
   await settle();
   expect(router.currentLocator()?.route).toBe(home);
-  return { router, owner, engine, link, contexts, disposed, gate, routes: { home, a, detail, b, hidden, results } };
+  return { router, disposeRoot, engine, link, contexts, disposed, gate, routes: { home, a, detail, b, hidden, results } };
 }
 function pointer(anchor: Element, type: string, init: PointerEventInit = {}) {
   anchor.dispatchEvent(new PointerEvent(type, {
@@ -172,7 +174,7 @@ it('inherits object options, preserves them for true, and lets Link objects enab
   await vi.advanceTimersByTimeAsync(1);
   expect(a.contexts.b).toHaveLength(1);
   expect(a.contexts.a).toHaveLength(0);
-  a.owner.dispose();
+  a.disposeRoot();
   const b = await app(false);
   pointer(b.link({ route: b.routes.a, prefetch: true }).anchor, 'pointerdown');
   await settle();
@@ -181,9 +183,7 @@ it('inherits object options, preserves them for true, and lets Link objects enab
 
 it.each(['hover', 'focus', 'cancelDelay'] as const)('validates finite nonnegative %s values at both levels, even when overridden', async key => {
   for (const value of [-1, NaN, Infinity]) {
-    const owner = createOwner();
-    expect(() => runWithOwner(owner, () => new Router(root({ home: route({}) }), { prefetch: { [key]: value } }))).toThrow(RangeError);
-    owner.dispose();
+    expect(() => new Router(root({ home: route({}) }), { prefetch: { [key]: value } })).toThrow(RangeError);
   }
   const a = await app();
   for (const value of [-1, NaN, Infinity]) {
@@ -628,7 +628,7 @@ it('releases an owned Router and never retargets existing Links to its replaceme
   pointer(old, 'pointerdown');
   await settle();
   expect(a.contexts.a).toHaveLength(1);
-  a.owner.dispose();
+  a.disposeRoot();
   flush();
   expect(a.contexts.a[0].signal.aborted).toBe(true);
   expect(() => Link({ route: a.routes.a })).toThrow('Create a Router before rendering Link');

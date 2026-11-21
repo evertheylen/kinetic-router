@@ -357,24 +357,20 @@ it.each(['factory', 'loader', 'child'] as const)('settles abort of uncooperative
   expect(f.cleanup).toHaveBeenCalledTimes(stage === 'loader' ? 0 : 1);
 });
 
-it('removes caller listeners and aborts owned fetching without aborting the caller on success/failure', async () => {
+it('aborts owned fetching without aborting the caller on success/failure', async () => {
   for (const fail of [false, true]) {
     const f = fixture();
     if (fail) f.output.mockImplementation(() => { throw new Error('failed output'); });
     const caller = new AbortController();
-    const add = vi.spyOn(caller.signal, 'addEventListener');
-    const remove = vi.spyOn(caller.signal, 'removeEventListener');
     const result = renderDumbSsr({ ...f, url: url(), signal: caller.signal });
     if (fail) await expect(result).rejects.toThrow('failed output');
     else await result;
-    expect(add).toHaveBeenCalledOnce();
-    expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0][1]);
     expect(caller.signal.aborted).toBe(false);
     expect(f.context().signal.aborted).toBe(true);
   }
 });
 
-it('settles synchronous cancellation before stream creation returns, including a simultaneous throw', async () => {
+it.each([false, true])('settles cancellation before stream creation returns (app throws: %s)', async throws => {
   const f = fixture();
   const caller = new AbortController();
   const reason = new Error('sync cancellation');
@@ -382,11 +378,25 @@ it('settles synchronous cancellation before stream creation returns, including a
   const result = renderDumbSsr({ ...f, url: url(), signal: caller.signal, app: () => {
     onCleanup(cleanup);
     caller.abort(reason);
-    throw new Error('render failed too');
+    if (throws) throw new Error('render failed too');
+    return 'Not delivered';
   } });
   await expect(result).rejects.toBe(reason);
   expect(cleanup).toHaveBeenCalledOnce();
   expect(f.factory).not.toHaveBeenCalled();
+});
+
+it('rejects cancellation during Solid cleanup before delivering the completed HTML', async () => {
+  const f = fixture();
+  const caller = new AbortController();
+  const reason = new Error('cancelled before delivery');
+  const result = renderDumbSsr({ ...f, url: url(), signal: caller.signal, app: () => {
+    onCleanup(() => caller.abort(reason));
+    return createComponent(Outlet, { component: 'main' });
+  } });
+  await expect(result).rejects.toBe(reason);
+  expect(f.output).toHaveBeenCalledOnce();
+  expect(f.cleanup).toHaveBeenCalledOnce();
 });
 
 it('observes late factory rejections after cancellation and never registers a global server Router', async () => {

@@ -698,7 +698,7 @@ export class ActualRouter<
       phase = 'disposed';
       if (constructing) {
         controller.abort(requestSignal.reason);
-        for (const params of createdParams.toReversed()) params.owner.dispose();
+        for (const params of createdParams.toReversed()) params.dispose();
         for (const rendered of createdRoutes.toReversed()) {
           const html = rendered.renderOutput?.html;
           if (html !== undefined) html.parentNode?.removeChild(html);
@@ -746,7 +746,7 @@ export class ActualRouter<
             stageIndex++;
             signal.throwIfAborted();
           }
-          runWithOwner(rendered.owner, () => createEffect(
+          runWithOwner(rendered.renderArgs.params.owner, () => createEffect(
             () => rendered.renderArgs.pageStatus.hasFocus() ? rendered.renderOutput!.title : undefined,
             title => { if (title !== undefined) document.title = title; },
           ));

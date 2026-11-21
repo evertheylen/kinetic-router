@@ -1,9 +1,10 @@
 import { expect, it, vi } from 'vitest';
-import { createEffect, createOwner, flush, runWithOwner } from 'solid-js';
+import { createEffect, flush, runWithOwner } from 'solid-js';
 import { createPageLifecycle } from './rendered-route.js';
+import { createSolidRoot } from './utils.js';
 
 it('does not invalidate resource or visibility readers when unrelated lifecycle fields change', () => {
-  const owner = createOwner();
+  const { owner, dispose } = createSolidRoot();
   const lifecycle = runWithOwner(owner, createPageLifecycle);
   const readFetch = vi.fn(() => lifecycle.status.fetchSignal());
   const readVisible = vi.fn(() => lifecycle.status.isVisible());
@@ -26,15 +27,15 @@ it('does not invalidate resource or visibility readers when unrelated lifecycle 
     flush();
     expect(readFetch).toHaveBeenCalledOnce();
     expect(readVisible).toHaveBeenCalledTimes(2);
-  } finally { owner.dispose(); }
+  } finally { dispose(); }
 });
 
 it('reactively tracks preparation, focus, retention, resumption and terminal disposal', () => {
-  const owner = createOwner(), observer = createOwner();
-  const lifecycle = runWithOwner(owner, createPageLifecycle);
+  const page = createSolidRoot(), observer = createSolidRoot();
+  const lifecycle = runWithOwner(page.owner, createPageLifecycle);
   const status = lifecycle.status;
   const snapshots: unknown[] = [];
-  runWithOwner(observer, () => createEffect(
+  runWithOwner(observer.owner, () => createEffect(
     () => [status.shouldFetch(), status.isVisible(), status.hasFocus(), status.fetchSignal()],
     value => { snapshots.push(value); },
   ));
@@ -73,15 +74,15 @@ it('reactively tracks preparation, focus, retention, resumption and terminal dis
     expect(active).not.toBe(resumed);
     expect(active.aborted).toBe(false);
 
-    owner.dispose();
-    owner.dispose();
+    page.dispose();
+    page.dispose();
     lifecycle.setState('active', true);
     flush();
     expect(active.aborted).toBe(true);
     expect(snapshots.at(-1)).toEqual([false, false, false, undefined]);
     expect(aborted).toHaveBeenCalledOnce();
   } finally {
-    owner.dispose();
+    page.dispose();
     observer.dispose();
   }
 });

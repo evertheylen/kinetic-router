@@ -94,7 +94,7 @@ export class RenderedRouteCache {
     // Children first: disposing a Solid parent also disposes its child owners.
     for (const rendered of [...previous].reverse()) {
       if (retained.has(rendered)) continue;
-      rendered.owner.dispose();
+      rendered.renderArgs.params.dispose();
       // A retained, offscreen parent can still contain an evicted child's DOM.
       const html = rendered.renderOutput?.html;
       if (html !== undefined) html.parentNode?.removeChild(html);

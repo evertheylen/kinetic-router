@@ -1,13 +1,14 @@
 import { expect, it, vi } from 'vitest';
 import { route } from '@kinetic-router/definition';
-import { createEffect, createOwner, createSignal, flush, onCleanup, runWithOwner, useContext } from 'solid-js';
+import { createEffect, createSignal, flush, onCleanup, runWithOwner, useContext } from 'solid-js';
 import { createParamStorage } from './params.js';
 import type { Page, PagePreparationContext } from './page.js';
 import { InRenderedRoute, renderRoute, type RenderedRoute } from './rendered-route.js';
+import { createSolidRoot } from './utils.js';
 
 it('provides the rendered route without leaking context to unrelated owners', async () => {
   const home = route({});
-  const unrelatedOwner = createOwner();
+  const unrelated = createSolidRoot();
   let seenContext: RenderedRoute | null = null;
   const [text, setText] = createSignal('initial');
   const cleanup = vi.fn();
@@ -32,7 +33,7 @@ it('provides the rendered route without leaking context to unrelated owners', as
       signal: new AbortController().signal,
     });
     expect(seenContext).toBe(rendered);
-    expect(runWithOwner(unrelatedOwner, () => useContext(InRenderedRoute))).toBe(null);
+    expect(runWithOwner(unrelated.owner, () => useContext(InRenderedRoute))).toBe(null);
     flush();
     expect(rendered.renderOutput!.html.textContent).toBe('initial');
     expect(cleanup).not.toHaveBeenCalled();
@@ -40,10 +41,40 @@ it('provides the rendered route without leaking context to unrelated owners', as
     flush();
     expect(rendered.renderOutput!.html.textContent).toBe('updated');
   } finally {
-    params.owner.dispose();
-    unrelatedOwner.dispose();
+    params.dispose();
+    unrelated.dispose();
   }
   expect(cleanup).toHaveBeenCalledOnce();
+});
+
+it('rejects a renderer failure without halting other reactive updates', async () => {
+  const definition = route({});
+  const failure = new Error('output failed');
+  const cleanup = vi.fn();
+  const implementation = { untrackedKeys: [], async render() {
+    return () => {
+      onCleanup(cleanup);
+      throw failure;
+    };
+  } };
+  const params = createParamStorage({ route: definition, implementation, paramMap: new Map() });
+  const [value, setValue] = createSignal(0);
+  const observer = createSolidRoot();
+  let observed: number | undefined;
+  runWithOwner(observer.owner, () => createEffect(value, current => { observed = current; }));
+  try {
+    flush();
+    expect(observed).toBe(0);
+    await expect(renderRoute({ route: definition, implementation, renderArgs: { params }, signal: new AbortController().signal }))
+      .rejects.toThrow(failure.message);
+    expect(cleanup).toHaveBeenCalledOnce();
+    setValue(1);
+    flush();
+    expect(observed).toBe(1);
+  } finally {
+    params.dispose();
+    observer.dispose();
+  }
 });
 
 it('skips a pre-cancelled factory and disposes its parameter owner exactly once', async () => {
@@ -57,7 +88,7 @@ it('skips a pre-cancelled factory and disposes its parameter owner exactly once'
   controller.abort();
   await expect(renderRoute({ route: definition, implementation, renderArgs: { params }, signal: controller.signal }))
     .rejects.toMatchObject({ name: 'AbortError' });
-  params.owner.dispose();
+  params.dispose();
   expect(render).not.toHaveBeenCalled();
   expect(cleanup).toHaveBeenCalledOnce();
 });
@@ -96,7 +127,7 @@ it.each(['resolve', 'reject'] as const)('cancels an owned factory before its lat
   const result = await outcome;
   if (completion === 'resolve') expect(result).toMatchObject({ name: 'AbortError' });
   else expect(result).toBe(error);
-  params.owner.dispose();
+  params.dispose();
   expect(cleanup).toHaveBeenCalledOnce();
   expect(output).not.toHaveBeenCalled();
 });
@@ -121,6 +152,6 @@ it('disposes output cancelled synchronously during construction without resurrec
     .then(() => 'resolved', (error: Error) => error.name);
   expect(outcome).toBe('AbortError');
   expect(html.parentNode).toBeNull();
-  params.owner.dispose();
+  params.dispose();
   expect(cleanup).toHaveBeenCalledOnce();
 });

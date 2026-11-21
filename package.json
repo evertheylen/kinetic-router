@@ -1,6 +1,7 @@
 {
   "name": "@kinetic-router/monorepo",
   "private": true,
+  "type": "module",
   "scripts": {
     "test": "pnpm -r build && vitest run",
     "test:browser": "pnpm --filter @kinetic-router/integration-tests... -r build && pnpm --filter @kinetic-router/integration-tests test",

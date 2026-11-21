@@ -1,3 +1,6 @@
-import { type createOwner } from "solid-js";
+import { createRoot, getOwner, runWithOwner } from "solid-js";
 
-export type SolidRoot = ReturnType<typeof createOwner>;
+// Capture a scope to re-enter across awaits, and keep its public disposer.
+export function createSolidRoot(parent = getOwner()) {
+  return runWithOwner(parent, () => createRoot(dispose => ({ owner: getOwner()!, dispose })));
+}
