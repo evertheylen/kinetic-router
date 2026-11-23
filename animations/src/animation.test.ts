@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createRoot } from 'solid-js'
+import { createRoot, createSignal, Errored, flush } from 'solid-js'
+import { render } from '@solidjs/web'
 import { createAnimation, type AnimationTarget } from './animation.js'
 import type { AnimationOptions } from './timing.js'
 
@@ -31,6 +32,25 @@ describe('reactive native target validation', () => {
       dispose()
     })
     expect(target).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { opacity: 1, transform: 'none' }, { transform: 'none' },
+  ])('keeps the first native property set when updating to %j', next => {
+    const [target, setTarget] = createSignal<AnimationTarget>({ opacity: 1 })
+    const host = document.createElement('div')
+    const dispose = render(() => Errored({
+      fallback: error => String(error()),
+      get children() {
+        const element = document.createElement('div')
+        createAnimation(target)(element)
+        return element
+      },
+    }), host)
+    try {
+      setTarget(next); flush()
+      expect(host.textContent).toContain('Keep the same animated properties')
+    } finally { dispose() }
   })
 
   it('requires an owner but not a lifecycle boundary', () => {

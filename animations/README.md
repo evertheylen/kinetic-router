@@ -9,6 +9,7 @@ integration, dependencies on an animation engine, or per-frame JavaScript.
 `motion` and `AnimatePresence` are inspired by Motion for React, not a compatibility
 layer. The components animate through the native Web Animations API (WAAPI); no
 CSS transitions, data attributes, or JavaScript frame loop are required.
+See [Coming from Motion for React](API-COMPARISON.md) for a migration guide.
 
 ```tsx
 import { createSignal } from 'solid-js'
@@ -41,15 +42,22 @@ function Preview() {
   `scale`. Numeric `x` and `y` are pixels; `rotate` is degrees; `opacity` and
   `scale` are unitless.
 - `initial` and `exit` override the corresponding `animate` values, not the entire
-  pose. Omit `initial` or pass `initial={false}` to apply the first `animate` target
-  without playing an entrance. Later updates can still animate.
+  pose. Omit `initial` or pass `initial={false}` to snap to the latest `animate`
+  target at first commit. Later updates can still animate.
+- Motion leaves opacity and transform alone unless a target requests them.
+  Families named in `animate`, `initial`, or `exit` at mount start owned. A later
+  target can add a family from its underlying CSS style. Once owned, omitted
+  values return to neutral instead of releasing ownership.
 - Component `transition.duration` and `transition.delay` are in **seconds**. `ease`
   accepts CSS easing strings and `easeIn`, `easeOut`, and `easeInOut`. Timing
   changes apply on the next target change; they don't retime a running animation.
-- `AnimatePresence when={shown()}` uses `Lifecycle.Show` to retain the outgoing owner
-  through exit. It does not diff children. Use `Lifecycle.For` for keyed lists;
-  an ordinary Solid conditional cannot retain its children for exit. Mounted
-  target updates do not need a presence boundary. Motion respects reduced motion.
+- For a retained exit, configure `exit` at mount inside `AnimatePresence` or an
+  equivalent lifecycle boundary. `AnimatePresence` uses `Lifecycle.Show`; it does
+  not diff children. Use `Lifecycle.For` for keyed lists. Ordinary Solid
+  conditionals do not retain their children, and mounted target updates do not
+  require presence. Retained content remains interactive unless your app disables
+  it: move focus out before hiding and set `inert` when appropriate. Motion
+  respects reduced motion and snaps if retargeted while disconnected.
 
 The [Postcard studio](../lifecycle/demo/postcard-studio.tsx) shows a reactive tilt and
 how to keep a local draft on mid-flight Undo while moving focus outside the exiting card.
@@ -135,7 +143,7 @@ are already infinite are ignored. Selected effects must be allowed to finish or 
 
 Detailed contracts: [presence](src/transition.ts), [reactive targets](src/animation.ts),
 [spring compiler](src/spring.ts), and [CSS helper](src/css-transition.ts).
-See [API comparison and gaps](API-COMPARISON.md) and [the integration demo](../lifecycle/demo/main.tsx).
+See [the integration demo](../lifecycle/demo/main.tsx) for runnable examples.
 
 ## Run
 

@@ -25,9 +25,9 @@ export interface MotionTransition {
 type MotionTag = keyof HTMLElementTagNameMap & keyof JSX.IntrinsicElements
 interface MotionOptions {
   animate: MotionTarget
-  /** Overlay on the first animate target. Omit or use false to skip entry motion. */
+  /** Overlay on the first animate target. Omit or use false to snap to animate at the first present commit. */
   initial?: MotionTarget | false
-  /** Overlay on the last present target, sampled at removal. Supply at mount in a lifecycle boundary. */
+  /** Overlay on the last present target, sampled at removal. Enable with a target at mount inside a lifecycle boundary. */
   exit?: MotionTarget
   /** Sampled at the start of each move, not used to retime a running effect. */
   transition?: MotionTransition
@@ -79,18 +79,19 @@ function motionTag<Tag extends MotionTag>(tag: Tag) {
     let present = untrack(() => snapshotMotionTarget(props.animate))
     const initial = untrack(() => {
       const value = props.initial
-      return value === false || value === undefined ? {} : snapshotMotionTarget(value)
+      return value === false || value === undefined ? undefined : snapshotMotionTarget(value)
     })
+    let skipInitialMotion = initial === undefined
     const exit = untrack(readExit)
     const lifecycle = exit && useLifecycle()
-    const ownsOpacity = [present, initial, exit].some(pose => pose?.opacity !== undefined)
-    const ownsTransform = [present, initial, exit].some(pose => pose && hasTransform(pose))
+    const declared = { ...present, ...initial, ...exit }
+    let ownsOpacity = declared.opacity !== undefined
+    let ownsTransform = hasTransform(declared)
     if (!ownsOpacity && !ownsTransform) throw new TypeError('Specify at least one motion target property')
 
     function target(pose: MotionTarget): AnimationTarget {
-      if ((!ownsOpacity && pose.opacity !== undefined) || (!ownsTransform && hasTransform(pose))) {
-        throw new TypeError('Cannot add an opacity or transform channel after mounting motion')
-      }
+      ownsOpacity ||= pose.opacity !== undefined
+      ownsTransform ||= hasTransform(pose)
       const { opacity = 1, x = 0, y = 0, rotate = 0, scale = 1 } = pose
       return {
         ...(ownsOpacity && { opacity }),
@@ -98,29 +99,33 @@ function motionTag<Tag extends MotionTag>(tag: Tag) {
       }
     }
 
-    const bindTarget = createTargetDriver({ snapDetached: false })
-    let move: ReturnType<typeof bindTarget> | undefined
+    const driver = createTargetDriver(() => untrack(() => motionTiming(props.transition)))
     function bind(element: Element) {
-      if (move) return
       const visible = target(present)
       const exiting = untrack(() => lifecycle?.phase()) === 'exiting'
+      if (exiting) skipInitialMotion = false
       const first = target({ ...present, ...(exiting ? exit : initial) })
-      move = bindTarget(element, first, exiting ? first : visible)
+      driver.prepare(element, first, exiting ? first : visible)
     }
-    const settings = () => untrack(() => motionTiming(props.transition))
 
     if (lifecycle) onInOut(({ direction }) => {
       // onInOut does not wait for an unrelated enter. Keep the old fill until
       // a committed restore can retarget it; final owner cleanup cancels it.
       if (direction !== 'out') return
       const overlay = untrack(readExit)
-      if (overlay !== undefined) return move?.(target({ ...present, ...overlay }), settings).finished
+      if (overlay === undefined) return
+      skipInitialMotion = false
+      return driver.retarget(target({ ...present, ...overlay }))?.finished
     })
 
     createEffect(() => lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
       if (!pose) return
       present = pose
-      move?.(target(pose), settings)
+      const next = target(pose)
+      // The ref can prepare before Loading holds the first present commit.
+      if (skipInitialMotion) driver.snapTo(next)
+      else driver.retarget(next)
+      skipInitialMotion = false
     })
 
     const ref = createMemo(() => {
@@ -133,13 +138,13 @@ function motionTag<Tag extends MotionTag>(tag: Tag) {
 }
 
 /**
- * Client-only HTML motion components. Initial animate/initial/exit choose the
- * owned channels for this instance: opacity and/or the combined transform
- * (translate, then rotate, then scale in CSS). Updates cannot claim a new channel.
- * Omitted values default to opacity/scale 1 and translation/rotation 0 within
- * owned channels. Declare at least one motion property. An opacity-only
- * component leaves authored transforms alone.
- * While exiting, only the exit target is applied; restore uses the latest animate.
+ * Client-only HTML motion components. Declare at least one motion property at
+ * mount across animate/initial/exit. Motion only owns the CSS families requested
+ * by its targets: opacity and the combined transform (translate, rotate, scale).
+ * Later targets can claim a family, starting from its underlying style. Once
+ * claimed, omitted components return to neutral (opacity/scale 1, x/y/rotate 0).
+ * Retargeting while disconnected snaps. While exiting, only the exit target is
+ * applied; restore uses the latest animate.
  */
 export const motion = {
   div: motionTag('div'),

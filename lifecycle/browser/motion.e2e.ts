@@ -14,7 +14,7 @@ test.afterEach(() => { expect(errors).toEqual([]) })
 function studio(page: Page) {
   const root = page.getByRole('region', { name: 'Postcard studio', exact: true })
   return {
-    card: root.locator('section.postcard'),
+    card: page.locator('.postcard-studio section.postcard'),
     discard: root.getByRole('button', { name: 'Discard draft', exact: true }),
     undo: root.getByRole('button', { name: 'Undo discard', exact: true }),
     newDraft: root.getByRole('button', { name: 'New postcard', exact: true }),
@@ -129,6 +129,43 @@ test('reactive animate retargets from the displayed pose with the latest timing'
   expect(rest.x).toBeCloseTo(0)
   expect(rest.degrees).toBeCloseTo(0)
   expect(rest.scale).toBeCloseTo(1)
+})
+
+test('a newly claimed transform animates from authored CSS and stays owned on omission', async ({ page }) => {
+  const { tilt, slow } = studio(page)
+  await page.addStyleTag({ content: '.postcard-tools button[aria-pressed] { transform: scale(0.9); }' })
+  expect((await pose(tilt)).scale).toBeCloseTo(0.9)
+  await slow.check()
+  await tilt.click()
+  const start = await pose(tilt, 0)
+  expect(start.scale).toBeCloseTo(0.9)
+  expect(start.opacity).toBeCloseTo(1)
+  expect(start.effects).toHaveLength(1)
+  const middle = await pose(tilt, 0.5)
+  expect(middle.scale).toBeGreaterThan(0.9)
+  expect(middle.scale).toBeLessThan(1.05)
+  await finishMotion(tilt)
+  expect((await pose(tilt)).scale).toBeCloseTo(1.05)
+
+  await tilt.click()
+  await finishMotion(tilt)
+  expect(await pose(tilt)).toMatchObject({ scale: 1, opacity: 1 })
+})
+
+test('an interrupted motion target snaps while the element is disconnected', async ({ page }) => {
+  const { card, tilt, slow } = studio(page)
+  await finishMotion(card)
+  await slow.check()
+  await tilt.click()
+  await pose(card, 0.5)
+  const active = await card.evaluateHandle(element => element.getAnimations()[0]!)
+  const original = (await card.elementHandle())!
+  const parent = await original.evaluateHandle(element => element.parentElement!)
+  await original.evaluate(element => element.remove())
+  await tilt.click()
+  await expect.poll(() => active.evaluate(animation => animation.playState)).toBe('idle')
+  await original.evaluate((element, parent) => { parent.append(element) }, parent)
+  expect(await pose(card)).toMatchObject({ x: 0, y: 0, degrees: 0, scale: 1, opacity: 1, effects: [] })
 })
 
 test('keyboard Undo reenters from a partial exit, retaining the exact node and its draft', async ({ page }) => {

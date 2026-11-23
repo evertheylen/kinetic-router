@@ -2,45 +2,53 @@ import { onCleanup } from 'solid-js'
 import { filledAnimation, type AnimationTarget } from './keyframes.js'
 import { onReducedMotion, type AnimationOptions, type timing } from './timing.js'
 
+function sameTarget(a: AnimationTarget, b: AnimationTarget) {
+  return a.opacity === b.opacity && a.transform === b.transform
+}
+
 /** Own a single filled target effect, including while presence work is retained. */
-export function createTargetDriver({ snapDetached = true } = {}) {
-  let animation: Animation | undefined
-  const reducedMotion = onReducedMotion(() => animation?.finish())
-  onCleanup(() => animation?.cancel())
+export function createTargetDriver(readTiming: () => ReturnType<typeof timing>) {
+  let current: { element: Element; target: AnimationTarget; animation: Animation } | undefined
+  const reducedMotion = onReducedMotion(() => current?.animation.finish())
+  onCleanup(() => current?.animation.cancel())
 
-  return (element: Element, initial: AnimationTarget, reduced = initial) => {
-    let previous = reducedMotion.matches ? reduced : initial
+  function install(element: Element, from: AnimationTarget, target: AnimationTarget, settings: AnimationOptions, snap: boolean) {
+    const animation = filledAnimation(element, [{ ...from }, { ...target }], settings)
+    current?.animation.cancel()
+    current = { element, target, animation }
+    if (snap) animation.finish()
+    else animation.play()
+    return animation
+  }
 
-    function install(from: AnimationTarget, to: AnimationTarget, options: AnimationOptions, snap: boolean) {
-      const next = filledAnimation(element, [{ ...from }, { ...to }], options)
-      animation?.cancel()
-      animation = next
-      previous = to
-      if (snap) next.finish()
-      else next.play()
-      return next
-    }
-
-    install(previous, previous, { duration: 0 }, true)
-    return (value: AnimationTarget, options: () => ReturnType<typeof timing>) => {
-      if ((value.opacity === undefined) !== (previous.opacity === undefined)
-        || (value.transform === undefined) !== (previous.transform === undefined)) {
-        throw new TypeError('Keep the same animated properties across target changes')
+  return {
+    prepare(element: Element, initial: AnimationTarget, reduced = initial) {
+      if (current) return
+      const target = reducedMotion.matches ? reduced : initial
+      install(element, target, target, { duration: 0 }, true)
+    },
+    snapTo(target: AnimationTarget) {
+      if (current && !sameTarget(target, current.target)) {
+        install(current.element, target, target, { duration: 0 }, true)
       }
-      if (value.opacity === previous.opacity && value.transform === previous.transform) return animation!
+    },
+    retarget(target: AnimationTarget) {
+      if (!current) return
+      const { element, target: previous, animation } = current
+      if (sameTarget(target, previous)) return animation
 
-      const settings = options()
-      const snap = reducedMotion.matches || (snapDetached && !element.isConnected)
-        || settings.duration + settings.delay === 0
+      const settings = readTiming()
+      const snap = reducedMotion.matches || !element.isConnected || settings.duration + settings.delay === 0
       const from = { ...previous }
-      // A settled target retains its authored interpolation path (e.g. 0deg to
-      // 360deg). Only interruptions need the displayed pose, which may be a matrix.
-      if (!snap && animation!.playState !== 'finished') {
+      // Leave newly claimed properties absent here so WAAPI starts from the
+      // underlying style. For existing properties preserve the authored path
+      // (e.g. 0deg to 360deg) unless interrupting a displayed animation.
+      if (!snap && animation.playState !== 'finished') {
         const style = getComputedStyle(element)
-        if (value.opacity !== undefined) from.opacity = Number(style.opacity)
-        if (value.transform !== undefined) from.transform = style.transform
+        if (previous.opacity !== undefined) from.opacity = Number(style.opacity)
+        if (previous.transform !== undefined) from.transform = style.transform
       }
-      return install(from, value, settings, snap)
-    }
+      return install(element, from, target, settings, snap)
+    },
   }
 }

@@ -51,7 +51,10 @@ export function PostcardStudio() {
         initial={false} animate={{ opacity: 1 }} onClick={() => shown() ? discard() : setShown(true)}>
         {shown() ? 'Discard draft' : canUndo() ? 'Undo discard' : 'New postcard'}
       </motion.button>
-      <button type="button" aria-pressed={tilted() ? 'true' : 'false'} onClick={() => setTilted(value => !value)}>Tilt postcard</button>
+      <motion.button type="button" aria-pressed={tilted() ? 'true' : 'false'}
+        animate={tilted() ? { opacity: 0.8, scale: 1.05 } : { opacity: 1 }}
+        transition={{ duration: slow() ? 4 : 0.2 }}
+        onClick={() => setTilted(value => !value)}>Tilt postcard</motion.button>
       <label><input type="checkbox" checked={slow()} onChange={event => setSlow(event.currentTarget.checked)} /> Slow preview</label>
     </div>
     <div class="postcard-stage">
