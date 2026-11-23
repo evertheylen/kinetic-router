@@ -3,6 +3,7 @@ import { render } from '@solidjs/web'
 import { Lifecycle, onExit, useLifecycle, type Direction } from '../src/index.js'
 import { createAnimation, createCssTransition, createTransition, fade, fadeScale, slide, spring } from '../../animations/src/index.js'
 import './style.css'
+import { PostcardStudio } from './postcard-studio.js'
 
 // Diagnostic counters intentionally update during component setup/cleanup.
 const [mounts, setMounts] = createSignal(0, { ownedWrite: true })
@@ -226,6 +227,7 @@ function Demo() {
   const [bidirectional, showBidirectional] = createSignal(false)
   return <main style={{ '--motion-duration': `${duration()}ms` }}>
     <h1>Solid 2 · Lifecycle</h1>
+    <PostcardStudio />
     <p>Cards glide in from the left and leave to the right. Type in one, remove it, then restore it mid-slide:
       it turns back without losing your text. Increase the card duration to see both movements in slow motion.</p>
     <label>Card duration: {duration()}ms <input aria-label="Card duration" type="range" min="500" max="5000" step="100" value={duration()} onInput={event => setDuration(+event.currentTarget.value)} /></label>

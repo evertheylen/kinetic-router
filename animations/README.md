@@ -4,13 +4,65 @@ Browser-native reactive and lifecycle animations for Solid 2. Client-only, priva
 experimental; uses the workspace's Solid 2 catalog version. No router
 integration, dependencies on an animation engine, or per-frame JavaScript.
 
+## Motion components
+
+`motion` and `AnimatePresence` are inspired by Motion for React, not a compatibility
+layer. The components animate through the native Web Animations API (WAAPI); no
+CSS transitions, data attributes, or JavaScript frame loop are required.
+
+```tsx
+import { createSignal } from 'solid-js'
+import { AnimatePresence, motion } from '@kinetic-router/animations'
+
+function Preview() {
+  const [shown, setShown] = createSignal(true)
+  const [tilted, setTilted] = createSignal(false)
+
+  return <>
+    <button onClick={() => setShown(value => !value)}>{shown() ? 'Hide' : 'Show'} preview</button>
+    <button aria-pressed={tilted() ? 'true' : 'false'} onClick={() => setTilted(value => !value)}>Tilt preview</button>
+    <AnimatePresence when={shown()}>
+      <motion.section
+        aria-label="Preview"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0, rotate: tilted() ? -5 : 0 }}
+        exit={{ opacity: 0, y: 12 }}
+        transition={{ duration: 0.2, delay: 0, ease: 'easeOut' }}
+      >Hello!</motion.section>
+    </AnimatePresence>
+  </>
+}
+```
+
+- `motion.div`, `motion.span`, `motion.section`, `motion.button`, and `motion.li`
+  accept ordinary native props, refs, and children. For other native HTML tags,
+  use `const MotionArticle = motion.create('article')`. The required `animate`
+  target is reactive and takes any subset of `opacity`, `x`, `y`, `rotate`, and
+  `scale`. Numeric `x` and `y` are pixels; `rotate` is degrees; `opacity` and
+  `scale` are unitless.
+- `initial` and `exit` override the corresponding `animate` values, not the entire
+  pose. Omit `initial` or pass `initial={false}` to apply the first `animate` target
+  without playing an entrance. Later updates can still animate.
+- Component `transition.duration` and `transition.delay` are in **seconds**. `ease`
+  accepts CSS easing strings and `easeIn`, `easeOut`, and `easeInOut`. Timing
+  changes apply on the next target change; they don't retime a running animation.
+- `AnimatePresence when={shown()}` uses `Lifecycle.Show` to retain the outgoing owner
+  through exit. It does not diff children. Use `Lifecycle.For` for keyed lists;
+  an ordinary Solid conditional cannot retain its children for exit. Mounted
+  target updates do not need a presence boundary. Motion respects reduced motion.
+
+The [Postcard studio](../lifecycle/demo/postcard-studio.tsx) shows a reactive tilt and
+how to keep a local draft on mid-flight Undo while moving focus outside the exiting card.
+
+## Lower-level refs
+
 ```tsx
 import { Lifecycle } from '@kinetic-router/lifecycle'
 import { createTransition, fade } from '@kinetic-router/animations'
 
 function Panel() {
-  const motion = createTransition(fade, { duration: 180 })
-  return <section ref={motion}>Hello!</section>
+  const fadeRef = createTransition(fade, { duration: 180 })
+  return <section ref={fadeRef}>Hello!</section>
 }
 
 <Lifecycle.Show when={open()}><Panel /></Lifecycle.Show>
@@ -18,18 +70,20 @@ function Panel() {
 
 `createTransition` uses WAAPI opacity/transform keyframes, reversible timelines,
 pre-insertion styling, reduced-motion handling and automatic cleanup. Presets:
-`fade`, `fadeScale`, `slide({ x: 0, y: 16 })`. Timings are milliseconds. Use
-`{ duration: { in: 400, out: 150 } }` for different entry/exit speeds; reversal
-preserves the same timeline's visual progress.
+`fade`, `fadeScale`, `slide({ x: 0, y: 16 })`. Ref timings are **milliseconds**, unlike
+component `transition` timings. Use `{ duration: { in: 400, out: 150 } }` for different
+entry/exit speeds; reversal preserves the same timeline's visual progress.
 
 For reactive changes to an already-mounted element, no lifecycle boundary is needed:
 
 ```tsx
-const motion = createAnimation(
+import { createAnimation } from '@kinetic-router/animations'
+
+const animateRef = createAnimation(
   () => ({ transform: `translateX(${expanded() ? 200 : 0}px)` }),
   { duration: 200 },
 )
-// <div ref={motion} />
+// <div ref={animateRef} />
 ```
 
 `createAnimation` applies its first target before insertion without interpolation;
@@ -40,7 +94,9 @@ on a separate wrapper: its first frame is prepared before insertion, then played
 Compile a spring once into ordinary native timing options:
 
 ```tsx
-const motion = createTransition(slide({ x: 100, y: 0 }), spring({
+import { createTransition, slide, spring } from '@kinetic-router/animations'
+
+const slideRef = createTransition(slide({ x: 100, y: 0 }), spring({
   stiffness: 200, damping: 20,
 }))
 ```
@@ -53,6 +109,8 @@ or keyframe animations on that element. List exact longhand or custom property n
 It handles reversals, cancellation and reduced motion without a JS animation loop.
 
 ```tsx
+import { createCssTransition } from '@kinetic-router/animations'
+
 const space = createCssTransition({
   apply: (element, direction) => { element.dataset.space = direction },
   properties: ['grid-template-rows'],

@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { Lifecycle, useLifecycle } from "@kinetic-router/lifecycle";
-import { createCssTransition, createTransition } from "@kinetic-router/animations";
+import { createCssTransition, createTransition, motion } from "@kinetic-router/animations";
 import "./todos.css";
 
 type Todo = { id: number; title: string; emoji: string };
@@ -48,14 +48,12 @@ function TodoCard(props: { todo: Todo; complete: () => void }) {
 function Victory() {
   const { phase } = useLifecycle();
   const space = animateSpace();
-  const motion = createTransition({ inout: [
-    { opacity: 0, transform: "translateY(60px) rotate(-12deg) scale(0.3)" },
-    { opacity: 1, transform: "translateY(-12px) rotate(3deg) scale(1.08)", offset: 0.7 },
-    { opacity: 1, transform: "translateY(0) rotate(0) scale(1)" },
-  ] }, { duration: 1200, easing: "ease-out" });
+  const tuckedAway = { opacity: 0, y: 60, rotate: -12, scale: 0.3 };
   return <div class="todos-victory-slot todos-space" ref={space}
     inert={phase() === "exiting"} aria-hidden={phase() === "exiting" ? "true" : undefined}>
-    <div class="todos-content"><section class="todos-victory" ref={motion} aria-labelledby="todos-victory-title">
+    <div class="todos-content"><motion.section class="todos-victory" aria-labelledby="todos-victory-title"
+      initial={tuckedAway} animate={{ opacity: 1, y: 0, rotate: 0, scale: 1 }} exit={tuckedAway}
+      transition={{ duration: 1.2, ease: "easeOut" }}>
       <div class="todos-confetti" aria-hidden="true">
         {Array.from({ length: 12 }, (_, index) => <span style={{
           "--piece": index,
@@ -66,8 +64,8 @@ function Victory() {
       <p class="todos-eyebrow">Achievement unlocked</p>
       <h2 id="todos-victory-title">All done. All glory.</h2>
       <p>You have defeated the list. Take a bow, hydrate, tell the cactus.</p>
-      <code>Lifecycle.Show → a very necessary celebration</code>
-    </section></div>
+      <code>Lifecycle.Show + motion.section → a very necessary celebration</code>
+    </motion.section></div>
   </div>;
 }
 
