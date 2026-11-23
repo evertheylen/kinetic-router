@@ -12,7 +12,7 @@ fi
 
 # Match the locked @playwright/test version. The check inside the container catches
 # drift before tests run; no host browser libraries or custom image build are used.
-playwright_version=1.64.1
+playwright_version=1.65.1
 image="mcr.microsoft.com/playwright:v${playwright_version}-noble"
 workspace_id=$(printf '%s' "$root" | cksum | cut -d ' ' -f 1)
 prefix="kinetic-lifecycle-${workspace_id}"
@@ -29,14 +29,14 @@ container=$("$engine" create --init --ipc=private --shm-size=1g --workdir /work 
   --mount "type=volume,source=$prefix-animations-modules,target=/work/animations/node_modules" \
   --mount "type=volume,source=$prefix-demo,target=/work/lifecycle/demo/dist" \
   --mount "type=volume,source=kinetic-lifecycle-package-cache,target=/cache" \
-  --env CI=true --env COREPACK_HOME=/cache/corepack --env COREPACK_ENABLE_AUTO_PIN=0 \
+  --env CI=true \
   --env PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 --env "PLAYWRIGHT_VERSION=$playwright_version" \
   --env "LIFECYCLE_DEV=${LIFECYCLE_DEV:-}" \
   "$image" bash -lc '
     set -euo pipefail
     mkdir -p /results
-    corepack enable
-    corepack prepare pnpm@12.14.0 --activate
+    # The Playwright image ships npm but no longer includes Corepack.
+    npm install --global --ignore-scripts --cache /cache/npm pnpm@12.21.0
     pnpm --filter @kinetic-router/animations... install --frozen-lockfile --store-dir=/cache/pnpm-store
     actual=$(node -p "require(\"./lifecycle/node_modules/@playwright/test/package.json\").version")
     if [[ "$actual" != "$PLAYWRIGHT_VERSION" ]]; then

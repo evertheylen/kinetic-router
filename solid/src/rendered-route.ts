@@ -1,11 +1,10 @@
-import { createComponent, createContext, createRenderEffect, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
+import { createComponent, createContext, createMemo, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
 
 import { Page, PageStatus } from "./page.js";
 import { ParamStorage } from "./params.js";
-import { SolidRoot } from "./utils.js";
-import type { FrameDelegate } from "./frame.js";
+import type { OutletDelegate } from "./outlet.js";
 
 
 export type RenderedRoute = {
@@ -16,9 +15,8 @@ export type RenderedRoute = {
     pageStatus: PageStatus,
   }
   renderOutput?: {html: Node, title: string },
-  owner: SolidRoot,
   lifecycle: ReturnType<typeof createPageLifecycle>,
-  subFrame: FrameDelegate | undefined;
+  subOutlet: OutletDelegate | undefined;
 };
 
 export const InRenderedRoute = createContext<RenderedRoute | null>(null);
@@ -83,8 +81,7 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
     renderArgs: RenderArgs,
     signal: AbortSignal,
   }): Promise<RenderedRoute> {
-    const owner = renderArgs.params.owner;
-    const dispose = () => owner.dispose();
+    const { owner, dispose } = renderArgs.params;
     signal.addEventListener('abort', dispose, { once: true });
     try {
       signal.throwIfAborted();
@@ -100,9 +97,8 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
         route,
         implementation,
         renderArgs: { ...renderArgs, pageStatus },
-        owner,
         lifecycle,
-        subFrame: undefined,  // to be set later
+        subOutlet: undefined,  // to be set later
       };
 
       runWithOwner(owner, () => {
@@ -123,17 +119,16 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
             });
           },
         });
-        // Resolve synchronously so renderer errors reject construction, then keep
-        // the provider's lazy children observed until this page owner is disposed.
-        flatten(content);
-        createRenderEffect(() => flatten(content), () => {});
+        // A non-lazy memo keeps the provider observed for the page's lifetime.
+        // Read it now so renderer errors reject construction synchronously.
+        createMemo(() => flatten(content))();
       });
 
       // Application callbacks can cancel construction synchronously too.
       signal.throwIfAborted();
       return res;
     } catch (error) {
-      owner.dispose();
+      dispose();
       throw error;
     } finally {
       signal.removeEventListener('abort', dispose);

@@ -1,6 +1,6 @@
-import { Accessor, createOwner, createSignal, runWithOwner, Setter } from "solid-js";
+import { Accessor, createSignal, runWithOwner, Setter, type Owner } from "solid-js";
 import { AnyParamDefs, ParamDef, ParamMap, ParamValues } from "@kinetic-router/definition/params.js";
-import { SolidRoot } from "./utils.js";
+import { createSolidRoot } from "./utils.js";
 import { Page } from "./page.js";
 import { Route } from "@kinetic-router/definition/routes.js";
 
@@ -40,7 +40,7 @@ export function createParamStorage({parent, route, implementation, paramMap, def
   )
 
   const untrackedParamDefs = new Set(implementation.untrackedKeys.map(k => route.paramDefs[k]));
-  const owner = parent?.owner !== undefined ? runWithOwner(parent.owner, createOwner) : createOwner();
+  const { owner, dispose } = createSolidRoot(parent?.owner);
   
   const ownedParamDefs = (
     parent === undefined
@@ -115,7 +115,8 @@ export function createParamStorage({parent, route, implementation, paramMap, def
     allValues,
     reactiveProxyObject,
     untrackedObject,
-    owner
+    owner,
+    dispose,
   };
 }
 
@@ -130,7 +131,8 @@ export type Value<T> = ReactiveValue<T> | UntrackedValue<T>;
 export type ParamStorage = {
   parent: ParamStorage | undefined;
   activate(): void;
-  owner: SolidRoot,
+  owner: Owner;
+  dispose(): void;
   allValues: Map<ParamDef<any>, Value<any>>;
   ownedValues: Map<ParamDef<any>, Value<any>>;
   reactiveProxyObject: object,

@@ -1,7 +1,7 @@
 # @kinetic-router/animations (prototype)
 
 Browser-native reactive and lifecycle animations for Solid 2. Client-only, private,
-experimental; uses the workspace's pinned Solid 2 release candidate. No router
+experimental; uses the workspace's Solid 2 catalog version. No router
 integration, dependencies on an animation engine, or per-frame JavaScript.
 
 ```tsx

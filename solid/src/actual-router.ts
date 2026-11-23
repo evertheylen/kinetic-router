@@ -3,23 +3,30 @@ import { isEqual } from "@dovetail-js/utils/equal.js";
 import { getSlugPath, isSlugPathPrefix, RootSitemap, slugLookup, slugPathToString } from "@kinetic-router/definition/root.js";
 import { AnyParamDefs, convertParamsByDefinition, convertParamsByKey } from "@kinetic-router/definition/params.js";
 import { Alias, Locator, resolveAliases, Route } from "@kinetic-router/definition/routes.js";
-import { locatorToUrl, serializePathParams, SerializedPathParams, urlToLocator } from "@kinetic-router/url";
+import { serializePathParams, SerializedPathParams } from "@kinetic-router/url";
 
 import { Page } from "./page.js";
 import { AppState, SerializedAppState } from "./app-state.js";
-import { FrameDelegate, frameDelegateAttribute, rootFrameId } from "./frame.js";
+import { OutletDelegate, outletDelegateAttribute, rootOutletId } from "./outlet.js";
 import { createParamStorage, ParamStorage } from "./params.js";
 import { renderRoute, RenderedRoute } from "./rendered-route.js";
 import { SolidImplementationMap } from "./implementation-map.js";
 import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
 import { reusableRoutes } from "./diff.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
-import { EngineEntry, EngineNavigateEvent, EngineNavigationResult, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
+import { EngineBeforeCommit, EngineEntry, EngineNavigateEvent, EngineNavigationResult, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
+import type { TransientHandle } from './router.js';
 import { Backstage } from './backstage.js';
 import { PreparationRegistry, type PreparationLease } from './preparation-registry.js';
 import { NavigationTransition, type NavigationTransitionOptions } from './navigation-transition.js';
+import { createRouteUrls } from './route-urls.js';
 
-/** push (default) adds an entry; replace replaces the current entry.
+function parseEntryUrl(url: EntrySource['url']) {
+  return typeof url === 'string' ? new URL(url, window.location.href) : url ?? undefined;
+}
+
+/** push (default) adds an entry, or replaces a transient-marked current entry;
+ * replace replaces the current entry.
  * menu resumes a subtree's last committed visit from outside, returns to its
  * root from below, and is a no-op at the root. Activation revalidates the
  * original menu root rather than blindly following a previously resolved href. */
@@ -30,7 +37,7 @@ export type NavigateOptions = Pick<NavigationInfo, 'forceNewInstance'> & {
 
 /** Isolated construction and its consumer interest. Adoption gives history
  * ownership without ending that interest; dispose releases it. Only the new
- * suffix is mounted in Backstage, without live frame or parameter side effects. */
+ * suffix is mounted in Backstage, without live outlet or parameter side effects. */
 export type PreparedNavigation = {
   readonly routes: readonly RenderedRoute[],
   readonly reusedCount: number,
@@ -41,6 +48,18 @@ export type PreparedNavigation = {
 };
 
 type MenuBookmark = { id: string, key: string };
+/** Map membership means pending or live; removal permanently expires the record.
+ * entryId is absent until commit. enter is consumed before invocation (or skipped
+ * by an early close); cleanup then owns the interaction until departure. */
+type TransientRecord = {
+  enter?: () => void | (() => void),
+  cleanup?: () => void,
+  predecessor: MenuBookmark,
+  entryId?: string,
+  opening?: EngineNavigationResult,
+  closeRequested: boolean,
+  closing?: EngineNavigationResult,
+};
 
 export type DestinationOperation =
   | { type: 'push' | 'replace' | 'no-op' }
@@ -70,9 +89,16 @@ export class ActualRouter<
 
   readonly rrCache: RenderedRouteCache;
 
+  protected readonly urls: ReturnType<typeof createRouteUrls>;
   protected readonly preparations: PreparationRegistry;
   protected readonly implLoads = new Map<Route<any>, Promise<Page<ExtraOutput, any, any>>>();
   protected readonly preparationHandoffs = new WeakMap<NavigationInfo, PreparationLease>();
+  // Info identity is the runtime token for a pending or live interaction.
+  protected readonly transients = new Map<NavigationInfo, TransientRecord>();
+  // Parent-first stacks for entries sharing the visible page; cleared on ordinary
+  // departure. They own no output and may retain expired tokens, so Forward can
+  // reuse the page without reviving callbacks.
+  protected readonly transientStacksByEntry = new Map<string, readonly NavigationInfo[]>();
 
   protected pendingTransition: NavigationTransition | undefined;
   protected detachEngine: (() => void) | undefined;
@@ -90,7 +116,7 @@ export class ActualRouter<
   protected _currentLocator: Accessor<Locator<any> | undefined>;
   protected _setCurrentLocator: Setter<Locator<any> | undefined>;
 
-  rootFrame!: FrameDelegate;
+  rootOutlet!: OutletDelegate;
 
   constructor(
     sitemap: RootSitemap,
@@ -98,12 +124,14 @@ export class ActualRouter<
     engine: NavigationEngine,
     rrCache = new RenderedRouteCache(),
     preparations = new PreparationRegistry(),
+    urls = createRouteUrls(sitemap),
   ) {
     this.sitemap = sitemap;
     this.implMap = implMap;
     this.engine = engine;
     this.rrCache = rrCache;
     this.preparations = preparations;
+    this.urls = urls;
 
     [this._currentLocator, this._setCurrentLocator] = createSignal();
     [this.navigationVersion, this.setNavigationVersion] = createSignal(0);
@@ -117,19 +145,23 @@ export class ActualRouter<
     //@ts-ignore
     window.__router = this;
 
-    const rootFrameElement = document.getElementById(rootFrameId);
-    if (rootFrameElement === null) {
-      throw new Error('No root frame found');
+    const rootOutletElement = document.getElementById(rootOutletId);
+    if (rootOutletElement === null) {
+      throw new Error('No root outlet found');
     }
 
-    this.rootFrame = (rootFrameElement as any)[frameDelegateAttribute];
+    this.rootOutlet = (rootOutletElement as any)[outletDelegateAttribute];
 
-    if (this.rootFrame === undefined) {
-      throw new Error('No delegate on root frame found');
+    if (this.rootOutlet === undefined) {
+      throw new Error('No delegate on root outlet found');
     }
 
     // setup after initial navigation stuff to avoid weird unwanted behaviour
     this.detachEngine = this.engine.attach({
+      shouldIntercept: this.urls.basePath ? destination => {
+        const url = parseEntryUrl(destination.url);
+        return url !== undefined && this.urls.contains(url.pathname);
+      } : undefined,
       handleNavigate: (event) => {
         const rendering = this.handleNavigateEvent(event);
         // Engine-initiated navigation can be fire-and-forget too.
@@ -137,6 +169,7 @@ export class ActualRouter<
         return rendering;
       },
       handleDispose: (entryId) => {
+        this.transientStacksByEntry.delete(entryId);
         this.rrCache.unreference(entryId);
         for (const [route, bookmarks] of this.bookmarks) {
           // DeepMap iteration is not stable under deletion from a hash bucket.
@@ -147,25 +180,20 @@ export class ActualRouter<
         }
         this.setNavigationVersion(version => version + 1);
       },
-      handleBeforeCommit: () => this.handleBeforeCommit(),
+      handleBeforeCommit: event => this.handleBeforeCommit(event),
     });
     return this.initializeEntry();
   }
 
   protected async initializeEntry() {
-    const state = this.getState(this.engine.currentEntry()!)!;
-    
-    const newLocator: Locator<any> = {
-      route: state.route, values: convertParamsByKey(state.paramsByDefinition, state.route.paramDefs)
-    };
+    const entry = this.engine.currentEntry()!;
+    const state = this.getState(entry)!;
+    const newUrl = this.urls.toUrl(state.locator, parseEntryUrl(entry.url));
 
-    const newUrl = this.resolveDestination(newLocator, 'replace').url;
-    const serializedState = state.serialize(this.sitemap);
-
-    if (this.engine.currentEntry()?.url !== newUrl) {
+    if (entry.url !== newUrl) {
       const res = this.engine.navigate({
         // set ignore=true to avoid weird behaviour not aligned with "first load"
-        url: newUrl, state: serializedState, history: 'replace', info: { ignore: true }
+        url: newUrl, state: state.serialize(this.sitemap), history: 'replace', info: { ignore: true }
       });
       const committedEntry = await res.committed;
 
@@ -178,6 +206,8 @@ export class ActualRouter<
 
     if (this.disposed || this.engine.currentEntry()?.id !== state.id) return;
     this.recordVisit(state.locator);
+    this.engine.updateCurrentEntry(state.serialize(this.sitemap));
+    if (this.disposed || this.engine.currentEntry()?.id !== state.id) return;
     const transition = this.beginTransition(state);
     try {
       await this.renderNavigation(transition);
@@ -189,6 +219,97 @@ export class ActualRouter<
 
   navigate<ParamDefs extends AnyParamDefs>(locator: Locator<ParamDefs>, options?: NavigateOptions) {
     return this.executeDestination(this.resolveDestination(locator, options?.mode), options);
+  }
+
+  pushTransient(enter: () => void | (() => void)): TransientHandle {
+    const predecessor = this.engine.currentEntry();
+    if (this.disposed || !predecessor || this.currentState?.id !== predecessor.id || this.pendingTransition) {
+      throw new Error('Router has no fully activated current page');
+    }
+    if (this.transients.size) console.warn('Nested transient: navigating away may leave extra Back steps.');
+    const info: NavigationInfo = {};
+    const record: TransientRecord = { enter, predecessor: { id: predecessor.id, key: predecessor.key }, closeRequested: false };
+    const state = this.currentState.serialize(this.sitemap);
+    // Install before navigate: MemoryEngine commits synchronously.
+    this.transients.set(info, record);
+    try {
+      const url = predecessor.url;
+      if (!url) throw new Error('Current entry has no URL');
+      const opening = record.opening = this.engine.navigate({
+        url: typeof url === 'string' ? url : url.pathname + url.search + (url.hash ?? ''),
+        state: { ...state, $transient: true }, history: 'push', info,
+      });
+      const releasePending = () => {
+        if (!record.entryId || (record.enter && !record.closeRequested)) this.expireTransients([info]);
+      };
+      void opening.committed?.catch(() => {});
+      void Promise.resolve(opening.finished).then(releasePending, releasePending);
+      return { committed: opening.committed, finished: opening.finished, close: () => this.closeTransient(info, record) };
+    } catch (error) {
+      this.expireTransients([info]);
+      throw error;
+    }
+  }
+
+  protected closeTransient(info: NavigationInfo, record: TransientRecord): EngineNavigationResult {
+    if (record.closing) return record.closing;
+    if (this.disposed || this.transients.get(info) !== record) return { finished: Promise.resolve() };
+    record.closeRequested = true;
+    // Publish the close before traversal, whose commit/cleanup can be synchronous.
+    const ready = Promise.withResolvers<EngineNavigationResult>();
+    const closing: EngineNavigationResult = {
+      committed: ready.promise.then(result => result.committed ?? { id: this.engine.currentEntry()?.id ?? record.predecessor.id }),
+      finished: ready.promise.then(result => result.finished),
+    };
+    record.closing = closing;
+    const traverse = () => {
+      const current = this.engine.currentEntry();
+      if (this.disposed || this.transients.get(info) !== record || !current
+        || this.currentState?.id !== current.id
+        || this.liveTransientStack(current.id).at(-1) !== info) return {};
+      const target = this.engine.entries().find(entry =>
+        entry.id === record.predecessor.id && entry.key === record.predecessor.key);
+      if (!target || this.engine.currentEntry()?.id !== current.id) return {};
+      return this.engine.traverseTo(target.key);
+    };
+    if (!record.entryId) {
+      // Closing early suppresses enter. Never undo a successor or newer child.
+      const afterOpening = () => {
+        record.enter = undefined;
+        ready.resolve(this.engine.currentEntry()?.id === record.entryId ? traverse() : {});
+      };
+      void Promise.resolve(record.opening?.finished).then(afterOpening, afterOpening).catch(ready.reject);
+    } else {
+      try { ready.resolve(traverse()); }
+      catch (error) { ready.reject(error); }
+    }
+    const settled = () => { if (record.closing === closing) record.closing = undefined; };
+    void closing.committed?.catch(() => {});
+    void closing.finished?.then(settled, settled);
+    return closing;
+  }
+
+  protected liveTransientStack(id: string): NavigationInfo[] {
+    return (this.transientStacksByEntry.get(id) ?? []).filter(info => this.transients.get(info)?.entryId !== undefined);
+  }
+
+  /** Delete the whole batch before callbacks; reentrant disposal/navigation must
+   * not double-clean or accidentally expire a newly opened interaction. */
+  protected expireTransients(tokens: readonly NavigationInfo[] = [...this.transients.keys()]): void {
+    const cleanups: (() => void)[] = [];
+    for (const info of tokens.toReversed()) {
+      const record = this.transients.get(info);
+      if (!record) continue;
+      this.transients.delete(info);
+      if (record.cleanup) cleanups.push(record.cleanup);
+      record.enter = record.cleanup = undefined;
+    }
+    for (const cleanup of cleanups) this.runTransientCleanup(cleanup);
+  }
+
+  protected runTransientCleanup(cleanup: () => void): void {
+    try { cleanup(); }
+    catch (error) { console.error('Transient cleanup failed', error); }
   }
 
   /** Shared by navigation, hrefs and preparation. Reads engine history,
@@ -204,10 +325,11 @@ export class ActualRouter<
     ) };
     const resolved = resolveAliases(target);
     const root = { route: resolved.route, values: { ...resolved.values } };
-    const snapshot = (locator: Locator<any>, operation: DestinationOperation): DestinationSnapshot => ({
-      target, mode, locator, url: locatorToUrl(this.sitemap, locator), operation,
+    const snapshot = (locator: Locator<any>, operation: DestinationOperation, entry?: EngineEntry): DestinationSnapshot => ({
+      target, mode, locator, url: this.urls.toUrl(locator, parseEntryUrl(entry?.url)), operation,
     });
-    if (mode !== 'menu') return snapshot(root, { type: mode });
+    const push = this.isTransientEntry(this.engine.currentEntry()) ? 'replace' : 'push';
+    if (mode !== 'menu') return snapshot(root, { type: mode === 'push' ? push : mode });
 
     const rootPath = getSlugPath(this.sitemap, root.route);
     if (rootPath === undefined) throw new Error('Route is not registered in the provided rootSitemap.');
@@ -218,13 +340,13 @@ export class ActualRouter<
         && isEqual(rootParams, serializePathParams(this.sitemap, locator, rootPath));
     };
     const current = this.engine.currentEntry();
-    const currentLocator = current && this.entryLocator(current);
+    const currentLocator = current && this.entryLocator(current, true);
     const entries = this.engine.entries();
     const traverse = (entry: EngineEntry, locator: Locator<any>) =>
-      snapshot(locator, { type: 'traverse', id: entry.id, key: entry.key });
+      snapshot(locator, { type: 'traverse', id: entry.id, key: entry.key }, entry);
 
     if (current && currentLocator && matchesRootInstance(currentLocator)) {
-      if (currentLocator.route === root.route) return snapshot(currentLocator, { type: 'no-op' });
+      if (currentLocator.route === root.route) return snapshot(currentLocator, { type: 'no-op' }, current);
       // Nearest preceding root, never a later/forward root or a layout parent.
       for (const entry of entries.toReversed()) {
         if (entry.index >= current.index) continue;
@@ -239,7 +361,7 @@ export class ActualRouter<
     const entry = bookmark && entries.find(entry => entry.id === bookmark.id && entry.key === bookmark.key);
     const locator = entry && this.entryLocator(entry);
     if (entry && locator && matchesRootInstance(locator)) return traverse(entry, locator);
-    return snapshot(root, { type: 'push' });
+    return snapshot(root, { type: push });
   }
 
   /** Revalidate at activation, retaining the original menu-root/alias identity
@@ -294,6 +416,8 @@ export class ActualRouter<
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.transientStacksByEntry.clear();
+    this.expireTransients();
     this.detachEngine?.();
     this.pendingTransition?.abort();
     this.pendingTransition = undefined;
@@ -307,16 +431,24 @@ export class ActualRouter<
     this.preparations.dispose();
   }
 
+  protected isTransientEntry(entry: EntrySource | undefined): boolean {
+    return (entry?.getState?.() as SerializedAppState | undefined)?.$transient === true;
+  }
+
   /** Unmatched or unreadable entries may exist in the engine but are not menu
    * destinations. Never traverse to one just because its key still survives. */
-  protected entryLocator(entry: EntrySource): Locator<any> | undefined {
-    try { return this.getState(entry)?.locator; }
+  protected entryLocator(entry: EntrySource, includeTransient = false): Locator<any> | undefined {
+    try { return !includeTransient && this.isTransientEntry(entry) ? undefined : this.getState(entry)?.locator; }
     catch { return undefined; }
   }
 
   protected recordVisit(locator: Locator<any>): void {
     const entry = this.engine.currentEntry();
     if (!entry) return;
+    if (this.isTransientEntry(entry)) {
+      this.setNavigationVersion(version => version + 1);
+      return;
+    }
     const path = getSlugPath(this.sitemap, locator.route);
     if (!path) throw new Error('Route is not registered in the provided rootSitemap.');
     for (const [route, rootPath] of this.sitemap[slugLookup]) {
@@ -335,25 +467,97 @@ export class ActualRouter<
    * outgoing entry is still current. Persists transient page state (scroll
    * positions) onto that entry — after commit, `updateCurrentEntry` would
    * target the *new* entry and corrupt its state. */
-  protected handleBeforeCommit(): void {
+  protected handleBeforeCommit(event: EngineBeforeCommit): void | { preservePresentation: true } {
     // A committed entry may still be rendering while an older page is displayed.
     // Never overwrite that unfinished entry with the displayed page's state.
     if (this.currentState === undefined || this.currentState.id !== this.engine.currentEntry()?.id) return;
 
     this.currentState.scrollTops = this.captureScrollPositions();
     this.engine.updateCurrentEntry(this.currentState.serialize(this.sitemap));
+    if (this.isTransientOnly(event, this.engine.currentEntry()?.id)) return { preservePresentation: true };
+  }
+
+  protected isTransientOnly(event: EngineBeforeCommit, fromId: string | undefined): boolean {
+    if (!fromId || this.currentState?.id !== fromId || this.pendingTransition
+      || !this.transientStacksByEntry.has(fromId)) return false;
+    if (event.navigationType === 'push') {
+      const opening = this.transients.get(event.info);
+      return opening !== undefined && !opening.entryId && opening.predecessor.id === fromId;
+    }
+    return event.navigationType === 'traverse' && !event.info.forceNewInstance
+      && event.destination.id != null && this.transientStacksByEntry.has(event.destination.id);
+  }
+
+  protected assertCurrent(id: string, signal: AbortSignal): void {
+    signal.throwIfAborted();
+    if (this.disposed || this.engine.currentEntry()?.id !== id) throw new DOMException('Navigation superseded', 'AbortError');
+  }
+
+  protected commitTransient(event: EngineNavigateEvent, state: AppState): void {
+    const opening = this.transients.get(event.info);
+    const outgoing = this.liveTransientStack(event.fromId!);
+    const stack = opening ? [...outgoing, event.info] : this.transientStacksByEntry.get(state.id)!;
+    this.currentState = state;
+    this.transientStacksByEntry.set(state.id, stack);
+    if (opening) opening.entryId = state.id;
+    this.engine.updateCurrentEntry(state.serialize(this.sitemap));
+    this.assertCurrent(state.id, event.signal);
+    this.rrCache.markUsedFor(state.id, this.rrCache.currentRoutes());
+    this.assertCurrent(state.id, event.signal);
+    this.setNavigationVersion(version => version + 1);
+    this.assertCurrent(state.id, event.signal);
+    if (!opening || this.transients.get(event.info) !== opening) return;
+    const enter = opening.enter;
+    opening.enter = undefined;
+    if (opening.closeRequested) return;
+    try {
+      const cleanup = enter?.();
+      if (cleanup) {
+        if (this.transients.get(event.info) === opening) opening.cleanup = cleanup;
+        else this.runTransientCleanup(cleanup);
+      }
+    } catch (error) {
+      this.expireTransients([event.info]);
+      throw error;
+    }
+    this.assertCurrent(state.id, event.signal);
   }
 
   /** Called by the engine for every navigation it observes. */
   protected async handleNavigateEvent(event: EngineNavigateEvent): Promise<void> {
-    if (this.disposed) throw new DOMException('Router is disposed', 'AbortError');
-    event.signal.throwIfAborted();
-    // could be an existing state!
-    const newState = this.getState(event.destination)!;
+    this.assertCurrent(event.committedId, event.signal);
+    const transientOnly = this.isTransientOnly(event, event.fromId);
+    // Capture only the interactions this commit leaves, before application code
+    // can navigate again. Opening a child retains the whole outgoing stack.
+    let departing: NavigationInfo[] = [];
+    if (!transientOnly) {
+      departing = [...this.transients.keys()];
+      this.transientStacksByEntry.clear();
+    } else if (event.navigationType === 'traverse') {
+      const retained = new Set(this.liveTransientStack(event.committedId));
+      departing = this.liveTransientStack(event.fromId!).filter(info => !retained.has(info));
+    }
 
-    newState.id = event.committedId;
-    // A visit is committed even if its renderer is slow, fails, or is superseded.
-    this.recordVisit(newState.locator);
+    let newState: AppState;
+    try {
+      newState = this.getState(event.destination)!;
+      newState.id = event.committedId;
+      this.assertCurrent(newState.id, event.signal);
+      if (transientOnly) {
+        this.commitTransient(event, newState);
+      } else {
+        // A visit is committed even if persistence/rendering reentrantly navigates.
+        this.recordVisit(newState.locator);
+        this.assertCurrent(newState.id, event.signal);
+        // Persist defaults before cleanup callbacks can navigate again.
+        this.engine.updateCurrentEntry(newState.serialize(this.sitemap));
+      }
+    } finally {
+      // Departure is already committed, even if resolution or persistence failed.
+      this.expireTransients(departing);
+    }
+    this.assertCurrent(newState.id, event.signal);
+    if (transientOnly) return;
     const entryId = event.navigationType === 'traverse' ? event.committedId : undefined;
     const transition = this.beginTransition(newState, {
       cacheId: entryId ?? event.fromId,
@@ -368,32 +572,22 @@ export class ActualRouter<
     return rendering;
   }
 
-    /** Make an AppState based on the best source of information */
-    protected getState(entry: EntrySource) {
-      if (entry.getState !== undefined) {
-        const rawState = entry.getState();
-        // null happens for entries created without state (e.g. native link
-        // clicks); treat it like a missing state and fall back to the URL
-        if (rawState !== undefined && rawState !== null) {
-          const state = AppState.deserialize(this.sitemap, rawState as SerializedAppState);
-          // Serialized state can still carry a temporary or replaced entry id.
-          if (entry.id) state.id = entry.id;
-          if (state.route instanceof Alias) {
-            const resolved = AppState.fromLocator(resolveAliases(state.locator), state.id);
-            resolved.scrollTops = state.scrollTops;
-            return resolved;
-          }
-          return state;
-        }
-      }
+  protected getState(entry: EntrySource) {
+    const url = parseEntryUrl(entry.url);
+    const rawState = entry.getState?.();
+    // Native links can leave null state; fall back to matching the URL.
+    if (rawState == null) return url && AppState.fromLocator(this.urls.toLocator(url), entry.id ?? undefined);
 
-      if (entry.url) {
-        return AppState.fromLocator(
-          urlToLocator(this.sitemap, typeof entry.url === 'string' ? new URL(entry.url, window.location.href) : entry.url),
-          entry.id ?? undefined
-        );
-      }
-    }
+    if (url) this.urls.assertInBasePath(url.pathname);
+    const state = AppState.deserialize(this.sitemap, rawState as SerializedAppState);
+    // Serialized state can still carry a temporary or replaced entry id.
+    if (entry.id) state.id = entry.id;
+    if (!(state.route instanceof Alias)) return state;
+    const resolved = AppState.fromLocator(resolveAliases(state.locator), state.id);
+    resolved.scrollTops = state.scrollTops;
+    resolved.transient = state.transient;
+    return resolved;
+  }
 
     protected captureScrollPositions(): Map<string, number> {
       return new Map([['window', window.scrollY]]);
@@ -427,11 +621,7 @@ export class ActualRouter<
   protected async renderNavigation(transition: NavigationTransition) {
     const { to, signal } = transition;
     try {
-      signal.throwIfAborted();
-      // Persist resolved defaults before any async work, even if rendering fails.
-      // Keep persistence in this cleanup scope: it can throw or start a new navigation.
-      this.engine.updateCurrentEntry(to.serialize(this.sitemap));
-      signal.throwIfAborted();
+      this.assertCurrent(to.id, signal);
       const prepared = await transition.prepare(this.preparations,
         (reused, requestSignal) => this.prepareNavigation(to, reused, requestSignal),
       );
@@ -468,7 +658,7 @@ export class ActualRouter<
     const stagedRoutes = new Map<number, RenderedRoute>();
     const backstage = Backstage();
     let stageIndex = reused.length;
-    let stageFrame: FrameDelegate | undefined = {
+    let stageOutlet: OutletDelegate | undefined = {
       setElement: node => backstage.replaceChildren(node), clear: () => backstage.replaceChildren(),
     };
     let releaseRoutes = this.rrCache.retainForRender(reused);
@@ -508,7 +698,7 @@ export class ActualRouter<
       phase = 'disposed';
       if (constructing) {
         controller.abort(requestSignal.reason);
-        for (const params of createdParams.toReversed()) params.owner.dispose();
+        for (const params of createdParams.toReversed()) params.dispose();
         for (const rendered of createdRoutes.toReversed()) {
           const html = rendered.renderOutput?.html;
           if (html !== undefined) html.parentNode?.removeChild(html);
@@ -550,13 +740,13 @@ export class ActualRouter<
           stagedRoutes.set(i, rendered);
           while (stagedRoutes.has(stageIndex)) {
             const next = stagedRoutes.get(stageIndex)!;
-            this.assertFrame(stageFrame, next.route);
-            stageFrame.setElement(next.renderOutput!.html);
-            stageFrame = next.subFrame;
+            this.assertOutlet(stageOutlet, next.route);
+            stageOutlet.setElement(next.renderOutput!.html);
+            stageOutlet = next.subOutlet;
             stageIndex++;
             signal.throwIfAborted();
           }
-          runWithOwner(rendered.owner, () => createEffect(
+          runWithOwner(rendered.renderArgs.params.owner, () => createEffect(
             () => rendered.renderArgs.pageStatus.hasFocus() ? rendered.renderOutput!.title : undefined,
             title => { if (title !== undefined) document.title = title; },
           ));
@@ -573,14 +763,14 @@ export class ActualRouter<
     }
   }
 
-  /** The only phase allowed to touch live frames, parameters and current state. */
+  /** The only phase allowed to touch live outlets, parameters and current state. */
   protected activateNavigation(state: AppState, prepared: PreparedNavigation, signal: AbortSignal): void {
     signal = AbortSignal.any([signal, prepared.signal]);
     signal.throwIfAborted();
-    let frame: FrameDelegate | undefined = this.rootFrame;
+    let outlet: OutletDelegate | undefined = this.rootOutlet;
     for (const rendered of prepared.routes) {
-      this.assertFrame(frame, rendered.route);
-      frame = rendered.subFrame;
+      this.assertOutlet(outlet, rendered.route);
+      outlet = rendered.subOutlet;
     }
     // Solid 2 batches signal writes until the end of this synchronous phase.
     for (const rendered of prepared.routes.slice(0, prepared.reusedCount)) {
@@ -591,27 +781,28 @@ export class ActualRouter<
       }
     }
     for (const rendered of prepared.routes.slice(prepared.reusedCount)) rendered.renderArgs.params.activate();
-    frame = this.rootFrame;
+    outlet = this.rootOutlet;
     for (const rendered of prepared.routes) {
       signal.throwIfAborted();
-      frame!.setElement(rendered.renderOutput!.html);
-      frame = rendered.subFrame;
+      outlet!.setElement(rendered.renderOutput!.html);
+      outlet = rendered.subOutlet;
     }
     signal.throwIfAborted();
-    frame?.clear();
+    outlet?.clear();
     this.restoreScrollPositions(state);
     signal.throwIfAborted();
     this.currentState = state;
     this.rrCache.markUsedFor(state.id, prepared.routes, prepared.adopt);
     signal.throwIfAborted();
+    this.transientStacksByEntry.set(state.id, []);
     this._setCurrentLocator(state.locator);
   }
 
-  protected assertFrame(frame: FrameDelegate | undefined, route: Route<any>): asserts frame is FrameDelegate {
-    if (frame === undefined) {
+  protected assertOutlet(outlet: OutletDelegate | undefined, route: Route<any>): asserts outlet is OutletDelegate {
+    if (outlet === undefined) {
       const slugPath = getSlugPath(this.sitemap, route)!;
       const slugPathStr = slugPathToString(slugPath);
-      throw new Error(`Cant render ${slugPathStr}: no frame!`);
+      throw new Error(`Cant render ${slugPathStr}: no outlet!`);
     }
   }
 

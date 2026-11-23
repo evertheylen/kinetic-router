@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && vite build --mode dumb-ssr && vite build --ssr src/dumb-ssr/server.ts --outDir dist-ssr",
     "test": "playwright test",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist dist-ssr dist-ssr-client *.tsbuildinfo"
   },
   "dependencies": {
     "@kinetic-router/definition": "workspace:*",

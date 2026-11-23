@@ -23,10 +23,10 @@ export type NavigationInfo = {
 /** A structural view on a history entry, just enough for the router to
  * reconstruct an AppState from the best available source of information.
  * Both NavigationHistoryEntry and NavigationDestination satisfy this shape.
- * `url` is a URL string (absolute or document-relative) or parsed path+search. */
+ * `url` is a URL string (absolute or document-relative) or its parsed components. */
 export type EntrySource = {
   readonly id?: string | null,
-  readonly url?: { pathname: string, search: string } | string | null,
+  readonly url?: { pathname: string, search: string, hash?: string } | string | null,
   getState?(): unknown,
 };
 
@@ -70,7 +70,15 @@ export type EngineNavigateEvent = {
   info: NavigationInfo,
 };
 
+/** Pre-commit context, while the outgoing entry is still current. */
+export type EngineBeforeCommit = Pick<EngineNavigateEvent, 'navigationType' | 'destination' | 'info'>;
+
 export type EngineHandlers = {
+  /** Engines that can leave navigation to the host should consult this hook
+   * before intercepting a destination. False means leave it to the host without
+   * reporting a navigation to the router. `ignore` bypasses this hook. */
+  shouldIntercept?(destination: EntrySource): boolean,
+
   /** Render the destination. The returned promise resolves when rendering
    * is complete (used for navigation success/failure reporting). */
   handleNavigate(event: EngineNavigateEvent): Promise<void>,
@@ -84,8 +92,10 @@ export type EngineHandlers = {
    * transient page state (scroll positions) onto the outgoing entry via
    * `updateCurrentEntry` — the only moment this is possible, since the
    * Navigation API can only update the *current* entry. Engines must not
-   * call this for `ignore` navigations. */
-  handleBeforeCommit?(): void,
+   * call this for `ignore` navigations. A preservePresentation hint requests
+   * manual browser focus/scroll handling for operations that reuse the visible
+   * page. This hook does not redirect or choose a history operation. */
+  handleBeforeCommit?(event: EngineBeforeCommit): void | { preservePresentation: true },
 };
 
 /** What `NavigationEngine.navigate` returns. The Navigation API's

@@ -2,30 +2,33 @@
 
 A type-safe client-side router for SolidJS, built on the browser's Navigation API.
 Declare routes separately from their page implementations, then navigate with
-ordinary-looking links and render pages through `<Frame>` outlets.
+ordinary-looking links and render pages through `<Outlet>` components.
 
 ## What it offers
 
 - Typed sitemaps, aliases, and path, search, and hidden parameters.
+- Mount the same sitemap at `/` or a subpath with `new Router(sitemap, { basePath: '/tools/app' })`.
 - Async and lazy-loaded pages, nested layouts, and inherited parameters.
 - `<Link>` and programmatic navigation, with push, replace, and menu/resume modes.
 - Cached page instances that preserve DOM state across Back/Forward navigation.
 - Opt-in, cancellable page preparation on hover, focus, or primary press.
 - Reactive lifecycle signals for loading resources, visibility, and page focus.
 - Injectable navigation engines, including a memory engine for headless use.
+- Optional [dumb SSR](solid/docs/dumb-ssr.md): public HTML followed by a fresh
+  client render, without hydration or server-state transfer.
 
-Requires Solid 2.0 release candidates and the Navigation API (Chrome 102+, Safari 26.2+,
-Firefox 147+). There is no History API fallback. Animated page transitions are
-not implemented yet.
+Requires Solid 2 (`solid-js` and `@solidjs/web` 2.0.3 or newer within 2.x) and
+the Navigation API (Chrome 102+, Safari 26.2+, Firefox 147+). There is no
+History API fallback. Animated page transitions are not implemented yet.
 
 ## A small example
 
-Define a route, implement its page, and mount a frame:
+Define a route, implement its page, and mount an outlet:
 
 ```tsx
 import { index, param, root, route } from '@kinetic-router/definition';
 import { render } from '@solidjs/web';
-import { Frame } from '@kinetic-router/solid/frame.js';
+import { Outlet } from '@kinetic-router/solid/outlet.js';
 import { Link } from '@kinetic-router/solid/link.js';
 import { Router } from '@kinetic-router/solid/router.js';
 
@@ -46,11 +49,11 @@ router.implement(home, {
   },
 });
 
-render(() => <Frame component="main" />, document.getElementById('root')!);
+render(() => <Outlet component="main" />, document.getElementById('root')!);
 ```
 
 Here `name` is a typed search parameter, and the link updates it without a full
-page load. Larger apps can use nested frames, lazy page implementations, and
+page load. Larger apps can use nested outlets, lazy page implementations, and
 `mode="menu"` links that resume the last visit to a section.
 
 See [example-app](example-app/) for a working demo. Detailed option and lifecycle

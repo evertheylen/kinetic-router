@@ -27,7 +27,7 @@ function ExitCard(props: { title: string; children?: SolidElement; fast?: boolea
   const lifecycle = useLifecycle()
   const [clicks, setClicks] = createSignal(0)
   // Independent work still retains the card after its short animation finishes.
-  onExit(({ signal }) => wait(props.fast ? 350 : duration(), signal))
+  onExit(({ signal }) => wait(props.fast ? 350 : untrack(duration), signal))
   return <div class="card" ref={motion} data-phase={lifecycle.phase()}>
     <header><strong>{props.title}</strong><code>#{instance} · {lifecycle.phase()}</code></header>
     <label>Local state <input aria-label={`${props.title} state`} placeholder="Type; remove; restore before exit ends" /></label>
@@ -72,16 +72,17 @@ function MotionCard(props: { separate: boolean; preset: string; hold: boolean; d
   const instance = untrack(mounts) + 1
   setMounts(instance)
   onCleanup(() => setDisposals(value => value + 1))
-  const preset = props.preset === 'scale' ? fadeScale : props.preset === 'slide' ? slide() : fade
-  const motion = createTransition(props.separate
+  // The controls configure the next instance, not an animation already in flight.
+  const { preset: presetName, separate, milliseconds, outMilliseconds, delay, hold } = untrack(() => ({ ...props }))
+  const preset = presetName === 'scale' ? fadeScale : presetName === 'slide' ? slide() : fade
+  const motion = createTransition(separate
     ? { in: fade.inout, out: [...fade.inout].reverse() }
     : preset, {
-      duration: props.outMilliseconds === undefined ? props.milliseconds : { in: props.milliseconds, out: props.outMilliseconds },
-      delay: props.delay, easing: 'linear',
+      duration: outMilliseconds === undefined ? milliseconds : { in: milliseconds, out: outMilliseconds },
+      delay, easing: 'linear',
     })
   const { phase } = useLifecycle()
   // A manually released gate makes retention after animation completion visible.
-  const hold = props.hold
   const [pending, setPending] = createSignal(false)
   let release: (() => void) | undefined
   onExit(({ signal }) => {

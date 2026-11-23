@@ -1,19 +1,30 @@
 import { RootSitemap } from "@kinetic-router/definition/root.js";
 import { SolidImplementationMap } from "./implementation-map.js";
 import { ActualRouter, type DestinationSnapshot, type NavigateOptions, type NavigationMode } from "./actual-router.js";
-import { locatorToUrl, urlToLocator } from "@kinetic-router/url";
 import { Locator, resolveAliases } from "@kinetic-router/definition/routes.js";
 import type { AnyParamDefs } from "@kinetic-router/definition/params.js";
 import { Accessor, createSignal, getOwner, onCleanup, Setter } from "solid-js";
-import { NavigationEngine } from "./navigation-engine.js";
+import { EngineNavigationResult, NavigationEngine } from "./navigation-engine.js";
 import { NavigationApiEngine } from "./navigation-api-engine.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
 import { PreparationRegistry, type PrefetchCacheOptions } from './preparation-registry.js';
 import { registerLink, type Prefetch } from './link.js';
+import { createRouteUrls } from './route-urls.js';
 
 export type { DestinationSnapshot, NavigateOptions, NavigationMode } from './actual-router.js';
 export type { PrefetchCacheOptions } from './preparation-registry.js';
 export type { LinkMode, LinkProps, Prefetch, PrefetchOptions } from './link.js';
+
+/** A one-shot, Back-dismissible interaction on the displayed page.
+ * committed describes the opening entry; finished includes synchronous enter,
+ * not a page render. Forward/reload never recreate the interaction.
+ * close traverses to the captured predecessor, never directly calls cleanup;
+ * stale/non-topmost closes do nothing. Closing before commit suppresses enter,
+ * and cannot undo a newer entry. Concurrent closes coalesce; cancelled traversal
+ * leaves the interaction open and can be retried. */
+export type TransientHandle = EngineNavigationResult & {
+  close(): EngineNavigationResult,
+};
 
 /** Public facade for typed implementations, navigation, and Link defaults.
  * Create the Router before Links and register implementations synchronously;
@@ -39,8 +50,17 @@ export class Router<
   protected didInit: Accessor<boolean>;
   protected setDidInit: Setter<boolean>;
   protected disposed = false;
+  private readonly urls: ReturnType<typeof createRouteUrls>;
 
   constructor(sitemap: RootSitemap, options?: {
+    /** Mount the unchanged sitemap at an absolute URL pathname (e.g. `/tools/app`).
+     * Use a URL-encoded path without an origin, query, fragment, or dot segments.
+     * Trailing slashes are ignored; omit, `''`, or `'/'` to mount at the site root.
+     * Both `/tools/app` and `/tools/app/` match the sitemap index; generated index
+     * URLs end in `/`. Mounted URL rewrites and menu links retain fragments and
+     * unrelated query parameters; the locator controls declared search values.
+     * The browser engine leaves URLs outside the mount to the browser. */
+    basePath?: string,
     /** The history layer to use. Defaults to the browser's Navigation API.
      * Tests can use MemoryEngine; other integrations can supply their own. */
     engine?: NavigationEngine,
@@ -57,6 +77,7 @@ export class Router<
     /** Speculative loading is disabled unless enabled here or on a Link. */
     prefetch?: Prefetch,
   }) {
+    this.urls = createRouteUrls(sitemap, options?.basePath);
     const rrCache = new RenderedRouteCache(options?.maxCachedPages);
     const preparations = new PreparationRegistry(options?.prefetchCache);
     this.sitemap = sitemap;
@@ -83,7 +104,7 @@ export class Router<
       try {
         this.implMap.check();
         const engine = options?.engine ?? new NavigationApiEngine();
-        const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache, preparations);
+        const router = new ActualRouter(this.sitemap, this.implMap, engine, rrCache, preparations, this.urls);
         this.actualRouter = router;
         const initialization = router.init();
         // The engine is attached; navigation need not wait for the first page's
@@ -107,6 +128,21 @@ export class Router<
     return this.actualRouter!.navigate(locator, options);
   }
 
+  /** Push the current URL/state without rendering or changing page lifecycle.
+   * Requires a fully activated current page. enter and its returned cleanup run
+   * synchronously, once; cleanup runs at departure commit (children first), or
+   * before page disposal, even if destination resolution, persistence or rendering
+   * fails. Opening cancellation does not close a live interaction.
+   * Nested opens are supported with a warning: navigation away may leave extra
+   * Back steps. Managed Link/navigate pushes replace a marked entry, even expired;
+   * raw anchors do not guarantee replacement. Focus management and async UI work
+   * belong to the component. Native dialog cancel handlers should preventDefault
+   * and call close(), rather than independently closing the dialog. */
+  pushTransient(enter: () => void | (() => void)): TransientHandle {
+    if (this.disposed || !this.didInit()) throw new Error('Router is not active');
+    return this.actualRouter!.pushTransient(enter);
+  }
+
   resolveDestination<ParamDefs extends AnyParamDefs>(target: Locator<ParamDefs>, mode: NavigationMode = 'push'): DestinationSnapshot {
     if (!this.disposed && this.didInit()) return this.actualRouter!.resolveDestination(target, mode);
     // Before the engine attaches there are no bookmarks to resume, but anchors
@@ -125,13 +161,17 @@ export class Router<
     return this.actualRouter!.activateDestination(snapshot, info);
   }
 
+  /** Generate a root-relative URL with the configured basePath and serialized
+   * search params. Throws if browser URL normalization would leave the mount.
+   * Usable before initialization; append `#id` for a native anchor. */
   toUrl(locator: Locator<any>) {
-    // Also usable before asynchronous init (e.g. for an initial anchor href).
-    return locatorToUrl(this.sitemap, locator);
+    return this.urls.toUrl(locator);
   }
 
+  /** Match the pathname and search params. Throws for an unmatched URL,
+   * including URLs outside the configured basePath. Fragments are not route inputs. */
   toLocator(url: URL) {
-    return urlToLocator(this.sitemap, url);
+    return this.urls.toLocator(url);
   }
 
   currentLocator() {

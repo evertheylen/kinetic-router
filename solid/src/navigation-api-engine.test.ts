@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NavigationApiEngine } from './navigation-api-engine.js';
+import type { EngineHandlers } from './navigation-engine.js';
 
 function entry(id: string, key: string, index: number) {
   return Object.assign(new EventTarget(), { id, key, index, url: `https://example.com/${id}`, getState: () => undefined });
@@ -15,7 +16,7 @@ function setup() {
     updateCurrentEntry: vi.fn(),
   });
   vi.stubGlobal('navigation', navigation);
-  const handlers = { handleNavigate: vi.fn(async () => {}), handleBeforeCommit: vi.fn(), handleDispose: vi.fn() };
+  const handlers = { handleNavigate: vi.fn(async () => {}), handleBeforeCommit: vi.fn<NonNullable<EngineHandlers['handleBeforeCommit']>>(), handleDispose: vi.fn() };
   const engine = new NavigationApiEngine();
   const detach = engine.attach(handlers);
   return { engine, navigation, first, handlers, detach };
@@ -42,6 +43,33 @@ describe('NavigationApiEngine', () => {
     expect(intercept).not.toHaveBeenCalled();
     expect(handlers.handleBeforeCommit).not.toHaveBeenCalled();
     expect(handlers.handleNavigate).not.toHaveBeenCalled();
+  });
+
+  it.each(['push', 'traverse'] as const)('passes %s context and maps presentation hints to manual focus/scroll', type => {
+    const { navigation, first, handlers } = setup();
+    handlers.handleBeforeCommit.mockReturnValue({ preservePresentation: true });
+    const intercept = vi.fn();
+    const info = {};
+    navigation.dispatchEvent(Object.assign(new Event('navigate'), {
+      canIntercept: true, navigationType: type, destination: first, info, intercept,
+    }));
+    expect(handlers.handleBeforeCommit).toHaveBeenCalledExactlyOnceWith({ navigationType: type, destination: first, info });
+    expect(intercept).toHaveBeenCalledWith(expect.objectContaining({ focusReset: 'manual', scroll: 'manual' }));
+  });
+
+  it('ignore bypasses the hook, and ordinary navigation keeps browser presentation defaults', () => {
+    const { navigation, handlers } = setup();
+    const intercept = vi.fn();
+    navigation.dispatchEvent(Object.assign(new Event('navigate'), {
+      canIntercept: true, navigationType: 'push', info: { ignore: true }, intercept,
+    }));
+    expect(handlers.handleBeforeCommit).not.toHaveBeenCalled();
+    expect(intercept).toHaveBeenCalledWith();
+    navigation.dispatchEvent(Object.assign(new Event('navigate'), {
+      canIntercept: true, navigationType: 'push', intercept,
+    }));
+    expect(intercept.mock.calls[1][0]).not.toHaveProperty('focusReset');
+    expect(intercept.mock.calls[1][0]).not.toHaveProperty('scroll');
   });
 
   it('rejects duplicate attachment', () => {

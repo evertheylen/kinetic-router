@@ -7,6 +7,7 @@ export default defineConfig({
     conditions: ['browser', 'development'],
   },
   test: {
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.server.test.ts'],
     environment: 'happy-dom',
     server: {
       deps: {

@@ -14,16 +14,16 @@ function rendered(definition: Route<any>, values: Record<string, any>, untracked
   const params = createParamStorage({ route: definition, implementation, paramMap: state.paramsByDefinition, parent: parent?.renderArgs.params });
   const lifecycle = runWithOwner(params.owner, createPageLifecycle);
   const result: RenderedRoute = {
-    route: definition, implementation, owner: params.owner, lifecycle,
+    route: definition, implementation, lifecycle,
     renderArgs: { params, pageStatus: lifecycle.status },
-    renderOutput: undefined, subFrame: undefined,
+    renderOutput: undefined, subOutlet: undefined,
   };
   created.push(result);
   return result;
 }
 
 afterEach(() => {
-  for (const page of created.splice(0).reverse()) page.owner.dispose();
+  for (const page of created.splice(0).reverse()) page.renderArgs.params.dispose();
 });
 
 describe('reusable route prefixes', () => {

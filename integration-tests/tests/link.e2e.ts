@@ -17,6 +17,35 @@ async function center(page: import('@playwright/test').Page, id = 'primary') {
   return { x: bounds!.x + bounds!.width / 2, y: bounds!.y + bounds!.height / 2 };
 }
 
+test('matches deep links under the mount, preserves URL suffixes, and leaves sibling paths to the browser', async ({ page }) => {
+  const suffix = '?q=deep%20link&source=email#results';
+  const canonical = '/link-test/results' + suffix;
+  await page.goto('/link-test//results' + suffix);
+  await expect(page.getByTestId('default-query')).toHaveText('deep link');
+  await expect(page).toHaveURL(canonical);
+  await page.evaluate(() => { document.documentElement.dataset.mountTest = 'same-document'; });
+
+  const managed = page.getByTestId('primary');
+  await expect(managed).toHaveAttribute('href', '/link-test/a');
+  await managed.click();
+  await expect(page).toHaveTitle('a');
+  await expect(page).toHaveURL(/\/link-test\/a$/);
+  await page.goBack();
+  await expect(page.getByTestId('default-query')).toHaveText('deep link');
+  await expect(page).toHaveURL(canonical);
+  await page.goForward();
+  await expect(page).toHaveTitle('a');
+
+  await page.getByTestId('results-fragment').click();
+  await expect(page.getByTestId('default-query')).toHaveText('plain link');
+  await expect(page).toHaveURL(/\/link-test\/results\?q=plain\+link#results$/);
+  await expect(page.locator('html')).toHaveAttribute('data-mount-test', 'same-document');
+
+  await page.getByTestId('outside-mount').click();
+  await expect(page).toHaveURL(/\/link-testing\/home$/);
+  await expect(page.getByRole('heading', { name: 'Router scenarios' })).toBeVisible();
+});
+
 test('real hover across children stages once, preserves focus/history/title, and click adopts exactly once', async ({ page }) => {
   await start(page);
   await page.getByLabel('Notes').focus();

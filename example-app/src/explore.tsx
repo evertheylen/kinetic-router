@@ -1,4 +1,4 @@
-import { Frame } from "@kinetic-router/solid/frame.js";
+import { Outlet } from "@kinetic-router/solid/outlet.js";
 import { Link } from "@kinetic-router/solid/link.js";
 import { Fingerprint } from "@kinetic-router/testing-utils/fingerprint.js";
 import { index } from "@kinetic-router/definition";
@@ -15,7 +15,7 @@ router.implement(explore, {
       const html = <div>
         <h1>Agencies</h1>
         <Fingerprint />
-        <Frame component="div" class="route-frame" />
+        <Outlet component="div" class="route-outlet" />
       </div>;
 
       return { html, title: 'agencies', description: 'Agency wrapper' };

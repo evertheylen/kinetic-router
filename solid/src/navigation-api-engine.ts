@@ -46,11 +46,15 @@ export class NavigationApiEngine implements NavigationEngine {
       }
 
       // the listener runs pre-commit: the outgoing entry is still current
-      handlers.handleBeforeCommit?.();
+      if (handlers.shouldIntercept?.(event.destination) === false) return;
+      const presentation = handlers.handleBeforeCommit?.({
+        navigationType: event.navigationType, destination: event.destination, info,
+      });
 
       const fromId = window.navigation.currentEntry!.id;
 
       event.intercept({
+        ...(presentation?.preservePresentation ? { focusReset: 'manual' as const, scroll: 'manual' as const } : {}),
         handler: async () => {
           attachment.signal.throwIfAborted();
           // Read the final identity after commit, not from the pre-commit destination.

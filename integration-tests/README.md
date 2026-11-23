@@ -88,5 +88,15 @@ with real hover, keyboard, touch/implicit capture, cancellation, new-tab/downloa
 menu/replace, and save-data changes. Add `?hold&press` to pause async page factories
 and enable only press, then use **Release renders** to complete navigation.
 
+## Dumb SSR production fixture
+
+The same browser suite starts a second, small HTTP adapter on port 4174. It uses
+separate production server/ordinary-DOM builds of `src/dumb-ssr/`, with shared
+page registration. `tests/dumb-ssr.e2e.ts` covers public HTML/head/native anchors,
+fresh-node replacement, the loading-shell handoff, empty CSR shell, explicit
+API-error recovery, stale attempts, cleanup and browser history. It does not
+promise general Router initialization recovery. See the
+[dumb SSR guide](../solid/docs/dumb-ssr.md) for contracts and manual startup.
+
 `pnpm --filter @kinetic-router/integration-tests test` runs the package directly
 if the app/libraries have already been built. Use the root command otherwise.

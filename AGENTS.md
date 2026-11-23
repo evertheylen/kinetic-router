@@ -10,8 +10,8 @@ and assume node is configured with `--enable-source-maps` so there's no need for
 |---|---|---|
 | `@kinetic-router/definition` | `definition/` | Framework-agnostic DSL for declaring routes, params, and sitemaps. No runtime routing. |
 | `@kinetic-router/url` | `url/` | `Locator` ⇄ URL (de)serialization. Depends on `definition`. |
-| `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js`, `@solidjs/web`, both 2.0 prereleases). |
-| `example-app` | `example-app/` | Vite + `vite-plugin-solid` demo (private). `pnpm --filter example-app dev`. |
+| `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js` and `@solidjs/web`, both Solid 2.x). |
+| `example-app` | `example-app/` | Vite + `@solidjs/vite-plugin` demo (private). `pnpm --filter @kinetic-router/example-app dev`. |
 
 Keep history behind `NavigationEngine`: future iOS support should use engine injection,
 not platform-specific branches in the router core.
@@ -27,6 +27,14 @@ CI=true pnpm --filter @kinetic-router/solid exec vitest run   # one package
 
 Publishing: `./publish.sh` — patch-bumps and publishes packages changed since the
 `published` git branch, then force-moves that branch. Don't run it casually.
+
+## Plans
+
+Keep implementation plans in `plans/`. Update each plan's status, progress
+checklist, open decisions/blockers, and validation results as work proceeds.
+Once fully implemented and validated, move any lasting contracts into source
+API docs/tests, delete the plan file, and update references to it. Do not retain
+completed plans as historical documentation.
 
 ## Adding a new package
 
@@ -76,8 +84,8 @@ There is no `<Route>` component or `useNavigate`. The model is:
    `render(untrackedParams, { signal, pageStatus })` returns (async) a function
    `(reactiveParams, pageStatus) => { html, title, ...ExtraOutput }`.
    Registered via `router.implement(route, page)` or `implementLazy`.
-4. **Frames** (`solid/src/frame.ts`): outlets. The root frame carries id
-   `__kinetic_router_root_frame` and a `FrameDelegate` attached to its DOM element.
+4. **Outlets** (`solid/src/outlet.ts`): containers for page content. The root outlet
+   carries id `__kinetic_router_root_outlet` and an `OutletDelegate` attached to its DOM element.
 5. **Links** (`solid/src/link.ts`): standalone `<Link route={...}>` captures the
    single active Router when mounted; do not expose a router-bound component.
    Plain `<a href={router.toUrl(route.locate({...}))}>` remains supported, but discouraged.
@@ -91,7 +99,7 @@ There is no `<Route>` component or `useNavigate`. The model is:
   asynchronously in a `queueMicrotask`; `currentLocator()` is signal-backed.
 - `ActualRouter` (`actual-router.ts`) — the engine-agnostic core: resolves entries to
   `AppState`s, finds reusable route prefixes (`diff.ts`), prepares isolated
-  output, and activates it through the frame chain.
+  output, and activates it through the outlet chain.
 - **`NavigationEngine`** (`navigation-engine.ts`) — the history-layer abstraction.
   The engine owns the history stack (entries, ids, states); the router owns rendering
   and caches rendered routes *by entry id*. Implementations:
@@ -126,11 +134,11 @@ There is no `<Route>` component or `useNavigate`. The model is:
   `vitest.config.ts` forces `resolve.conditions: ['browser', 'development']` and
   inlines `solid-js` — without this, `createEffect` silently does nothing in tests.
 - **Router tests don't need JSX**: pages can return plain DOM nodes (happy-dom), and
-  the root frame is faked by attaching a `FrameDelegate` to a div with the root frame
+  the root outlet is faked by attaching an `OutletDelegate` to a div with the root outlet
   id (see `solid/src/router.test.ts`).
 - Solid 2.0 API differences: `createEffect(compute, effect)` takes two functions;
-  `createOwner`/`runWithOwner` are used directly (rendered routes manage their own
-  owners, see `rendered-route.ts`).
+  rendered routes use public `createRoot`/`getOwner`/`runWithOwner` APIs to keep
+  their own scopes across async preparation (see `params.ts` and `rendered-route.ts`).
 - `Router` init is async (`queueMicrotask`): register all `implement()` calls
   synchronously after construction; in tests, wait until `currentLocator()` is defined.
 - `urlToLocator` expects `{ pathname, search }` (or a `URL` object). Tests in

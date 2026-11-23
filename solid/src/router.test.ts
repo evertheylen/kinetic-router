@@ -1,6 +1,6 @@
 // End-to-end tests of Router/ActualRouter running headlessly (happy-dom)
 // on top of a MemoryEngine. Pages are implemented with plain DOM nodes, and
-// the root Frame is replaced by a hand-made frame delegate, so no JSX or
+// the root Outlet is replaced by a hand-made outlet delegate, so no JSX or
 // Solid rendering setup is needed.
 
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
@@ -8,23 +8,24 @@ import { index, param, route, root } from '@kinetic-router/definition';
 import { createSignal, onCleanup, useContext } from 'solid-js';
 
 import { Router } from './router.js';
+import { AppState } from './app-state.js';
 import { MemoryEngine, type MemoryEntry } from './memory-engine.js';
-import { FrameDelegate, frameDelegateAttribute, rootFrameId } from './frame.js';
+import { OutletDelegate, outletDelegateAttribute, rootOutletId } from './outlet.js';
 import { InRenderedRoute, type RenderedRoute } from './rendered-route.js';
 import type { PagePreparationContext } from './page.js';
 
 const routers: Router[] = [];
 afterEach(() => { for (const router of routers.splice(0)) router.dispose(); });
 
-function installRootFrame() {
+function installRootOutlet() {
   const el = document.createElement('div');
-  el.id = rootFrameId;
+  el.id = rootOutletId;
 
-  const delegate: FrameDelegate = {
+  const delegate: OutletDelegate = {
     setElement(element) { el.replaceChildren(element); },
     clear() { el.replaceChildren(); },
   };
-  (el as any)[frameDelegateAttribute] = delegate;
+  (el as any)[outletDelegateAttribute] = delegate;
 
   document.body.replaceChildren(el);
   return el;
@@ -75,7 +76,7 @@ function createApp(initialUrl: string, maxCachedPages?: number) {
     },
   });
 
-  const frame = installRootFrame();
+  const outlet = installRootOutlet();
 
   const ready = vi.waitFor(() => {
     if (router.currentLocator() === undefined) {
@@ -84,7 +85,7 @@ function createApp(initialUrl: string, maxCachedPages?: number) {
   });
 
   return {
-    router, engine, frame, counters, cleanups, ready,
+    router, engine, outlet, counters, cleanups, ready,
     routes: { home, user },
     getUserParams: () => lastUserParams,
   };
@@ -127,7 +128,7 @@ function createNestedApp(
           if (name === 'outer' || name === 'layout') {
             const outlet = document.createElement('div');
             html.append(outlet);
-            current.subFrame = {
+            current.subOutlet = {
               setElement(element) { outlet.replaceChildren(element); },
               clear() { outlet.replaceChildren(); },
             };
@@ -138,10 +139,126 @@ function createNestedApp(
     });
   }
 
-  const frame = installRootFrame();
+  const outlet = installRootOutlet();
   const ready = vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
-  return { router, engine, routes, frame, counters, cleanups, rendered, contexts, ready };
+  return { router, engine, routes, outlet, counters, cleanups, rendered, contexts, ready };
 }
+
+describe('Router basePath', () => {
+  const page = { untrackedKeys: [] as const, async render() {
+    return () => ({ html: document.createElement('section'), title: 'page' });
+  } };
+
+  it('matches both mount root spellings and preserves the query and fragment during initialization and traversal', async () => {
+    const home = route({}), settings = route({ tab: param.search<string>() });
+    const sitemap = root({ [index]: home, settings });
+    const engine = new MemoryEngine('/tools/app?source=email#top');
+    const router = new Router(sitemap, { engine, basePath: '/tools/app/' });
+    routers.push(router);
+    router.implement(home, page);
+    router.implement(settings, page);
+    installRootOutlet();
+    const url = (path: string) => new URL(path, 'https://example.test');
+    for (const path of ['/tools/app', '/tools/app/']) {
+      expect(router.toLocator(url(path)).route).toBe(home);
+    }
+    for (const path of ['/tools/application/settings', '/settings', '/tools/app%2Fsettings']) {
+      expect(() => router.toLocator(url(path))).toThrow('outside basePath');
+    }
+    const target = settings.locate({ tab: 'some value' });
+    expect(router.toUrl(home.locate({}))).toBe('/tools/app/');
+    expect(router.resolveDestination(target).url).toBe('/tools/app/settings?tab=some+value');
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
+    expect(engine.entries()[0].url).toBe('/tools/app/?source=email#top');
+
+    const transient = router.pushTransient(() => {});
+    await transient.finished;
+    expect(engine.entries()[1].url).toBe('/tools/app/?source=email#top');
+    await transient.close().finished;
+    await router.navigate(target).finished;
+    expect(engine.entries()[1].url).toBe('/tools/app/settings?tab=some+value');
+    expect(engine.currentEntry().getState?.()).toMatchObject({ slugs: ['settings'] });
+    expect(router.currentLocator()?.values).toEqual({ tab: 'some value' });
+    const homeVisit = router.resolveDestination(home.locate({}), 'menu');
+    expect(homeVisit.url).toBe('/tools/app/?source=email#top');
+    await router.activateDestination(homeVisit).finished;
+    expect(router.currentLocator()?.route).toBe(home);
+  });
+
+  it.each(['alias', 'saved state'] as const)('keeps unrelated query values but uses search params from the resolved %s', async source => {
+    let defaultTab = 'summary';
+    const home = route({}), settings = route({ tab: param.search<string>().withDefault(() => defaultTab) });
+    const legacy = route({}).aliasTo(() => settings.locate({}));
+    const sitemap = root({ home, settings, legacy });
+    const path = source === 'alias' ? 'legacy' : 'settings';
+    const engine = new MemoryEngine(`/tools/app/${path}?tab=stale&source=email&source=campaign#details`);
+    if (source === 'saved state') {
+      engine.updateCurrentEntry(AppState.fromLocator(settings.locate({})).serialize(sitemap));
+    }
+    const router = new Router(sitemap, { engine, basePath: '/tools/app' });
+    routers.push(router);
+    router.implement(home, page);
+    router.implement(settings, page);
+    installRootOutlet();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(settings));
+    expect(engine.entries()[0].url).toBe('/tools/app/settings?source=email&source=campaign#details');
+    await router.navigate(home.locate({})).finished;
+
+    defaultTab = 'activity';
+    const snapshot = router.resolveDestination(settings.locate({}), 'menu');
+    expect(snapshot.operation.type).toBe('traverse');
+    expect(snapshot.url).toBe('/tools/app/settings?source=email&source=campaign&tab=summary#details');
+    expect(router.toLocator(new URL(snapshot.url, 'https://example.test')).values).toEqual({ tab: 'summary' });
+    await router.activateDestination(snapshot).finished;
+    expect(router.currentLocator()?.values).toEqual({ tab: 'summary' });
+  });
+
+  it('rejects generated URLs that normalize outside the mount before touching history', async () => {
+    const id = param.path<string>();
+    const settings = route({ id });
+    const initialUrl = '/tools/app/team/settings';
+    const engine = new MemoryEngine(initialUrl);
+    const router = new Router(root({ [id.$]: { settings } }), { engine, basePath: '/tools/app' });
+    routers.push(router);
+    router.implement(settings, page);
+    installRootOutlet();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(settings));
+
+    for (const value of ['..', '%2E%2E', '../application']) {
+      const target = settings.locate({ id: value });
+      expect(() => router.toUrl(target)).toThrow('outside basePath');
+      expect(() => router.navigate(target)).toThrow('outside basePath');
+    }
+    expect(engine.entries().map(entry => entry.url)).toEqual([initialUrl]);
+    const valid = settings.locate({ id: 'id-..' });
+    expect(router.toUrl(valid)).toBe('/tools/app/id-../settings');
+    await router.navigate(valid).finished;
+    expect(router.currentLocator()?.values).toEqual({ id: 'id-..' });
+  });
+
+  it('rejects invalid mount paths', () => {
+    const sitemap = root({ home: route({}) });
+    for (const basePath of ['tools/app', '//tools/app', '/tools?x=1', '/tools#app', '/tools/..', '/\\tools']) {
+      expect(() => new Router(sitemap, { basePath })).toThrow(/basePath must be an absolute URL pathname/);
+    }
+  });
+
+  it.each([undefined, '', '/'])('keeps legacy URL normalization when basePath is %s', async basePath => {
+    const home = route({}), away = route({});
+    const url = '/home?source=email#top';
+    const engine = new MemoryEngine(url);
+    const router = new Router(root({ home, away }), { engine, basePath });
+    routers.push(router);
+    router.implement(home, page);
+    router.implement(away, page);
+    installRootOutlet();
+    await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
+    expect(engine.entries()[0].url).toBe('/home');
+    await engine.navigate({ url, history: 'push', state: undefined }).finished;
+    await router.navigate(away.locate({})).finished;
+    expect(router.resolveDestination(home.locate({}), 'menu').url).toBe('/home');
+  });
+});
 
 describe('Router on a MemoryEngine', () => {
   beforeEach(() => {
@@ -152,7 +269,7 @@ describe('Router on a MemoryEngine', () => {
     const app = createApp('/home');
     await app.ready;
 
-    expect(app.frame.textContent).toBe('home page');
+    expect(app.outlet.textContent).toBe('home page');
     expect(app.router.currentLocator()?.route).toBe(app.routes.home);
     expect(app.counters).toEqual({ home: 1, user: 0 });
 
@@ -168,7 +285,7 @@ describe('Router on a MemoryEngine', () => {
     const res = app.router.navigate(app.routes.user.locate({ userId: 'alice' }));
     await res.finished;
 
-    expect(app.frame.textContent).toBe('user alice');
+    expect(app.outlet.textContent).toBe('user alice');
     expect(app.router.currentLocator()?.route).toBe(app.routes.user);
     expect(app.router.currentLocator()?.values).toEqual({ userId: 'alice' });
     expect(app.engine.entries().map(e => e.url)).toEqual(['/home', '/users/alice']);
@@ -181,14 +298,14 @@ describe('Router on a MemoryEngine', () => {
     await app.ready;
 
     await app.router.navigate(app.routes.user.locate({ userId: 'alice' })).finished;
-    const aliceNode = app.frame.firstChild;
+    const aliceNode = app.outlet.firstChild;
     expect(app.counters.user).toBe(1);
 
     await app.router.navigate(app.routes.user.locate({ userId: 'bob' })).finished;
 
     // same rendered instance: not re-rendered, same DOM node, new param value
     expect(app.counters.user).toBe(1);
-    expect(app.frame.firstChild).toBe(aliceNode);
+    expect(app.outlet.firstChild).toBe(aliceNode);
     expect(app.getUserParams()!.userId).toBe('bob');
     expect(app.router.currentLocator()?.values).toEqual({ userId: 'bob' });
   });
@@ -198,7 +315,7 @@ describe('Router on a MemoryEngine', () => {
     await app.ready;
 
     await app.router.navigate(app.routes.user.locate({ userId: 'alice' })).finished;
-    const aliceNode = app.frame.firstChild;
+    const aliceNode = app.outlet.firstChild;
 
     await app.router.navigate(
       app.routes.user.locate({ userId: 'alice' }),
@@ -206,26 +323,26 @@ describe('Router on a MemoryEngine', () => {
     ).finished;
 
     expect(app.counters.user).toBe(2);
-    expect(app.frame.firstChild).not.toBe(aliceNode);
+    expect(app.outlet.firstChild).not.toBe(aliceNode);
   });
 
   it('restores cached pages when traversing back and forward', async () => {
     const app = createApp('/home');
     await app.ready;
-    const homeNode = app.frame.firstChild;
+    const homeNode = app.outlet.firstChild;
 
     await app.router.navigate(app.routes.user.locate({ userId: 'alice' })).finished;
-    const userNode = app.frame.firstChild;
+    const userNode = app.outlet.firstChild;
 
     await app.engine.back().finished;
-    expect(app.frame.textContent).toBe('home page');
-    expect(app.frame.firstChild).toBe(homeNode);
+    expect(app.outlet.textContent).toBe('home page');
+    expect(app.outlet.firstChild).toBe(homeNode);
     expect(app.router.currentLocator()?.route).toBe(app.routes.home);
     await vi.waitFor(() => expect(document.title).toBe('Home'));
 
     await app.engine.forward().finished;
-    expect(app.frame.textContent).toBe('user alice');
-    expect(app.frame.firstChild).toBe(userNode);
+    expect(app.outlet.textContent).toBe('user alice');
+    expect(app.outlet.firstChild).toBe(userNode);
 
     // neither page was rendered again
     expect(app.counters).toEqual({ home: 1, user: 1 });
@@ -244,17 +361,17 @@ describe('Router on a MemoryEngine', () => {
       html: document.createElement('div'), get title() { return `Live ${params.live}${suffix()}`; },
     }));
     router.implement(detail, { untrackedKeys: ['constant'], render });
-    const frame = installRootFrame();
+    const outlet = installRootOutlet();
     await vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
     await router.navigate(detail.locate({ constant: 1, live: 1 })).finished;
-    const node = frame.firstChild;
+    const node = outlet.firstChild;
     await router.navigate(detail.locate({ constant: 1, live: 2 })).finished;
     expect(render).toHaveBeenCalledOnce();
-    expect(frame.firstChild).toBe(node);
+    expect(outlet.firstChild).toBe(node);
     await vi.waitFor(() => expect(document.title).toBe('Live 2'));
     await router.navigate(detail.locate({ constant: 2, live: 2 })).finished;
     expect(render).toHaveBeenCalledTimes(2);
-    expect(frame.firstChild).not.toBe(node);
+    expect(outlet.firstChild).not.toBe(node);
     await router.navigate(home.locate({})).finished;
     await vi.waitFor(() => expect(document.title).toBe('Home'));
     setSuffix(' updated in background');
@@ -274,7 +391,7 @@ describe('Router on a MemoryEngine', () => {
     ).finished;
 
     expect(app.engine.entries().map(e => e.url)).toEqual(['/users/alice']);
-    expect(app.frame.textContent).toBe('user alice');
+    expect(app.outlet.textContent).toBe('user alice');
   });
 
   it('keeps working after a pruned entry is disposed', async () => {
@@ -288,10 +405,10 @@ describe('Router on a MemoryEngine', () => {
     await app.router.navigate(app.routes.user.locate({ userId: 'bob' })).finished;
 
     expect(app.engine.entries().map(e => e.url)).toEqual(['/home', '/users/bob']);
-    expect(app.frame.textContent).toBe('user bob');
+    expect(app.outlet.textContent).toBe('user bob');
 
     await app.engine.back().finished;
-    expect(app.frame.textContent).toBe('home page');
+    expect(app.outlet.textContent).toBe('home page');
   });
 });
 
@@ -317,7 +434,7 @@ describe('page lifecycle', () => {
         return () => ({ html: document.createTextNode(String(token)), title: 'Draft' });
       },
     });
-    const frame = installRootFrame();
+    const outlet = installRootOutlet();
     await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
     // Ordinary anchors create entries without an AppState payload.
     const navigation = engine.navigate({ url: '/draft', state: undefined, history: 'push' });
@@ -349,7 +466,7 @@ describe('page lifecycle', () => {
       first.release(); second.release();
       expect(engine.currentEntry().id).toBe(visited.id);
       expect(router.currentLocator()?.values).toEqual({ token: 1 });
-      expect(frame.textContent).toBe('1');
+      expect(outlet.textContent).toBe('1');
       expect(tokens).toEqual([1, 1]);
       expect(makeDefault).toHaveBeenCalledOnce();
     } finally { gate.resolve(); await outcome; }
@@ -375,7 +492,7 @@ describe('page lifecycle', () => {
       await expect(interrupted.finished).rejects.toMatchObject({ name: 'AbortError' });
       await latest!.finished;
       expect(app.router.currentLocator()?.route).toBe(app.routes.home);
-      expect(app.frame.textContent).toBe('home page');
+      expect(app.outlet.textContent).toBe('home page');
       expect(app.counters.user).toBe(0);
       // The interrupted entry was still committed, so its bookmark survives.
       const snapshot = app.router.resolveDestination(app.routes.user.locate({ userId: 'alice' }), 'menu');
@@ -394,7 +511,7 @@ describe('page lifecycle', () => {
     routers.push(router);
     const render = vi.fn(async () => () => ({ html: document.createElement('div'), title: 'old' }));
     router.implement(home, { untrackedKeys: [], render });
-    installRootFrame();
+    installRootOutlet();
     await vi.waitFor(() => expect(engine.navigate).toHaveBeenCalledOnce());
     router.dispose();
     const next = createApp('/home');
@@ -402,7 +519,7 @@ describe('page lifecycle', () => {
     else gate.resolve({ id: engine.currentEntry().id });
     await next.ready;
     expect(render).not.toHaveBeenCalled();
-    expect(next.frame.textContent).toBe('home page');
+    expect(next.outlet.textContent).toBe('home page');
   });
 
   it('allows the first async renderer to be superseded without stranding the facade or orphaning its initialization', async () => {
@@ -428,12 +545,12 @@ describe('page lifecycle', () => {
         return () => ({ html: document.createTextNode('home'), title: 'Home' });
       },
     });
-    const frame = installRootFrame();
+    const outlet = installRootOutlet();
     try {
       await vi.waitFor(() => expect(started).toHaveBeenCalledOnce());
       await router.navigate(home.locate({})).finished;
       expect(router.currentLocator()?.route).toBe(home);
-      expect(frame.textContent).toBe('home');
+      expect(outlet.textContent).toBe('home');
       expect(cleanup).toHaveBeenCalledOnce();
       gate.resolve();
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -488,7 +605,7 @@ describe('page lifecycle', () => {
     const app = createNestedApp(1, new MemoryEngine('/outside'), gate.promise);
     await app.ready;
     await vi.waitFor(() => expect(document.title).toBe('outside'));
-    const outside = app.frame.firstChild;
+    const outside = app.outlet.firstChild;
     const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
     const navigation = app.router.navigate(app.routes.beta.locate({}));
     try {
@@ -498,7 +615,7 @@ describe('page lifecycle', () => {
       expect(status.isVisible()).toBe(false);
       expect(status.hasFocus()).toBe(false);
       expect(app.contexts.beta?.signal.aborted).toBe(false);
-      expect(app.frame.firstChild).toBe(outside);
+      expect(app.outlet.firstChild).toBe(outside);
       expect(document.querySelector('[data-kinetic-router-backstage]')?.contains(app.rendered.outer!.renderOutput!.html)).toBe(true);
       expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
       expect(document.title).toBe('outside');
@@ -542,7 +659,7 @@ describe('page lifecycle', () => {
       return { untrackedKeys: implementation.untrackedKeys, render };
     });
     router.implementLazy(slow, load, { untrackedKeys: implementation.untrackedKeys });
-    const frame = installRootFrame();
+    const outlet = installRootOutlet();
     await vi.waitFor(() => expect(router.currentLocator()).toBeDefined());
     const first = router.navigate(slow.locate({}));
     await vi.waitFor(() => expect(phase === 'lazy' ? load : render).toHaveBeenCalledOnce());
@@ -554,7 +671,7 @@ describe('page lifecycle', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     await expect(first.finished).rejects.toBe(failure);
     expect(output).not.toHaveBeenCalled();
-    expect(frame.textContent).toBe('');
+    expect(outlet.textContent).toBe('');
     expect(router.currentLocator()?.route).toBe(home);
     expect(document.title).toBe('Home');
     await router.navigate(slow.locate({})).finished;
@@ -579,19 +696,19 @@ describe('bounded page caching', () => {
   it.each([0, 1])('re-renders evicted entries without deleting history (budget %s)', async limit => {
     const app = createApp('/home', limit);
     await app.ready;
-    const originalHome = app.frame.firstChild;
+    const originalHome = app.outlet.firstChild;
     await app.router.navigate(app.routes.user.locate({ userId: 'alice' })).finished;
     expect(app.cleanups).toEqual({ home: 1, user: 0 });
     expect(originalHome?.parentNode).toBeNull();
-    const originalUser = app.frame.firstChild;
+    const originalUser = app.outlet.firstChild;
 
     await app.engine.back().finished;
-    expect(app.frame.textContent).toBe('home page');
-    expect(app.frame.firstChild).not.toBe(originalHome);
+    expect(app.outlet.textContent).toBe('home page');
+    expect(app.outlet.firstChild).not.toBe(originalHome);
     expect(app.cleanups).toEqual({ home: 1, user: 1 });
     await app.engine.forward().finished;
-    expect(app.frame.textContent).toBe('user alice');
-    expect(app.frame.firstChild).not.toBe(originalUser);
+    expect(app.outlet.textContent).toBe('user alice');
+    expect(app.outlet.firstChild).not.toBe(originalUser);
     expect(app.router.currentLocator()?.values).toEqual({ userId: 'alice' });
     expect(app.counters).toEqual({ home: 2, user: 2 });
     expect(app.engine.entries().map(entry => entry.url)).toEqual(['/home', '/users/alice']);
@@ -601,13 +718,13 @@ describe('bounded page caching', () => {
     const app = createApp('/home', 1);
     await app.ready;
     await app.router.navigate(app.routes.user.locate({ userId: 'alice' })).finished;
-    const node = app.frame.firstChild;
+    const node = app.outlet.firstChild;
     await app.router.navigate(app.routes.user.locate({ userId: 'bob' })).finished;
-    expect(app.frame.firstChild).toBe(node);
+    expect(app.outlet.firstChild).toBe(node);
     expect(app.cleanups.user).toBe(0);
 
     await app.engine.back().finished;
-    expect(app.frame.firstChild).not.toBe(node);
+    expect(app.outlet.firstChild).not.toBe(node);
     expect(app.router.currentLocator()?.values).toEqual({ userId: 'alice' });
     expect(app.cleanups.user).toBe(1);
   });
@@ -625,7 +742,7 @@ describe('bounded page caching', () => {
     };
     router.implement(home, implementation);
     router.implement(detail, implementation);
-    installRootFrame();
+    installRootOutlet();
     await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
     await router.navigate(detail.locate({ draft: 'unsent text' })).finished;
     const scrollY = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(123);
@@ -644,42 +761,42 @@ describe('bounded page caching', () => {
   it('clears a reused root outlet in menu mode and restores its cached descendants on Back', async () => {
     const app = createNestedApp(10);
     await app.ready;
-    const outerNode = app.frame.firstChild;
-    const alphaNode = app.frame.querySelector('[data-page="alpha"]');
+    const outerNode = app.outlet.firstChild;
+    const alphaNode = app.outlet.querySelector('[data-page="alpha"]');
     await app.router.navigate(app.routes.outer.locate({}), { mode: 'menu' }).finished;
     expect(app.engine.entries()).toHaveLength(1); // No preceding root: replace.
-    expect(app.frame.firstChild).toBe(outerNode);
-    expect(app.frame.querySelector('[data-page="layout"]')).toBeNull();
+    expect(app.outlet.firstChild).toBe(outerNode);
+    expect(app.outlet.querySelector('[data-page="layout"]')).toBeNull();
     await vi.waitFor(() => expect(document.title).toBe('outer'));
     await app.router.navigate(app.routes.alpha.locate({})).finished;
-    const restoredAlpha = app.frame.querySelector('[data-page="alpha"]');
+    const restoredAlpha = app.outlet.querySelector('[data-page="alpha"]');
     expect(restoredAlpha).not.toBe(alphaNode); // Its original entry was replaced.
     await app.engine.back().finished;
-    expect(app.frame.querySelector('[data-page="layout"]')).toBeNull();
+    expect(app.outlet.querySelector('[data-page="layout"]')).toBeNull();
     await app.engine.forward().finished;
-    expect(app.frame.querySelector('[data-page="alpha"]')).toBe(restoredAlpha);
+    expect(app.outlet.querySelector('[data-page="alpha"]')).toBe(restoredAlpha);
     await vi.waitFor(() => expect(document.title).toBe('alpha'));
   });
 
   it('retains a cached child together with both ancestors while evicting its older sibling', async () => {
     const app = createNestedApp(4);
     await app.ready;
-    const outerNode = app.frame.firstChild;
+    const outerNode = app.outlet.firstChild;
     await app.router.navigate(app.routes.beta.locate({})).finished;
-    const betaNode = app.frame.querySelector('[data-page="beta"]');
+    const betaNode = app.outlet.querySelector('[data-page="beta"]');
     // A newly rendered child must inherit the reused parent's storage and owner.
     expect(app.rendered.beta?.renderArgs.params.parent).toBe(app.rendered.layout?.renderArgs.params);
     await app.router.navigate(app.routes.outside.locate({})).finished;
     expect(app.cleanups).toEqual({ outer: 0, layout: 0, alpha: 1, beta: 0, outside: 0 });
 
     await app.engine.back().finished;
-    expect(app.frame.firstChild).toBe(outerNode);
-    expect(app.frame.querySelector('[data-page="beta"]')).toBe(betaNode);
+    expect(app.outlet.firstChild).toBe(outerNode);
+    expect(app.outlet.querySelector('[data-page="beta"]')).toBe(betaNode);
     expect(app.counters).toEqual({ outer: 1, layout: 1, alpha: 1, beta: 1, outside: 1 });
 
     await app.engine.back().finished;
-    expect(app.frame.firstChild).not.toBe(outerNode);
-    expect(app.frame.querySelector('[data-page="alpha"]')).not.toBeNull();
+    expect(app.outlet.firstChild).not.toBe(outerNode);
+    expect(app.outlet.querySelector('[data-page="alpha"]')).not.toBeNull();
     expect(app.counters).toEqual({ outer: 2, layout: 2, alpha: 2, beta: 1, outside: 1 });
     expect(app.cleanups).toEqual({ outer: 1, layout: 1, alpha: 1, beta: 1, outside: 1 });
     expect(app.engine.entries()).toHaveLength(3);
@@ -706,15 +823,15 @@ describe('bounded page caching', () => {
     const ready = new Promise<void>(resolve => { finish = resolve; });
     const app = createNestedApp(4, new ImmediateDisposeEngine('/nested/alpha'), ready);
     await app.ready;
-    const outerNode = app.frame.firstChild;
+    const outerNode = app.outlet.firstChild;
     const navigation = app.router.navigate(app.routes.beta.locate({}), { mode: 'replace' });
     await navigation.committed;
     expect(app.cleanups).toEqual({ outer: 0, layout: 0, alpha: 0, beta: 0, outside: 0 });
-    expect(app.frame.querySelector('[data-page="alpha"]')).not.toBeNull();
+    expect(app.outlet.querySelector('[data-page="alpha"]')).not.toBeNull();
     finish();
     await navigation.finished;
-    expect(app.frame.firstChild).toBe(outerNode);
-    expect(app.frame.querySelector('[data-page="beta"]')).not.toBeNull();
+    expect(app.outlet.firstChild).toBe(outerNode);
+    expect(app.outlet.querySelector('[data-page="beta"]')).not.toBeNull();
     expect(app.cleanups).toEqual({ outer: 0, layout: 0, alpha: 1, beta: 0, outside: 0 });
     await app.router.navigate(app.routes.outside.locate({}), { mode: 'replace' }).finished;
     expect(app.cleanups).toEqual({ outer: 1, layout: 1, alpha: 1, beta: 1, outside: 0 });
@@ -750,10 +867,10 @@ describe('bounded page caching', () => {
       expect(await traversed).toMatchObject({ name: 'AbortError' });
       if (abort) {
         expect(await outcome).toMatchObject({ name: 'AbortError' });
-        expect(app.frame.textContent).toBe('outside');
+        expect(app.outlet.textContent).toBe('outside');
       } else {
         expect(await outcome).toBeUndefined();
-        expect(app.frame.querySelector('[data-page="beta"]')).not.toBeNull();
+        expect(app.outlet.querySelector('[data-page="beta"]')).not.toBeNull();
         expect(app.cleanups.outer).toBe(0);
         expect(app.cleanups.layout).toBe(0);
         await app.router.navigate(app.routes.outside.locate({}), { mode: 'replace' }).finished;
@@ -776,14 +893,14 @@ describe('bounded page caching', () => {
     try {
       await vi.waitFor(() => expect(app.counters.beta).toBe(1));
       await app.router.navigate(app.routes.outside.locate({})).finished;
-      const outsideNode = app.frame.firstChild;
+      const outsideNode = app.outlet.firstChild;
       await vi.waitFor(() => expect(document.title).toBe('outside'));
       scrollTo.mockClear();
       finish();
 
       expect(await outcome).toMatchObject({ name: 'AbortError' });
       expect(app.rendered.beta).toBeUndefined();
-      expect(app.frame.firstChild).toBe(outsideNode);
+      expect(app.outlet.firstChild).toBe(outsideNode);
       expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
       expect(document.title).toBe('outside');
       expect(scrollTo).not.toHaveBeenCalled();
@@ -792,11 +909,11 @@ describe('bounded page caching', () => {
       // The unfinished entry must keep its own state, not the outgoing page's.
       await app.engine.back().finished;
       expect(app.router.currentLocator()?.route).toBe(app.routes.beta);
-      expect(app.frame.querySelector('[data-page="beta"]')).not.toBeNull();
+      expect(app.outlet.querySelector('[data-page="beta"]')).not.toBeNull();
       expect(app.counters.beta).toBe(2);
       await app.engine.forward().finished;
       expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
-      expect(app.frame.querySelector('[data-page="beta"]')).toBeNull();
+      expect(app.outlet.querySelector('[data-page="beta"]')).toBeNull();
     } finally {
       finish();
       await outcome;
@@ -814,7 +931,7 @@ describe('bounded page caching', () => {
     const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
     try {
       await vi.waitFor(() => expect(app.rendered.layout).toBeDefined());
-      expect(app.frame.textContent).toBe('outside');
+      expect(app.outlet.textContent).toBe('outside');
       const outerNode = app.rendered.outer!.renderOutput!.html;
       const layoutNode = app.rendered.layout!.renderOutput!.html;
       await app.router.navigate(app.routes.outside.locate({})).finished;
@@ -825,7 +942,7 @@ describe('bounded page caching', () => {
       finish();
       expect(await outcome).toMatchObject({ name: 'AbortError' });
       expect(app.rendered.beta).toBeUndefined();
-      expect(app.frame.textContent).toBe('outside');
+      expect(app.outlet.textContent).toBe('outside');
       expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
     } finally {
       finish();
@@ -850,18 +967,18 @@ describe('bounded page caching', () => {
     const load = vi.fn(async () => { await gate; return slowImplementation; });
     const slowImplementation = { ...implementation, render: vi.fn(implementation.render) };
     router.implementLazy(slow, load, { untrackedKeys: slowImplementation.untrackedKeys });
-    const frame = installRootFrame();
+    const outlet = installRootOutlet();
     await vi.waitFor(() => expect(router.currentLocator()?.route).toBe(home));
     const navigation = router.navigate(slow.locate({}));
     const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
     try {
       await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
       await router.navigate(home.locate({})).finished;
-      const homeNode = frame.firstChild;
+      const homeNode = outlet.firstChild;
       finish();
       expect(await outcome).toMatchObject({ name: 'AbortError' });
       expect(slowImplementation.render).not.toHaveBeenCalled();
-      expect(frame.firstChild).toBe(homeNode);
+      expect(outlet.firstChild).toBe(homeNode);
       expect(router.currentLocator()?.route).toBe(home);
     } finally {
       finish();
@@ -878,7 +995,7 @@ describe('bounded page caching', () => {
     const navigation = app.router.navigate(app.routes.beta.locate({}));
     const outcome = Promise.resolve(navigation.finished).catch((error: unknown) => error);
     await vi.waitFor(() => expect(app.rendered.layout).toBeDefined());
-    expect(app.frame.textContent).toBe('outside');
+    expect(app.outlet.textContent).toBe('outside');
     const outerNode = app.rendered.outer!.renderOutput!.html;
     fail(error);
     expect(await outcome).toBe(error);
@@ -887,7 +1004,7 @@ describe('bounded page caching', () => {
     expect(outerNode.parentNode).toBeNull();
     expect(app.router.currentLocator()?.route).toBe(app.routes.outside);
     await app.router.navigate(app.routes.outside.locate({})).finished;
-    expect(app.frame.textContent).toBe('outside');
+    expect(app.outlet.textContent).toBe('outside');
   });
 
   it('handles disposal of a pruned nested entry without disposing shared ancestors', async () => {

@@ -29,10 +29,41 @@ function attachedEngine(initialUrl?: string) {
 const tick = () => new Promise<void>(resolve => setTimeout(resolve));
 
 describe('MemoryEngine', () => {
-  it('starts with a single entry for the initial url', () => {
-    const engine = new MemoryEngine('/home?q=1');
+  it('supplies pre-commit destination/type/info while the outgoing entry is still current', async () => {
+    const engine = new MemoryEngine('/');
+    const first = engine.currentEntry();
+    const contexts: unknown[] = [];
+    const currents: string[] = [];
+    engine.attach({ ...mockHandlers().handlers, handleBeforeCommit(event) {
+      contexts.push({ ...event, destination: event.destination.getState?.() });
+      currents.push(engine.currentEntry().id);
+      return { preservePresentation: true };
+    } });
+    const info = {};
+    await engine.navigate({ url: '/a', state: 'a', history: 'push', info }).finished;
+    const second = engine.currentEntry();
+    await engine.traverseTo(first.key, info).finished;
+    await engine.navigate({ url: '/', state: null, history: 'replace', info: { ignore: true } }).finished;
+    expect(contexts).toEqual([
+      { navigationType: 'push', destination: 'a', info },
+      { navigationType: 'traverse', destination: undefined, info },
+    ]);
+    expect(currents).toEqual([first.id, second.id]);
+  });
 
-    expect(engine.entries()).toHaveLength(1);
+  it('shares the default info object between the pre-commit and committed hooks', async () => {
+    const engine = new MemoryEngine('/');
+    const mock = mockHandlers();
+    let info: unknown;
+    engine.attach({ ...mock.handlers, handleBeforeCommit(event) { info = event.info; } });
+    await engine.navigate({ url: '/a', state: undefined, history: 'push' }).finished;
+    expect(mock.events[0].info).toBe(info);
+  });
+
+  it('resolves a relative initial URL consistently in the listing and the current entry', () => {
+    const engine = new MemoryEngine('home?q=1');
+
+    expect(engine.entries().map(entry => entry.url)).toEqual(['/home?q=1']);
     expect(engine.currentIndex()).toBe(0);
 
     const current = engine.currentEntry();
@@ -81,7 +112,7 @@ describe('MemoryEngine', () => {
     const { engine, events } = attachedEngine('/');
     const initialId = engine.currentEntry().id!;
 
-    const res = engine.navigate({ url: '/a', state: { foo: 1 }, history: 'push' });
+    const res = engine.navigate({ url: 'a', state: { foo: 1 }, history: 'push' });
     const committed = await res.committed;
     await res.finished;
 

@@ -23,16 +23,16 @@ function page(parent?: RenderedRoute) {
   const cleanup = vi.fn();
   runWithOwner(params.owner, () => onCleanup(cleanup));
   const rendered: RenderedRoute = {
-    route: definition, implementation, owner: params.owner, lifecycle,
+    route: definition, implementation, lifecycle,
     renderArgs: { params, pageStatus: lifecycle.status }, renderOutput: { html, title: '' },
-    subFrame: undefined,
+    subOutlet: undefined,
   };
   created.push(rendered);
   return { rendered, html, cleanup };
 }
 
 afterEach(() => {
-  for (const rendered of created.splice(0).reverse()) rendered.owner.dispose();
+  for (const rendered of created.splice(0).reverse()) rendered.renderArgs.params.dispose();
 });
 
 describe('RenderedRouteCache', () => {

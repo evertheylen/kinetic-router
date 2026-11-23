@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+dist-ssr/
+dist-ssr-client/
 *.tsbuildinfo
 
 # Browser test artifacts

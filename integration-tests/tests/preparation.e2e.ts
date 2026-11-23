@@ -15,7 +15,7 @@ test('Backstage preserves viewport geometry without layout, focus, accessibility
     const target = sitemap.a.detail.locate({});
     const other = sitemap.b.locate({});
     const snapshot = router.resolveDestination(target);
-    const live = document.getElementById('__kinetic_router_root_frame')!;
+    const live = document.getElementById('__kinetic_router_root_outlet')!;
     const activeNode = live.firstChild;
     const input = live.querySelector('input')!;
     // Make window scrolling measurable, independently of the playground layout.
@@ -124,7 +124,7 @@ test('browser pre-commit cancellation releases navigation ownership and a later 
     const navigation = router.activateDestination(snapshot);
     retry.release();
     await navigation.finished;
-    const adopted = output === prepared && document.getElementById('__kinetic_router_root_frame')!.firstChild === node;
+    const adopted = output === prepared && document.getElementById('__kinetic_router_root_outlet')!.firstChild === node;
     router.disposePreparations();
     return { retained, resumed, adopted, visibleAfterDisposal: status.isVisible() };
   });
