@@ -42,14 +42,14 @@ test('Undo reverses a retained row and its space without losing DOM or local inp
   const original = await card.elementHandle();
   await card.getByRole('textbox').fill('The duck understands generics now');
   await card.getByRole('button').click();
-  const retained = page.locator('.todo-slot[data-phase="exiting"]');
+  const retained = page.locator('.todo-slot[inert]');
   await pauseMotion(retained);
   const halfway = await spaceAt(retained, 0.5);
   await expect(retained).toHaveJSProperty('inert', true);
-  await expect(retained).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.getByRole('button', { name: 'Complete Teach the rubber duck TypeScript' })).toHaveCount(0);
   await expect(page.getByLabel('Your next very important mission')).toBeFocused();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(card).toHaveAttribute('data-phase', 'present');
+  await expect(card.getByRole('button')).toBeVisible();
   expect(await card.evaluate((element, original) => element === original, original)).toBe(true);
   expect(Math.abs(await spaceAt(card, 0) - halfway)).toBeLessThan(1);
   await expect(card.getByRole('textbox')).toHaveValue('The duck understands generics now');
@@ -118,8 +118,8 @@ test('the empty-state Show also grows and collapses its space before disposal', 
   expect(exitingStart).toBeGreaterThan(exitingHalfway);
   expect(exitingHalfway).toBeGreaterThan(1);
   expect(exitingEnd).toBeLessThan(1);
-  await expect(victory).toHaveAttribute('data-phase', 'exiting');
-  await expect(victory).toHaveAttribute('aria-hidden', 'true');
+  await expect(victory).toHaveJSProperty('inert', true);
+  await expect(page.getByRole('heading', { name: 'All done. All glory.' })).toHaveCount(0);
   // Hold the entering card at zero so it doesn't mask the banner's layout change.
   const added = page.locator('.todo-slot');
   await pauseMotion(added);
@@ -208,7 +208,7 @@ test('reduced motion, form validation, mobile layout, and cached navigation work
 
 test('enabling reduced motion during exit settles both layout and decorative motion', async ({ page }) => {
   await page.getByRole('button', { name: 'Complete all', exact: true }).click();
-  await expect(page.locator('.todo-slot[data-phase="exiting"]')).toHaveCount(4);
+  await expect(page.locator('.todo-slot[inert]')).toHaveCount(4);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.todo-slot')).toHaveCount(0);
   await expect(page.locator('.todos-victory')).toHaveCSS('opacity', '1');

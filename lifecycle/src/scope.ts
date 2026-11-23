@@ -74,7 +74,6 @@ export class Scope {
       }
       this.queue(registration)
     }
-    this.changed()
   }
 
   register(kind: Kind, handler: InOutHandler) {
@@ -104,17 +103,20 @@ export class Scope {
     registration.run = { controller: new AbortController(), state: 'queued' }
   }
 
-  /** The retain effect calls this after rendering, before checking disposal. */
-  runPending() {
-    if (this.disposed) return
-    const entering = [...this.handlers].some(registration =>
-      registration.kind === 'enter' && registration.run && registration.run.state !== 'done',
+  /** Run committed work; return true if the exit is complete. A hook can request
+   * reentry, so never prune in the same pass in which a hook was invoked. */
+  advance(): boolean {
+    let removable = this.exiting
+    const entering = [...this.handlers].some(({ kind, run }) =>
+      kind === 'enter' && run && run.state !== 'done',
     )
     for (const registration of this.handlers) {
       const run = registration.run
-      if (!run || run.state !== 'queued' || (registration.kind === 'exit' && entering)) continue
-      this.invoke(registration, run)
+      if (!run || run.state === 'done') continue
+      removable = false
+      if (run.state === 'queued' && !(registration.kind === 'exit' && entering)) this.invoke(registration, run)
     }
+    return removable
   }
 
   private cancel(registration: Registration) {
@@ -139,22 +141,15 @@ export class Scope {
       finish()
       return
     }
-    let result: Completion
     try {
       // A standalone enter still runs inward when removal is queued behind it.
       const direction = registration.kind === 'enter' ? 'in' : this.direction
-      result = runWithOwner(null, () => registration.handler({ direction, signal: run.controller.signal }))
+      const result = runWithOwner(null, () => registration.handler({ direction, signal: run.controller.signal }))
+      if (result) void Promise.resolve(result).then(finish, failed)
+      else finish()
     } catch (error) {
-      result = Promise.reject(error)
+      failed(error)
     }
-    // All completions, including throws, wait for the same promise turn. A handler
-    // may request reentry before failing; let Solid render it before pruning.
-    void Promise.resolve(result).then(finish, failed)
-  }
-
-  canRemove(): boolean {
-    return this.exiting
-      && [...this.handlers].every(registration => !registration.run || registration.run.state === 'done')
   }
 
   dispose() {
@@ -174,6 +169,8 @@ function currentScope() {
   return scope
 }
 
+/** Reactive presence only. The library never writes a phase attribute, class, or
+ * accessibility state to the DOM; the component decides how to use this signal. */
 export function useLifecycle(): LifecycleState {
   return currentScope().state
 }
@@ -199,6 +196,8 @@ function animationHook<T extends Element>(kind: 'enter' | 'inout', handler: InOu
     return handler.run({ ...context, element })
   })
   return (target: T) => {
+    if (element === target) return
+    if (element) throw new Error('Bind each lifecycle animation ref to only one element')
     element = target
     // Skip standalone enters registered late in this already-exiting boundary.
     if (kind === 'inout' || scope.direction === 'in') {

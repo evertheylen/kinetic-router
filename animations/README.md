@@ -33,10 +33,9 @@ const motion = createAnimation(
 ```
 
 `createAnimation` applies its first target before insertion without interpolation;
-subsequent signal changes retarget from the current native presentation. For an
-entrance animation, use `createTransition` on a separate wrapper: its hidden first
-frame is prepared before insertion, then played. That preparation prevents a flash;
-it does **not** skip the entrance animation. No new `initial: false` option is added.
+later changes animate between authored targets, sampling the displayed pose only
+when interrupting active motion. For an entrance animation, use `createTransition`
+on a separate wrapper: its first frame is prepared before insertion, then played.
 
 Compile a spring once into ordinary native timing options:
 
@@ -49,8 +48,8 @@ const motion = createTransition(slide({ x: 100, y: 0 }), spring({
 `spring()` returns `{ duration, easing }`, usable with either helper or WAAPI.
 It preserves overshoot using CSS `linear()`; it never runs physics each frame.
 
-`createCssTransition` generalizes the demo's old `createSpaceTransition`: set any
-CSS state and await only named properties or keyframe animations on that element.
+`createCssTransition` sets authored CSS state and waits for the named transitions
+or keyframe animations on that element. List exact longhand or custom property names.
 It handles reversals, cancellation and reduced motion without a JS animation loop.
 
 ```tsx
@@ -73,8 +72,8 @@ The grid transition may reflow layout each frame **inside the browser**; it does
 not run JavaScript each frame. Prefer opacity/transform for compositor-friendly
 motion. CSS owns timing and endpoints; animate a wrapper when combining effects.
 Use `animations: ['panel-in', 'panel-out']` and `mode: 'separate'` for named CSS
-animations whose entry must finish before exit. Unrelated/infinite effects never
-hold a boundary open.
+animations whose entry must finish before exit. Unrelated effects and effects that
+are already infinite are ignored. Selected effects must be allowed to finish or cancel.
 
 Detailed contracts: [presence](src/transition.ts), [reactive targets](src/animation.ts),
 [spring compiler](src/spring.ts), and [CSS helper](src/css-transition.ts).

@@ -64,7 +64,7 @@ contracts live beside the exported types in [link.ts](solid/src/link.ts),
 
 ```sh
 CI=true pnpm install
-pnpm --filter @kinetic-router/solid... -r build
+pnpm --filter @kinetic-router/example-app... -r build
 pnpm --filter @kinetic-router/example-app dev
 ```
 

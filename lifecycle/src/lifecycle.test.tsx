@@ -60,6 +60,44 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(host.textContent).toBe('content')
   })
 
+  it('commits presence to the DOM before dispatching work already woken by a completion', async () => {
+    const [visible, show] = createSignal(true)
+    const enter = deferred()
+    const calls: string[] = []
+    function Content() {
+      const { phase } = useLifecycle()
+      let element!: HTMLParagraphElement
+      onInOut(({ direction }) => {
+        calls.push(`${direction}:${element.inert}`)
+        if (direction === 'in') return enter.promise
+      })
+      return <p ref={element} inert={phase() === 'exiting'} />
+    }
+    mount(() => <Lifecycle.Show when={visible()}><Content /></Lifecycle.Show>)
+    await settle()
+    enter.resolve(); await enter.promise
+    show(false); await settle()
+    expect(calls).toEqual(['in:false', 'out:true'])
+  })
+
+  it('admits a phase-dependent exit before pruning a just-completed entry', async () => {
+    const [visible, show] = createSignal(true)
+    const enter = deferred(), exit = deferred()
+    function Child() { onExit(() => exit.promise); return <b>exiting</b> }
+    function Content() {
+      const { phase } = useLifecycle()
+      onEnter(() => enter.promise)
+      return <>{phase() === 'exiting' && <Child />}</>
+    }
+    const { host } = mount(() => <Lifecycle.Show when={visible()}><Content /></Lifecycle.Show>)
+    await settle()
+    enter.resolve(); await enter.promise
+    show(false); await settle()
+    expect(host.textContent).toBe('exiting')
+    exit.resolve(); await settle()
+    expect(host.textContent).toBe('')
+  })
+
   it('finishes all superseded abort cleanup before applying any new transition targets', async () => {
     const [visible, show] = createSignal(true)
     const gate = deferred()
@@ -296,6 +334,20 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     } finally {
       load.resolve(); await settle()
     }
+  })
+
+  it('does not hold a synchronous enter open across committed direction changes', () => {
+    const [visible, show] = createSignal(true)
+    const exit = deferred(), events: string[] = []
+    function Content() {
+      onEnter(() => { events.push('in') })
+      onExit(() => { events.push('out'); return exit.promise })
+      return <p>content</p>
+    }
+    mount(() => <Lifecycle.Show when={visible()}><Content /></Lifecycle.Show>)
+    show(false); flush(); show(true); flush()
+    expect(events).toEqual(['in', 'out', 'in'])
+    exit.resolve()
   })
 
   it('finishes all standalone enters before starting an ordinary exit', async () => {
@@ -920,6 +972,25 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(events).toEqual(['dispose:a', 'mount:b'])
   })
 
+  it('out-in does not wait for the cleanup of a branch that was never rendered', async () => {
+    const [page, select] = createSignal('a'), [revealed, reveal] = createSignal(false)
+    const mounts: string[] = []
+    function Branch(props: { name: string }) { mounts.push(props.name); return <p>{props.name}</p> }
+    function App() {
+      const branches = <Lifecycle.Switch mode="out-in">
+        <Lifecycle.Match when={page() === 'a'}><Branch name="a" /></Lifecycle.Match>
+        <Lifecycle.Match when={page() === 'b'}><Branch name="b" /></Lifecycle.Match>
+      </Lifecycle.Switch>
+      return <>{revealed() && branches}</>
+    }
+    const { host } = mount(App)
+    select('b'); await settle()
+    expect(mounts).toEqual([])
+    reveal(true); await settle()
+    expect(host.textContent).toBe('b')
+    expect(mounts).toEqual(['b'])
+  })
+
   it('out-in mounts only the latest request, including fallback in both directions', async () => {
     const [page, setPage] = createSignal('a')
     const first = deferred(), fallback = deferred()
@@ -1125,6 +1196,21 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(homeMounts).toBe(1)
     gates.home.resolve(); gates.settings.resolve(); gates.fallback.resolve(); await settle()
     expect(host.textContent).toBe('home')
+  })
+
+  it('tracks direct children and fallback values without remounting the selection', async () => {
+    const [selected, select] = createSignal(true), [label, rename] = createSignal('one')
+    const { host } = mount(() => <>
+      <Lifecycle.Show when={selected()} fallback={`show:${label()}`}>{label()}</Lifecycle.Show>
+      <Lifecycle.Switch fallback={`switch:${label()}`}>
+        <Lifecycle.Match when={selected()}>{label()}</Lifecycle.Match>
+      </Lifecycle.Switch>
+    </>)
+    rename('two'); await settle()
+    expect(host.textContent).toBe('twotwo')
+    select(false); await settle()
+    rename('three'); await settle()
+    expect(host.textContent).toBe('show:threeswitch:three')
   })
 
   it.each(['Show', 'Match'] as const)('keeps %s values readable through exit and reentry', async control => {
@@ -1349,7 +1435,7 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(exits).toBe(1) // cleanup does not start an impossible asynchronous exit
   })
 
-  it.each(['throw', 'reject'] as const)('preserves same-turn reentry from an exit that fails by %s', async failure => {
+  it.each(['return', 'throw', 'reject'] as const)('preserves same-turn reentry from an exit that ends by %s', async failure => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const [visible, show] = createSignal(true)
     let mounts = 0, cleanups = 0
@@ -1358,6 +1444,7 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
       onCleanup(() => { cleanups++ })
       onExit(() => {
         show(true)
+        if (failure === 'return') return
         const error = new Error('exit failed after requesting reentry')
         if (failure === 'throw') throw error
         return Promise.reject(error)

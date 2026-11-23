@@ -138,7 +138,7 @@
   grid-template-rows: 1fr;
 }
 
-.todos-space[data-phase=exiting] {
+.todos-space[data-space=out] {
   z-index: 1;
 }
 

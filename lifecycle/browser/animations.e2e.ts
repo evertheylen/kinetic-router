@@ -30,7 +30,7 @@ test('prepares a hidden first frame, including the entrance delay', async ({ pag
 
 for (const separate of [false, true]) {
   test(`nested Loading preserves first frames and starts motion after reveal (${separate ? 'separate' : 'inout'})`, async ({ page }) => {
-    await page.getByLabel('Exit duration', { exact: true }).fill('500')
+    await page.getByLabel('Card duration', { exact: true }).fill('500')
     await page.getByLabel('Separate suspended motion', { exact: true }).setChecked(separate)
     const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Suspended motion', exact: true }) })
     await section.getByRole('button', { name: 'Toggle suspended motion', exact: true }).click()
@@ -71,6 +71,24 @@ for (const separate of [false, true]) {
   })
 }
 
+test('restoring a separate entrance first revealed during exit plays on the retained element', async ({ page }) => {
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Suspended motion', exact: true }) })
+  const toggle = section.getByRole('button', { name: 'Toggle suspended motion' })
+  await section.getByLabel('Separate suspended motion').check()
+  await section.getByLabel('Hold suspended exit').check()
+  await toggle.click()
+  await expect(section.getByText('Loading motion…')).toBeVisible()
+  await toggle.click()
+  await section.getByRole('button', { name: 'Resolve motion loading' }).click()
+  const card = section.locator('.motion-card')
+  const outgoing = await card.evaluateHandle(element => element.getAnimations()[0]!)
+  expect(await outgoing.evaluate(animation => (animation.effect as KeyframeEffect).getKeyframes().map(frame => frame.opacity))).toEqual(['1', '0'])
+  await toggle.click()
+  expect(await outgoing.evaluate(animation => animation.playState)).toBe('idle')
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await expect(card).toHaveCSS('opacity', '1')
+})
+
 test('removing a pending Loading boundary does not wait for or later mount its animations', async ({ page }) => {
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Suspended motion', exact: true }) })
   const toggle = section.getByRole('button', { name: 'Toggle suspended motion', exact: true })
@@ -90,7 +108,7 @@ test('reverses the same native animation repeatedly without snapping or remounti
   await toggle.click()
   const card = page.locator('.motion-card')
   const instance = await card.locator('code').textContent()
-  await card.getByRole('textbox').fill('retained')
+  await page.getByLabel('Motion state').fill('retained')
   const animation = await card.evaluateHandle(element => {
     const animation = element.getAnimations()[0]!
     animation.pause()
@@ -106,7 +124,7 @@ test('reverses the same native animation repeatedly without snapping or remounti
     expect(opacity).toBeLessThan(0.75)
   }
   await expect(card.locator('code')).toHaveText(instance!)
-  await expect(card.getByRole('textbox')).toHaveValue('retained')
+  await expect(page.getByLabel('Motion state')).toHaveValue('retained')
   await animation.evaluate(animation => animation.finish())
   await expect(card).toHaveCSS('opacity', '1')
   await toggle.click()
@@ -127,15 +145,16 @@ test('reversing at time zero does not rewind to the visible endpoint', async ({ 
     animation.currentTime = 0
   })
   await toggle.click()
-  await expect(card).toHaveAttribute('data-pending', 'true')
+  const release = page.getByRole('button', { name: 'Release other work' })
+  await expect(release).toBeEnabled()
   await expect(card).toHaveCSS('opacity', '0')
   expect(await card.evaluate(element => element.getAnimations()[0]!.currentTime)).toBe(0)
-  await card.getByRole('button', { name: 'Release other work' }).click({ force: true })
+  await release.click()
   await expect(card).toHaveCount(0)
 })
 
 test('separate entry finishes before exit and a completed exit stays applied until other work finishes', async ({ page }) => {
-  await page.getByLabel('Separate motion', { exact: true }).check()
+  await page.getByLabel('Motion mode').selectOption('separate')
   await page.getByLabel('Hold other work', { exact: true }).check()
   const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
   await toggle.click()
@@ -143,21 +162,24 @@ test('separate entry finishes before exit and a completed exit stays applied unt
   const entering = await card.evaluateHandle(element => element.getAnimations()[0]!)
   await toggle.click()
   await expect(card).toHaveAttribute('data-phase', 'exiting')
-  await expect(card).toHaveAttribute('data-pending', 'false')
+  const release = page.getByRole('button', { name: 'Release other work' })
+  await expect(release).toBeDisabled()
   expect(await card.evaluate((element, entering) => element.getAnimations()[0] === entering, entering)).toBe(true)
   await entering.evaluate(animation => animation.finish())
-  await expect(card).toHaveAttribute('data-pending', 'true')
+  await expect(release).toBeEnabled()
   expect(await card.evaluate((element, entering) => element.getAnimations()[0] !== entering, entering)).toBe(true)
   await card.evaluate(element => element.getAnimations()[0]!.finish())
   await expect(card).toHaveCSS('opacity', '0')
   // The independent lifecycle handler, not the animation, still retains this owner.
   await expect(card).toHaveCount(1)
-  await card.getByRole('button', { name: 'Release other work' }).click({ force: true })
+  await release.focus()
+  await expect(release).toBeFocused()
+  await release.press('Enter')
   await expect(card).toHaveCount(0)
 })
 
 test('separate exit cancellation restarts entry on the same instance', async ({ page }) => {
-  await page.getByLabel('Separate motion', { exact: true }).check()
+  await page.getByLabel('Motion mode').selectOption('separate')
   const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
   await toggle.click()
   const card = page.locator('.motion-card')
@@ -178,21 +200,22 @@ for (const separate of [false, true]) {
   test(`reduced motion skips delays without skipping other work (${separate ? 'separate' : 'inout'})`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.getByLabel('Motion delay', { exact: true }).fill('5000')
-    await page.getByLabel('Separate motion', { exact: true }).setChecked(separate)
+    await page.getByLabel('Motion mode').selectOption(separate ? 'separate' : 'inout')
     await page.getByLabel('Hold other work', { exact: true }).check()
     const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
     await toggle.click()
     const card = page.locator('.motion-card')
     await expect(card).toHaveCSS('opacity', '1')
     await toggle.click()
-    await expect(card).toHaveAttribute('data-pending', 'true')
+    const release = page.getByRole('button', { name: 'Release other work' })
+    await expect(release).toBeEnabled()
     await expect(card).toHaveCSS('opacity', '0')
     await toggle.click()
-    await expect(card).toHaveAttribute('data-pending', 'false')
+    await expect(release).toBeDisabled()
     await expect(card).toHaveCSS('opacity', '1')
     await toggle.click()
     await expect(card).toHaveCSS('opacity', '0')
-    await card.getByRole('button', { name: 'Release other work' }).click({ force: true })
+    await release.click()
     await expect(card).toHaveCount(0)
   })
 }
@@ -219,21 +242,23 @@ test('zero-duration motion settles at the correct endpoints', async ({ page }) =
   const card = page.locator('.motion-card')
   await expect(card).toHaveCSS('opacity', '1')
   await toggle.click()
-  await expect(card).toHaveAttribute('data-pending', 'true')
+  await expect(page.getByRole('button', { name: 'Release other work' })).toBeEnabled()
   await expect(card).toHaveCSS('opacity', '0')
   await toggle.click()
   await expect(card).toHaveCSS('opacity', '1')
 })
 
 test('exit-only reentry restores styles and reduced motion cannot revive the cancelled effect', async ({ page }) => {
-  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Show', exact: true }) })
-  const toggle = section.getByRole('button', { name: 'Toggle modal' })
+  await page.getByLabel('Motion mode').selectOption('exit-only')
+  await page.getByLabel('Hold other work').check()
+  const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
   await toggle.click()
-  const card = section.locator('.card')
+  const card = page.locator('.motion-card')
+  expect(await card.evaluate(element => element.getAnimations().length)).toBe(0)
   await toggle.click()
   await expect(card).toHaveAttribute('data-phase', 'exiting')
   await card.evaluate(element => element.getAnimations()[0]!.finish())
-  await expect(card).toHaveCSS('opacity', '0.25')
+  await expect(card).toHaveCSS('opacity', '0')
   await toggle.click()
   await expect(card).toHaveCSS('opacity', '1')
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -270,7 +295,8 @@ test('CSS adapter ignores unrelated decorations and descendant effects', async (
   await page.addStyleTag({ content: `
     @keyframes unrelated { from { outline-color: red; } to { outline-color: blue; } }
     .css-inout { animation: unrelated 60s linear infinite; }
-    .css-inout input { animation: unrelated 60s linear; }
+    .css-inout strong { opacity: 0; transition: opacity 60s linear; }
+    .css-inout[data-direction=in] strong { opacity: 1; }
   ` })
   const toggle = page.getByRole('button', { name: 'Toggle bidirectional' })
   await toggle.click()
@@ -281,6 +307,9 @@ test('CSS adapter ignores unrelated decorations and descendant effects', async (
   await finishTransition()
   await toggle.click()
   await expect(card).toHaveAttribute('data-phase', 'exiting')
+  expect(await card.locator('strong').evaluate(element => element.getAnimations().some(animation =>
+    animation instanceof CSSTransition && animation.transitionProperty === 'opacity',
+  ))).toBe(true)
   await finishTransition()
   await expect(card).toHaveCount(0)
 })
@@ -291,7 +320,11 @@ test('CSS cancellation settles exit without an unhandled rejection', async ({ pa
   const card = page.locator('.css-inout')
   await card.evaluate(element => element.getAnimations().forEach(animation => animation.finish()))
   await toggle.click()
-  await card.evaluate(element => element.getAnimations().forEach(animation => animation.cancel()))
+  await card.evaluate(element => {
+    const outgoing = element.getAnimations().find(animation => animation instanceof CSSTransition)
+    if (!outgoing) throw new Error('Expected an outgoing CSS transition')
+    outgoing.cancel()
+  })
   await expect(card).toHaveCount(0)
 })
 
@@ -304,6 +337,22 @@ test('CSS reduced motion skips delays even without cooperating media rules', asy
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(card).toHaveCSS('opacity', '1')
   await toggle.click()
+  await expect(card).toHaveCount(0)
+})
+
+test('reduced motion releases a CSS exit retimed to infinity after it started', async ({ page }) => {
+  const toggle = page.getByRole('button', { name: 'Toggle separate' })
+  const card = page.locator('.css-separate')
+  await toggle.click()
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await toggle.click()
+  await expect(card).toHaveAttribute('data-runs', 'in,out')
+  expect(await card.evaluate((element: HTMLElement) => {
+    const exit = element.getAnimations()[0]!
+    element.style.animationIterationCount = 'infinite'
+    return element.getAnimations()[0] === exit && exit.effect!.getComputedTiming().endTime === Infinity
+  })).toBe(true)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(card).toHaveCount(0)
 })
 
@@ -366,9 +415,30 @@ for (const inward of [0, 5000]) {
   })
 }
 
+test('reentry from a zero-duration exit at its delay boundary starts at the hidden frame', async ({ page }) => {
+  await page.getByLabel('Directional duration', { exact: true }).check()
+  await page.getByLabel('Exit motion duration', { exact: true }).fill('0')
+  await page.getByLabel('Motion delay', { exact: true }).fill('1000')
+  const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
+  const card = page.locator('.motion-card')
+  await toggle.click()
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await toggle.click()
+  await card.evaluate(async element => {
+    const exit = element.getAnimations()[0]!
+    exit.pause(); await exit.ready
+    exit.currentTime = 1000
+  })
+  await expect(card).toHaveCSS('opacity', '0')
+  await toggle.click()
+  expect(await card.evaluate(element => Number(getComputedStyle(element).opacity))).toBeLessThan(0.15)
+  await card.evaluate(element => element.getAnimations()[0]!.finish())
+  await expect(card).toHaveCSS('opacity', '1')
+})
+
 test('separate entry and exit use their own native durations', async ({ page }) => {
   await page.getByLabel('Directional duration', { exact: true }).check()
-  await page.getByLabel('Separate motion', { exact: true }).check()
+  await page.getByLabel('Motion mode').selectOption('separate')
   await page.getByLabel('Exit motion duration', { exact: true }).fill('1000')
   const toggle = page.getByRole('button', { name: 'Toggle motion', exact: true })
   await toggle.click()
@@ -399,6 +469,16 @@ test('reactive targets retarget from the current native presentation outside a l
   expect(origin).toBeCloseTo(100, 0)
   await card.evaluate(element => element.getAnimations()[0]!.finish())
   await expect(card).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+})
+
+test('settled authored transforms preserve a full turn instead of interpolating between matrices', async ({ page }) => {
+  await page.getByRole('button', { name: 'Rotate target' }).click()
+  const sine = await page.locator('.reactive-card').evaluate(element => {
+    const animation = element.getAnimations()[0]!
+    animation.pause(); animation.currentTime = Number(animation.effect!.getTiming().duration) / 4
+    return new DOMMatrixReadOnly(getComputedStyle(element).transform).b
+  })
+  expect(sine).toBeCloseTo(1, 3)
 })
 
 test('the first reactive target applies before insertion even when remounting at a different target', async ({ page }) => {
@@ -451,6 +531,7 @@ test('compiled spring easing overshoots and reverses on the same native timeline
 })
 
 test('out-in mounts only the latest branch after native motion AND other work finish', async ({ page }) => {
+  await page.getByLabel('Hold sequence exit').check()
   const card = page.locator('.sequence-card')
   await card.evaluate(element => element.getAnimations()[0]!.finish())
   const old = await card.elementHandle()
@@ -459,8 +540,7 @@ test('out-in mounts only the latest branch after native motion AND other work fi
   await expect(card).toHaveCount(1)
   await expect(card).toHaveAttribute('data-name', 'A')
   await card.evaluate(element => element.getAnimations()[0]!.finish())
-  await expect(card).toHaveAttribute('data-pending', 'true')
-  await card.getByRole('button', { name: 'Release sequence work', exact: true }).click({ force: true })
+  await page.getByRole('button', { name: 'Release sequence work', exact: true }).click()
   await expect(card).toHaveCount(1)
   await expect(card).toHaveAttribute('data-name', 'C')
   expect(await old!.evaluate(element => element.isConnected)).toBe(false)
@@ -470,13 +550,15 @@ test('out-in reselects an exiting instance and preserves local input state', asy
   const card = page.locator('.sequence-card')
   await card.evaluate(element => element.getAnimations()[0]!.finish())
   const old = await card.elementHandle()
-  await card.getByRole('textbox').fill('keep me')
+  await page.getByLabel('Sequence local state').fill('keep me')
   await page.getByRole('button', { name: 'Sequence B', exact: true }).click()
   await expect(card).toHaveAttribute('data-phase', 'exiting')
   await page.getByRole('button', { name: 'Sequence A', exact: true }).click()
   await expect(card).toHaveAttribute('data-phase', 'present')
-  await expect(card.getByRole('textbox')).toHaveValue('keep me')
+  await expect(page.getByLabel('Sequence local state')).toHaveValue('keep me')
   expect(await card.evaluate((element, old) => element === old, old)).toBe(true)
+  await page.getByRole('button', { name: 'Sequence B', exact: true }).click()
+  await expect(card).toHaveAttribute('data-name', 'B') // no manual hold by default
 })
 
 for (const preset of ['scale', 'slide']) {

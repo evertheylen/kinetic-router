@@ -23,6 +23,13 @@ describe('native spring compiler', () => {
     expect(Math.max(...values)).toBe(1)
   })
 
+  it('settles continuously on either side of critical damping', () => {
+    const critical = spring({ stiffness: 1, damping: 2 }).duration
+    for (const damping of [1.9997, 2.0003]) {
+      expect(Math.abs(spring({ stiffness: 1, damping }).duration - critical)).toBeLessThan(100)
+    }
+  })
+
   it('uses mass and stiffness, and samples fast springs more densely', () => {
     expect(spring({ mass: 2 })).not.toEqual(spring())
     const fast = spring({ stiffness: 10000, damping: 100 })

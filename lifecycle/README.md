@@ -45,8 +45,10 @@ Lists and conditional branches work too:
   row out; nested controls respond to their own data changes.
 - Use lifecycle-aware controls at every removal point that needs retention.
   Ordinary conditionals and final unmount dispose immediately.
-- Exit handlers must settle or respond to cancellation; there is no timeout.
-  Retained content remains interactive: manage focus, `inert`, and ARIA as needed.
+- Exits wait for the promises you return; there is no timeout. Use the provided
+  abort signal to cancel work on reentry or final unmount.
+- `useLifecycle().phase()` is a signal, not a DOM attribute. Retained content stays
+  interactive unless the component manages focus, `inert`, or ARIA itself.
 
 See [the demo](demo/main.tsx) for CSS-only effects and interactive examples.
 Detailed contracts live beside the [hooks](src/scope.ts)

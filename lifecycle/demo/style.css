@@ -9,11 +9,21 @@ button { cursor: pointer; background: #263652; color: inherit; }
 button:hover { background: #344d75; }
 button:focus-visible, input:focus-visible { outline: 2px solid #b5d6ff; outline-offset: 3px; }
 .card { padding: 1rem; margin: .8rem 0; border: 1px solid #627ba6; border-radius: .6rem; background: #1d293e; }
-.card[data-phase=exiting] { border-color: #f6bb6a; }
+.card[data-phase=exiting], .flow-card.leaving { border-color: #f6bb6a; }
 .card header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
 .card label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .8rem 0; }
 .card input { flex: 1; min-width: 10rem; }
 code { color: #afc9ed; }
+
+.flow-card { transition: opacity var(--motion-duration) ease-out, transform var(--motion-duration) ease-out; }
+@starting-style {
+  .flow-card { opacity: 0; transform: translate(-1.75rem, .5rem) rotate(-1.5deg) scale(.96); }
+}
+.flow-card.leaving {
+  opacity: 0;
+  transform: translate(1.75rem, .5rem) rotate(1.5deg) scale(.96);
+  transition-timing-function: ease-in;
+}
 
 @keyframes lifecycle-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes lifecycle-out { from { opacity: 1; } to { opacity: 0; } }
@@ -24,6 +34,7 @@ code { color: #afc9ed; }
 .css-inout[data-direction=in] { opacity: 1; }
 @starting-style { .css-inout[data-direction=in] { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
+  .flow-card { transition: none; }
   .css-separate[data-direction] { animation-duration: 1ms; animation-delay: 0ms; }
   .css-inout { transition-duration: 1ms; }
 }

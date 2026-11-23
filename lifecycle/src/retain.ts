@@ -29,36 +29,28 @@ export function retain<T>(
     }
   }
   type Entry = ReturnType<typeof entry>
-  const entries = new Map<unknown, Entry>()
-  // Pruning input is not disposal yet. Out-in waits for Solid to remove the owners.
-  const retiring = new Set<Entry>()
-  const [retired, setRetired] = createSignal(0, { ownedWrite: true })
-  const [visible, setVisible] = createSignal<Entry[]>([], { ownedWrite: true })
-  let order: Entry[] = []
-  let disposed = false
-  const [revision, setRevision] = createSignal(0, { ownedWrite: true })
+  // A row has an owner only once Solid's For consumes it, and until its cleanup.
+  const mounted = new Set<Entry>()
+  let waitingForDisposal = false
+  const [disposal, retrySelection] = createSignal(undefined, { equals: false, ownedWrite: true })
+  let staged: Entry[] = []
+  const [visible, setVisible] = createSignal(staged, { ownedWrite: true })
+  const [workChanged, invalidate] = createSignal(undefined, { equals: false, ownedWrite: true })
 
-  function invalidate() {
-    if (!disposed) setRevision(value => value + 1)
+  function stage(rows: Entry[]) {
+    staged = rows
+    setVisible(rows)
   }
 
-  // Reconcile committed selections in the render phase, then invoke/prune here.
-  // Committed descendants have admitted their hooks; suspended ones haven't.
-  // Refs and all superseded abort cleanup are ready before invocation.
-  // Async completions only invalidate: direct pruning or a second microtask/flush
-  // scheduler could race a same-turn reentry or a render held behind an action.
-  createEffect(revision, () => {
-    for (const entry of order) entry.scope.runPending()
-    const next = order.filter(entry => {
-      if (!entry.scope.canRemove()) return true
-      entries.delete(entry.key)
-      retiring.add(entry)
-      return false
-    })
-    if (next.length !== order.length) setVisible(order = next)
+  createEffect(() => { workChanged(); return visible() }, rendered => {
+    // A completion may have woken this effect just as reconciliation staged new
+    // rows/phases. Dispatch only for the snapshot Solid has committed to the DOM.
+    if (rendered !== staged) return
+    const next = rendered.filter(row => !row.scope.advance())
+    if (next.length !== rendered.length) stage(next)
   })
 
-  createRenderEffect(() => ({ selections: source(), mode: mode(), retired: retired() }), ({ selections, mode }) => {
+  createRenderEffect(() => { disposal(); return { selections: source(), mode: mode() } }, ({ selections, mode }) => {
     if (mode !== 'parallel' && mode !== 'out-in') throw new TypeError('Lifecycle mode must be parallel or out-in')
     const keys = new Set<unknown>()
     for (const { key } of selections) {
@@ -67,47 +59,43 @@ export function retain<T>(
     }
     // Keep only already-mounted selections while outgoing scopes still exist.
     // Reselecting an exiting branch restores it immediately, preserving its owner.
-    const blocked = mode === 'out-in' && (retiring.size > 0 || order.some(entry => !keys.has(entry.key)))
-    const allowed = blocked ? selections.filter(selection => entries.has(selection.key)) : selections
-    const next = allowed.map((selection, index) => {
-      let retained = entries.get(selection.key)
-      if (!retained) {
-        retained = entry(selection, index)
-        entries.set(selection.key, retained)
-      }
+    const reusable = new Map(staged.map(row => [row.key, row]))
+    waitingForDisposal = mode === 'out-in' && [...mounted].some(row => !keys.has(row.key) || reusable.get(row.key) !== row)
+    const allowed = waitingForDisposal ? selections.filter(selection => reusable.has(selection.key)) : selections
+    const selected = allowed.map((selection, index) => {
+      const retained = reusable.get(selection.key)
+      if (!retained) return entry(selection, index)
       retained.update(selection.value, index)
       retained.scope.setPresent(true)
       return retained
     })
-    // Keep exits in their previous rendered slots; active rows fill the other slots
-    // in source order. Earlier exits disappearing can naturally shift later slots.
-    for (const [index, retained] of order.entries()) {
-      if (!keys.has(retained.key)) {
+    // Keep exiting rows in place. Fill the other slots in selection order, then
+    // append any extra rows. No repeated splicing when many rows leave together.
+    let index = 0
+    const next: Entry[] = []
+    for (const retained of staged) {
+      if (keys.has(retained.key)) next.push(selected[index++]!)
+      else if (mounted.has(retained)) {
         retained.scope.setPresent(false)
-        next.splice(index, 0, retained)
+        next.push(retained)
       }
     }
-    setVisible(order = next)
-  })
-
-  onCleanup(() => {
-    disposed = true
-    entries.clear()
-    retiring.clear()
+    while (index < selected.length) next.push(selected[index++]!)
+    stage(next)
   })
 
   return For({
     get each() { return visible() },
     children: retained => {
-      // One disposal path: Solid removes this owner, locally or with an ancestor.
+      mounted.add(retained)
       onCleanup(() => {
         retained.scope.dispose()
-        retiring.delete(retained)
-        if (!disposed) setRetired(value => value + 1)
+        mounted.delete(retained)
+        if (waitingForDisposal) retrySelection()
       })
       return ScopeContext({
         value: retained.scope,
-        get children() { return untrack(() => render(retained.value, retained.index)) },
+        get children() { return render(retained.value, retained.index) },
       })
     },
   })

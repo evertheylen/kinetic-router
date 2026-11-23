@@ -42,8 +42,9 @@ export function spring(options: SpringOptions = {}): { duration: number; easing:
       const decay = Math.exp(-alpha * time)
       return {
         value: 1 - decay * (Math.cos(frequency * time) + alpha / frequency * Math.sin(frequency * time)),
-        displacement: decay * Math.hypot(1, alpha / frequency),
-        speed: decay * squared / frequency,
+        // |sin(f·t)| ≤ f·t keeps the bounds continuous near critical damping.
+        displacement: decay * Math.min(Math.hypot(1, alpha / frequency), 1 + alpha * time),
+        speed: decay * squared * Math.min(1 / frequency, time),
       }
     }
   } else {

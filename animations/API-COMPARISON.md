@@ -11,7 +11,7 @@ prefer opacity/transform when compositor-only motion matters.
 The concrete comparison is [`solid-motionone`](https://github.com/solidjs-community/solid-motionone),
 whose API is `<Motion initial animate exit transition>` plus `<Presence>`.
 Its [package metadata](https://github.com/solidjs-community/solid-motionone/blob/main/package.json)
-requires Solid `^1.8.0`; this repository uses Solid 2 RC. It is not a drop-in
+requires Solid `^1.8.0`; this repository uses Solid 2. It is not a drop-in
 runtime dependency or the same API as Motion for React.
 
 | Concern | This package + lifecycle | Solid MotionOne |

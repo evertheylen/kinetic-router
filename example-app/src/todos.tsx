@@ -12,12 +12,16 @@ const demoTasks: Todo[] = [
   { id: 4, title: "Celebrate this extremely productive list", emoji: "🪩" },
 ];
 
-function TodoCard(props: { todo: Todo; complete: () => void }) {
-  const { phase } = useLifecycle();
-  const space = createCssTransition({
+function animateSpace() {
+  return createCssTransition({
     apply: (element, direction) => { element.dataset.space = direction; },
     properties: ["grid-template-rows"],
   });
+}
+
+function TodoCard(props: { todo: Todo; complete: () => void }) {
+  const { phase } = useLifecycle();
+  const space = animateSpace();
   // A single timeline tumbles in and reverses on exit (or a quick Undo).
   const motion = createTransition({ inout: [
     { opacity: 0, transform: "translateY(90px) rotate(-18deg) scale(0.45)" },
@@ -25,8 +29,8 @@ function TodoCard(props: { todo: Todo; complete: () => void }) {
     { opacity: 1, transform: "translateY(4px) rotate(-2deg) scale(0.98)", offset: 0.82 },
     { opacity: 1, transform: "translateY(0) rotate(0) scale(1)" },
   ] }, { duration: 1000, easing: "ease-out" });
-  return <li class="todo-slot todos-space" ref={space} data-phase={phase()}
-    inert={phase() === "exiting"} aria-hidden={phase() === "exiting" ? "true" : "false"}>
+  return <li class="todo-slot todos-space" ref={space}
+    inert={phase() === "exiting"} aria-hidden={phase() === "exiting" ? "true" : undefined}>
     <div class="todos-content"><div class="todo-card" ref={motion}>
       <span class="todo-emoji" aria-hidden="true">{props.todo.emoji}</span>
       <div class="todo-copy">
@@ -43,17 +47,14 @@ function TodoCard(props: { todo: Todo; complete: () => void }) {
 
 function Victory() {
   const { phase } = useLifecycle();
-  const space = createCssTransition({
-    apply: (element, direction) => { element.dataset.space = direction; },
-    properties: ["grid-template-rows"],
-  });
+  const space = animateSpace();
   const motion = createTransition({ inout: [
     { opacity: 0, transform: "translateY(60px) rotate(-12deg) scale(0.3)" },
     { opacity: 1, transform: "translateY(-12px) rotate(3deg) scale(1.08)", offset: 0.7 },
     { opacity: 1, transform: "translateY(0) rotate(0) scale(1)" },
   ] }, { duration: 1200, easing: "ease-out" });
-  return <div class="todos-victory-slot todos-space" ref={space} data-phase={phase()}
-    aria-hidden={phase() === "exiting" ? "true" : "false"} inert={phase() === "exiting"}>
+  return <div class="todos-victory-slot todos-space" ref={space}
+    inert={phase() === "exiting"} aria-hidden={phase() === "exiting" ? "true" : undefined}>
     <div class="todos-content"><section class="todos-victory" ref={motion} aria-labelledby="todos-victory-title">
       <div class="todos-confetti" aria-hidden="true">
         {Array.from({ length: 12 }, (_, index) => <span style={{

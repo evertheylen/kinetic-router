@@ -1,7 +1,6 @@
-import { onCleanup } from 'solid-js'
-import { onEnter, onExit, onInOut, type Direction } from '@kinetic-router/lifecycle'
+import { onEnter, onExit, onInOut, type AnimationAdapter, type Direction } from '@kinetic-router/lifecycle'
 
-/** Explicit CSS property names (kebab-case) / @keyframes names; no wildcard waits. */
+/** Exact CSS longhand/custom property names or @keyframes names; no wildcard waits. */
 export type CssTransitionOptions<T extends Element = HTMLElement> = {
   /** Set classes, attributes, or styles synchronously; called before insertion too. Must be idempotent. */
   apply: (element: T, direction: Direction) => void
@@ -22,9 +21,11 @@ export type CssTransitionOptions<T extends Element = HTMLElement> = {
  * CSS layout-property transitions may cause browser reflow each frame; they do not
  * run per-frame JavaScript. Use opacity/transform when compositor-only motion matters.
  *
- * Reentry retargets CSS, never cancels the visual effect on an old waiter's abort.
- * CSS cancellations count as completion. Reduced motion finishes selected effects
- * (also on preference changes); author CSS media rules for unselected decorations.
+ * Each run snapshots the effects after applying its target. They must be able to
+ * finish: pausing or retiming one to infinity can retain an exit. Reentry retargets
+ * CSS; aborting the old run does not cancel its effects. CSS cancellation settles
+ * the wait. Reduced motion finishes selected effects (cancels any that can no
+ * longer finish); author CSS media rules for unselected decorations.
  * Use a separate wrapper when combining layout CSS with createTransition's transforms.
  * A final unmount removes listeners; CSS effects remain owned by the stylesheet.
  */
@@ -37,63 +38,46 @@ export function createCssTransition<T extends Element = HTMLElement>(options: Cs
   const properties = [...(options.properties ?? [])], animations = [...(options.animations ?? [])]
   if (typeof apply !== 'function' || !['inout', 'separate'].includes(mode)
     || (!properties.length && !animations.length)
-    || [...properties, ...animations].some(name => typeof name !== 'string' || !name.trim() || name === 'all')) {
+    || properties.includes('all') || [...properties, ...animations].some(name => typeof name !== 'string' || !name.trim())) {
     throw new TypeError('Provide apply, explicit CSS property/animation names, and an inout or separate mode')
   }
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
-  let element: T | undefined
-  let active: Animation[] = []
 
-  function finishSelected() {
-    if (!reducedMotion.matches) return
-    for (const animation of active) {
-      // A CSS media rule may already have cancelled the effect.
-      if (animation.playState !== 'idle') animation.finish()
-    }
-  }
-
-  function run(direction: Direction, signal: AbortSignal) {
-    if (!element) throw new Error('Bind the ref returned by createCssTransition')
+  function run({ element, direction, signal }: { element: T; direction: Direction; signal: AbortSignal }) {
     apply(element, direction)
-    // getAnimations flushes style, including newly created CSS transitions.
+    // getAnimations reflects pending style changes, including the transition just created.
     const selected = element.getAnimations().filter(animation =>
       ((animation instanceof CSSTransition && properties.includes(animation.transitionProperty))
         || (animation instanceof CSSAnimation && animations.includes(animation.animationName)))
       && Number.isFinite(animation.effect?.getComputedTiming().endTime),
     )
-    active = selected
+    if (!selected.length) return
     const finished = Promise.allSettled(selected.map(animation => animation.finished))
-    finishSelected()
-    return new Promise<void>(resolve => {
-      const done = () => {
-        signal.removeEventListener('abort', done)
-        if (active === selected) active = []
-        resolve()
+    function finishSelected() {
+      if (!reducedMotion.matches) return
+      for (const animation of selected) {
+        if (animation.playState === 'idle') continue // already cancelled by a CSS media rule
+        try { animation.finish() }
+        catch (error) {
+          // CSS or another script can change a selected effect to infinite or zero-rate.
+          if ((error as DOMException).name !== 'InvalidStateError') throw error
+          animation.cancel()
+        }
       }
-      signal.addEventListener('abort', done, { once: true })
-      if (signal.aborted) done()
-      void finished.then(done)
-    })
+    }
+    reducedMotion.addEventListener('change', finishSelected, { signal })
+    finishSelected()
+    return finished.finally(() => reducedMotion.removeEventListener('change', finishSelected))
   }
 
-  const bind = mode === 'inout' ? onInOut<T>({
-    prepare: (target, { direction }) => apply(target, direction),
-    run: ({ direction, signal }) => run(direction, signal),
-  }) : onEnter<T>({
-    prepare: target => apply(target, 'in'),
-    run: ({ signal }) => run('in', signal),
-  })
-  if (mode === 'separate') onExit(({ signal }) => run('out', signal))
+  const adapter: AnimationAdapter<T> = { prepare: (target, { direction }) => apply(target, direction), run }
+  if (mode === 'inout') return onInOut(adapter)
 
-  reducedMotion.addEventListener('change', finishSelected)
-  onCleanup(() => {
-    reducedMotion.removeEventListener('change', finishSelected)
-    active = []
+  let element: T | undefined
+  const bind = onEnter(adapter)
+  onExit(({ signal }) => {
+    if (!element) throw new Error('Bind the ref returned by createCssTransition')
+    return run({ element, direction: 'out', signal })
   })
-  return target => {
-    if (element && element !== target) throw new Error('Bind each createCssTransition ref to only one element')
-    if (element) return
-    element = target
-    bind(target)
-  }
+  return target => { bind(target); element = target }
 }
