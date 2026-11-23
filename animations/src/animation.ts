@@ -1,6 +1,7 @@
-import { createEffect, createSignal, getOwner, isDisposed, onCleanup, untrack, type Accessor } from 'solid-js'
-import { filledAnimation, snapshotTarget, type AnimationTarget } from './keyframes.js'
-import { onReducedMotion, timing, type AnimationOptions } from './timing.js'
+import { createEffect, createSignal, getOwner, isDisposed, untrack, type Accessor } from 'solid-js'
+import { snapshotTarget, type AnimationTarget } from './keyframes.js'
+import { createTargetDriver } from './target-driver.js'
+import { timing, type AnimationOptions } from './timing.js'
 
 export type { AnimationTarget } from './keyframes.js'
 
@@ -19,50 +20,21 @@ export function createAnimation(target: Accessor<AnimationTarget>, options: Anim
   const settings = timing(options)
   const owner = getOwner()
   if (!owner) throw new Error('createAnimation requires a reactive owner')
-  const [bound, setBound] = createSignal<Element | undefined>(undefined, { ownedWrite: true })
-  let animation: Animation | undefined
-  let previous: AnimationTarget
-  const reducedMotion = onReducedMotion(() => animation?.finish())
-  onCleanup(() => animation?.cancel())
+  const [bound, setBound] = createSignal(false, { ownedWrite: true })
+  const bind = createTargetDriver()
+  let element: Element | undefined
+  let move: ReturnType<typeof bind>
 
-  createEffect(() => {
-    const element = bound()
-    return element && { element, value: snapshotTarget(target()) }
-  }, update => {
-    if (!update || !animation) return
-    const { element, value } = update
-    if ((value.opacity === undefined) !== (previous.opacity === undefined)
-      || (value.transform === undefined) !== (previous.transform === undefined)) {
-      throw new TypeError('Keep the same animated properties across target changes')
-    }
-    if (value.opacity === previous.opacity && value.transform === previous.transform) return
-
-    const snap = reducedMotion.matches || !element.isConnected || settings.duration + settings.delay === 0
-    const from = { ...previous }
-    // Computed transforms are matrices: sampling a *settled* rotate(0deg)
-    // would lose the authored interpolation path to e.g. rotate(360deg).
-    if (!snap && animation.playState !== 'finished') {
-      const style = getComputedStyle(element)
-      if (value.opacity !== undefined) from.opacity = Number(style.opacity)
-      if (value.transform !== undefined) from.transform = style.transform
-    }
-    const next = filledAnimation(element, [from, { ...value }], settings)
-    if (snap) next.finish()
-    else next.play()
-    animation.cancel()
-    animation = next
-    previous = value
+  createEffect(() => bound() ? snapshotTarget(target()) : undefined, value => {
+    if (value) move(value, () => settings)
   })
 
-  return element => {
-    if (animation) {
-      if ((animation.effect as KeyframeEffect).target === element) return
-      throw new Error('Bind each createAnimation ref to only one element')
-    }
+  return targetElement => {
+    if (element === targetElement) return
+    if (element) throw new Error('Bind each createAnimation ref to only one element')
     if (isDisposed(owner)) throw new Error('Cannot bind an animation after disposal')
-    previous = snapshotTarget(untrack(target))
-    animation = filledAnimation(element, [{ ...previous }, { ...previous }], { duration: 0 })
-    animation.finish()
-    setBound(element)
+    move = bind(targetElement, snapshotTarget(untrack(target)))
+    element = targetElement
+    setBound(true)
   }
 }
