@@ -64,6 +64,7 @@ reorder, remove, and keyboard Undo:
 ```sh
 CI=true pnpm install
 pnpm --filter @kinetic-router/layout... -r build
+pnpm --filter @kinetic-router/layout test
 pnpm --filter @kinetic-router/lifecycle test:browser:container layout.e2e.ts
 pnpm --filter @kinetic-router/lifecycle dev
 # Open http://127.0.0.1:5173 and find Reading queue.
