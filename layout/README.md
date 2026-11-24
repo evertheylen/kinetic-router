@@ -59,7 +59,8 @@ render(() => <Queue />, document.body)
 
 From the repository root, build the optional package and run its browser checks,
 or open the [Reading queue](../lifecycle/demo/reading-queue.tsx) to try add,
-reorder, remove, and keyboard Undo:
+reorder, remove, and keyboard Undo. Choose **Slow** for more time to undo before
+the row leaves, or **Instant** to see the same changes without animation:
 
 ```sh
 CI=true pnpm install

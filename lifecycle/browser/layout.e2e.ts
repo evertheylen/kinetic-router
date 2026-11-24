@@ -2,6 +2,10 @@ import { expect, test, type Locator } from '@playwright/test'
 
 test.use({ reducedMotion: 'no-preference' })
 
+const listSelector = '.layout-queue-list'
+const rowSelector = (id: number) => `[data-entry="${id}"]`
+const speed = (queue: Locator) => queue.getByRole('combobox', { name: 'Animation speed' })
+
 let errors: string[]
 test.beforeEach(async ({ page }) => {
   errors = []
@@ -10,71 +14,57 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
   // Keep document scroll anchoring from moving the viewport during a geometry sample.
   await page.addStyleTag({ content: 'html, body { overflow-anchor: none; }' })
+  const selector = speed(page.getByRole('region', { name: 'Reading queue' }))
+  await expect(selector).toHaveValue('0.25')
+  await selector.selectOption({ label: 'Slow' })
 })
 test.afterEach(() => { expect(errors).toEqual([]) })
 
-const listSelector = '.layout-queue-list'
-const rowSelector = (id: number) => `[data-entry="${id}"]`
+async function pauseEffects(queue: Locator, ...targets: string[]) {
+  await expect.poll(() => queue.locator(listSelector).evaluate(async (list, targets) => {
+    const playing = [list, ...list.children].map(element => ({
+      element,
+      effects: element.getAnimations().filter(a =>
+        (a.pending || a.playState === 'running') && a.effect instanceof KeyframeEffect && a.effect.target === element),
+    }))
+    const missing = targets.filter(selector => !playing.some(({ element, effects }) => element.matches(selector) && effects.length))
+    if (missing.length) return missing
 
-// Pause inside the page as soon as the requested element effects start: the
-// public demo uses a real 250ms transition, not a test-only slow clock.
-async function frames(queue: Locator, options: {
-  click?: Locator
-  watch?: string[]
-  seek?: number[]
-} = {}) {
-  const { click, watch = [], seek = [] } = options
-  return queue.evaluate(async (root, { button, watch, seek, listSelector }) => {
-    function own(element: Element) {
-      return element.getAnimations().filter(animation =>
-        animation.effect instanceof KeyframeEffect && animation.effect.target === element)
-    }
+    // Freeze the new effects together, leaving any already-paused exit alone.
+    const effects = playing.flatMap(({ effects }) => effects)
+    for (const animation of effects) animation.pause()
+    await Promise.all(effects.map(animation => animation.ready))
+    return []
+  }, targets), { message: 'Targets without a playing, element-owned effect' }).toEqual([])
+}
+
+async function sample(queue: Locator, progress?: number) {
+  return queue.evaluate((root, { listSelector, progress }) => {
     const list = root.querySelector<HTMLUListElement>(listSelector)!
-    const directRows = () => Array.from(list.querySelectorAll<HTMLLIElement>(':scope > li[data-entry]'))
-    const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-    const active = (element: Element) => own(element).filter(a => a.pending || a.playState === 'running' || a.playState === 'paused')
-    const watched = () => watch.every(selector => {
-      const element = root.querySelector(selector)
-      return element && active(element).length > 0
-    })
-
-    if (button) (button as HTMLButtonElement).click()
-    if (watch.length) {
-      const deadline = performance.now() + 1500
-      while (!watched() && performance.now() < deadline) await nextFrame()
-      if (!watched()) throw new Error(`No element-owned native effect on ${watch.join(', ')}`)
-    } else if (button) {
-      await nextFrame()
-    }
-    const playing = [list, ...directRows()].flatMap(active)
-    if (watch.length) {
-      for (const animation of playing) animation.pause()
-      await Promise.all(playing.map(animation => animation.ready))
-    }
-
-    return (seek.length ? seek : [undefined]).map(progress => {
-      if (progress !== undefined) {
-        for (const animation of playing) {
-          const { delay = 0, duration } = animation.effect!.getComputedTiming()
-          animation.currentTime = delay + Number(duration) * (animation.playbackRate < 0 ? 1 - progress : progress)
-        }
+    const rows = Array.from(list.querySelectorAll<HTMLLIElement>(':scope > li[data-entry]'))
+    const own = (element: Element) => element.getAnimations().filter(a =>
+      a.effect instanceof KeyframeEffect && a.effect.target === element)
+    if (progress !== undefined) {
+      for (const animation of [list, ...rows].flatMap(own)) {
+        if (animation.playState !== 'paused') continue
+        const { delay = 0, duration } = animation.effect!.getComputedTiming()
+        animation.currentTime = delay + Number(duration) * (animation.playbackRate < 0 ? 1 - progress : progress)
       }
-      const host = list.getBoundingClientRect()
-      const rows = directRows()
-      return {
-        list: { width: host.width, height: host.height, style: list.style.cssText, effects: own(list).length, scrollTop: list.scrollTop },
-        footerY: root.querySelector('.layout-queue-summary')!.getBoundingClientRect().y - host.y,
-        order: rows.map(row => Number(row.dataset.entry)),
-        rows: Object.fromEntries(rows.map(row => {
-          const { x, y, width, height } = row.getBoundingClientRect()
-          return [Number(row.dataset.entry), {
-            x: x - host.x, y: y - host.y, width, height, style: row.style.cssText, effects: own(row).length,
-            opacity: Number(getComputedStyle(row).opacity), inert: row.inert,
-          }]
-        })),
-      }
-    })
-  }, { button: await click?.elementHandle(), watch, seek, listSelector })
+    }
+    const host = list.getBoundingClientRect()
+    return {
+      list: { height: host.height, style: list.style.cssText, effects: own(list).length, scrollTop: list.scrollTop },
+      footerY: root.querySelector('.layout-queue-summary')!.getBoundingClientRect().y - host.y,
+      order: rows.map(row => Number(row.dataset.entry)),
+      rows: Object.fromEntries(rows.map(row => {
+        const { x, y, width, height } = row.getBoundingClientRect()
+        return [Number(row.dataset.entry), {
+          x: x - host.x, y: y - host.y, width, height, style: row.style.cssText, effects: own(row).length,
+          opacity: Number(getComputedStyle(row).opacity), inert: row.inert,
+        }]
+      })),
+    }
+  }, { listSelector, progress })
 }
 
 async function finish(queue: Locator) {
@@ -91,10 +81,10 @@ async function finish(queue: Locator) {
 
 async function resting(queue: Locator, order: number[]) {
   await expect.poll(async () => {
-    const [frame] = await frames(queue)
+    const frame = await sample(queue)
     return { order: frame.order, effects: [frame.list, ...Object.values(frame.rows)].map(box => box.effects) }
   }).toEqual({ order, effects: Array(order.length + 1).fill(0) })
-  return (await frames(queue))[0]
+  return sample(queue)
 }
 
 function close(actual: number, expected: number, pixels = 1.5) {
@@ -112,7 +102,7 @@ function sameBox(actual: { x: number; y: number; width: number; height: number }
   }
 }
 
-function styles(frame: Awaited<ReturnType<typeof frames>>[number]) {
+function styles(frame: Awaited<ReturnType<typeof sample>>) {
   return [frame.list.style, ...Object.values(frame.rows).map(row => row.style)]
 }
 
@@ -121,16 +111,16 @@ test('LayoutList reorders direct custom rows on both axes without owning descend
   await page.addStyleTag({ content: '.layout-queue-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; }' })
   await queue.scrollIntoViewIfNeeded()
   await expect(queue.locator(`${listSelector} > *`)).toHaveCount(3)
-  await finish(queue)
   const before = await resting(queue, [1, 2, 3])
   const note = queue.locator(`${rowSelector(3)} input`)
   const independent = await note.evaluateHandle(input => input.animate(
     [{ outlineOffset: '0px' }, { outlineOffset: '2px' }], { duration: 300, iterations: Infinity },
   ))
 
-  const [start, mid] = await frames(queue, {
-    click: queue.getByRole('button', { name: 'Rotate queue' }), watch: [rowSelector(3)], seek: [0, 0.5],
-  })
+  await queue.getByRole('button', { name: 'Rotate queue' }).click()
+  await pauseEffects(queue, rowSelector(3))
+  const start = await sample(queue, 0)
+  const mid = await sample(queue, 0.5)
   expect(start.order).toEqual([2, 3, 1])
   sameBox(start.rows[3], before.rows[3])
   between(mid.rows[3].x, before.rows[3].x, before.rows[2].x)
@@ -149,17 +139,17 @@ test('LayoutList moves survivors and animates flow height through remove and add
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await page.addStyleTag({ content: '.layout-queue-tray { max-height: 135px; overflow-y: scroll; overflow-anchor: none; }' })
   await queue.scrollIntoViewIfNeeded()
-  await finish(queue)
   const tray = queue.locator('.layout-queue-tray')
   expect(await tray.evaluate(element => { element.scrollTop = 20; return element.scrollTop })).toBe(20)
   const before = await resting(queue, [1, 2, 3])
   const outgoing = queue.locator(rowSelector(1))
   const originalRow = (await outgoing.elementHandle())!
 
-  const [start, mid, almostDone] = await frames(queue, {
-    click: outgoing.getByRole('button', { name: 'Remove The night atlas' }),
-    watch: [listSelector, rowSelector(1), rowSelector(2)], seek: [0, 0.5, 0.99],
-  })
+  await outgoing.getByRole('button', { name: 'Remove The night atlas' }).click()
+  await pauseEffects(queue, listSelector, rowSelector(1), rowSelector(2))
+  const start = await sample(queue, 0)
+  const mid = await sample(queue, 0.5)
+  const almostDone = await sample(queue, 0.99)
   sameBox(start.rows[1], before.rows[1])
   sameBox(mid.rows[1], before.rows[1])
   sameBox(start.rows[2], before.rows[2])
@@ -182,10 +172,11 @@ test('LayoutList moves survivors and animates flow height through remove and add
   close(almostDone.list.height, smaller.list.height, 3)
   close(almostDone.footerY, smaller.footerY, 3)
 
-  const [enter, growing, almostFull] = await frames(queue, {
-    click: queue.getByRole('button', { name: 'Add title' }),
-    watch: [listSelector, rowSelector(4), rowSelector(2)], seek: [0, 0.5, 0.99],
-  })
+  await queue.getByRole('button', { name: 'Add title' }).click()
+  await pauseEffects(queue, listSelector, rowSelector(4), rowSelector(2))
+  const enter = await sample(queue, 0)
+  const growing = await sample(queue, 0.5)
+  const almostFull = await sample(queue, 0.99)
   close(enter.list.height, smaller.list.height)
   sameBox(enter.rows[2], smaller.rows[2])
   expect(enter.rows[4].opacity).toBeLessThan(0.05)
@@ -218,15 +209,15 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
     .layout-queue-list > li { grid-column: 2; }
   ` })
   await queue.scrollIntoViewIfNeeded()
-  await finish(queue)
   const list = queue.locator(listSelector)
   const scroll = (top: number) => list.evaluate((node, top) => { node.scrollTop = top; return node.scrollTop }, top)
   expect(await scroll(20)).toBe(20)
   const before = await resting(queue, [1, 2, 3])
   const outgoing = queue.locator(rowSelector(2))
-  const [firstPin, pinned] = await frames(queue, {
-    click: outgoing.getByRole('button', { name: 'Remove Notes from the coast' }), watch: [rowSelector(2)], seek: [0, 0.5],
-  })
+  await outgoing.getByRole('button', { name: 'Remove Notes from the coast' }).click()
+  await pauseEffects(queue, rowSelector(2))
+  const firstPin = await sample(queue, 0)
+  const pinned = await sample(queue, 0.5)
   sameBox(firstPin.rows[2], before.rows[2])
   sameBox(pinned.rows[2], before.rows[2])
   expect(pinned.rows[2].opacity).toBeGreaterThan(0)
@@ -235,9 +226,9 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
   const holdTimes = await exit.evaluate(animations => animations.map(animation => animation.currentTime))
 
   expect(await scroll(30)).toBe(30)
-  const [edited] = await frames(queue, {
-    click: queue.getByRole('button', { name: 'Add title' }), watch: [rowSelector(4)],
-  })
+  await queue.getByRole('button', { name: 'Add title' }).click()
+  await pauseEffects(queue, rowSelector(4))
+  const edited = await sample(queue)
   expect(edited.rows[2].inert).toBe(true)
   // Compare the same point in the host's scrolling coordinate space, using
   // the actual scroll offsets on either side of the edit.
@@ -262,14 +253,13 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
 test('an initially empty LayoutList grows and returns to its natural empty height after the last exit', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
-  const instant = queue.getByRole('checkbox', { name: 'Instant' })
-  await instant.check()
+  await speed(queue).selectOption({ label: 'Instant' })
   for (const id of [1, 2, 3]) {
-    await frames(queue, { click: queue.locator(`${rowSelector(id)} button`) })
+    await queue.locator(`${rowSelector(id)} button`).click()
   }
   // Remount with no rows, so the first insertion has no previous row to measure.
   await queue.getByRole('button', { name: 'Hide list' }).click()
-  await instant.uncheck()
+  await speed(queue).selectOption({ label: 'Slow' })
   await queue.getByRole('button', { name: 'Show list' }).click()
   const empty = await resting(queue, [])
   const boxEdges = await queue.locator(listSelector).evaluate(node => {
@@ -279,9 +269,11 @@ test('an initially empty LayoutList grows and returns to its natural empty heigh
   close(empty.list.height, boxEdges)
 
   async function grow(id: number) {
-    const [start, mid, end] = await frames(queue, {
-      click: queue.getByRole('button', { name: 'Add title' }), watch: [listSelector, rowSelector(id)], seek: [0, 0.5, 0.99],
-    })
+    await queue.getByRole('button', { name: 'Add title' }).click()
+    await pauseEffects(queue, listSelector, rowSelector(id))
+    const start = await sample(queue, 0)
+    const mid = await sample(queue, 0.5)
+    const end = await sample(queue, 0.99)
     await finish(queue)
     const full = await resting(queue, [id])
     close(start.list.height, empty.list.height)
@@ -293,9 +285,11 @@ test('an initially empty LayoutList grows and returns to its natural empty heigh
   }
 
   const full = await grow(4)
-  const [start, mid, end] = await frames(queue, {
-    click: queue.locator(`${rowSelector(4)} button`), watch: [listSelector, rowSelector(4)], seek: [0, 0.5, 0.99],
-  })
+  await queue.locator(`${rowSelector(4)} button`).click()
+  await pauseEffects(queue, listSelector, rowSelector(4))
+  const start = await sample(queue, 0)
+  const mid = await sample(queue, 0.5)
+  const end = await sample(queue, 0.99)
   sameBox(mid.rows[4], full.rows[4])
   expect(mid.rows[4].inert).toBe(true)
   await finish(queue)
@@ -312,22 +306,22 @@ test('an initially empty LayoutList grows and returns to its natural empty heigh
 test('interrupting a reorder with removal and quick Undo restores the same focused input and draft', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
-  await finish(queue)
   const before = await resting(queue, [1, 2, 3])
   const row = queue.locator(rowSelector(1))
   const note = row.getByRole('textbox')
   const original = await note.elementHandle()
   const undo = queue.getByRole('button', { name: 'Undo removal' })
   await note.fill('Keep this draft')
-  const [moving] = await frames(queue, {
-    click: queue.getByRole('button', { name: 'Rotate queue' }), watch: [rowSelector(1)], seek: [0.5],
-  })
+  await queue.getByRole('button', { name: 'Rotate queue' }).click()
+  await pauseEffects(queue, rowSelector(1))
+  const moving = await sample(queue, 0.5)
   between(moving.rows[1].y, before.rows[1].y, before.rows[3].y)
   await note.evaluate(input => input.focus({ preventScroll: true }))
 
-  const exit = frames(queue, { watch: [`${rowSelector(1)}[inert]`], seek: [0, 0.5] })
   await page.keyboard.press('Escape')
-  const [held, leaving] = await exit
+  await pauseEffects(queue, `${rowSelector(1)}[inert]`)
+  const held = await sample(queue, 0)
+  const leaving = await sample(queue, 0.5)
   sameBox(held.rows[1], moving.rows[1])
   expect(leaving.rows[1].opacity).toBeGreaterThan(0)
   expect(leaving.rows[1].opacity).toBeLessThan(1)
@@ -338,9 +332,9 @@ test('interrupting a reorder with removal and quick Undo restores the same focus
   await row.locator('input').evaluate(input => input.focus())
   await expect(undo).toBeFocused()
 
-  const entry = frames(queue, { watch: [`${rowSelector(1)}:not([inert])`] })
   await page.keyboard.press('Enter')
-  const [reentering] = await entry
+  await pauseEffects(queue, `${rowSelector(1)}:not([inert])`)
+  const reentering = await sample(queue, 0)
   close(reentering.rows[1].opacity, leaving.rows[1].opacity, 0.2)
   expect(await note.evaluate((input, saved) => input === saved, original)).toBe(true)
   await expect(note).toBeFocused()
@@ -355,16 +349,18 @@ for (const mode of ['reduced motion', 'zero duration'] as const) {
   test(`LayoutList snaps list changes with ${mode}`, async ({ page }) => {
     const queue = page.getByRole('region', { name: 'Reading queue' })
     if (mode === 'reduced motion') await page.emulateMedia({ reducedMotion: 'reduce' })
-    else await queue.getByRole('checkbox', { name: 'Instant' }).check()
+    else await speed(queue).selectOption({ label: 'Instant' })
     await queue.scrollIntoViewIfNeeded()
     const before = await resting(queue, [1, 2, 3])
-    const [reordered] = await frames(queue, { click: queue.getByRole('button', { name: 'Rotate queue' }) })
+    await queue.getByRole('button', { name: 'Rotate queue' }).click()
+    const reordered = await sample(queue)
     expect(reordered.order).toEqual([2, 3, 1])
     sameBox(reordered.rows[1], before.rows[3])
     expect(styles(reordered)).toEqual(styles(before))
     expect([reordered.list, ...Object.values(reordered.rows)].every(box => box.effects === 0)).toBe(true)
 
-    const [removed] = await frames(queue, { click: queue.getByRole('button', { name: 'Remove The night atlas' }) })
+    await queue.getByRole('button', { name: 'Remove The night atlas' }).click()
+    const removed = await sample(queue)
     expect(removed.order).toEqual([2, 3])
     expect(removed.list.height).toBeLessThan(before.list.height - 20)
     expect([removed.list, ...Object.values(removed.rows)].every(box => box.effects === 0)).toBe(true)
@@ -374,14 +370,12 @@ for (const mode of ['reduced motion', 'zero duration'] as const) {
 test('ordinary unmount cancels active LayoutList effects and restores owned styles', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
-  await finish(queue)
   const before = await resting(queue, [1, 2, 3])
   const list = await queue.locator(listSelector).elementHandle()
   const row = await queue.locator(rowSelector(1)).elementHandle()
-  await frames(queue, {
-    click: queue.getByRole('button', { name: 'Remove The night atlas' }),
-    watch: [listSelector, rowSelector(1)], seek: [0.5],
-  })
+  await queue.getByRole('button', { name: 'Remove The night atlas' }).click()
+  await pauseEffects(queue, listSelector, rowSelector(1))
+  await sample(queue, 0.5)
   const effects = await queue.locator(listSelector).evaluateHandle(list => [list, ...list.children].flatMap(el => el.getAnimations()))
   await queue.getByRole('button', { name: 'Hide list' }).click()
   await expect(queue.locator(listSelector)).toHaveCount(0)
@@ -390,6 +384,5 @@ test('ordinary unmount cancels active LayoutList effects and restores owned styl
   expect(await row!.evaluate(element => element.style.cssText)).toBe(before.rows[1].style)
   await queue.getByRole('button', { name: 'Show list' }).click()
   await expect(queue.locator(`${listSelector} > li`)).toHaveCount(2)
-  await finish(queue)
   await resting(queue, [2, 3])
 })

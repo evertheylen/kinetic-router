@@ -16,12 +16,13 @@
 .layout-queue-intro p { max-width: 55ch; margin: .5rem 0 1.25rem; }
 .layout-queue-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1rem; }
 .layout-queue-tools label { display: inline-flex; align-items: center; gap: .25rem; }
-.layout-queue button { background: #433957; border-color: #8a779d; }
+.layout-queue-tools select { font: inherit; color: inherit; border: 1px solid; border-radius: .35rem; padding: .4rem .65rem; }
+.layout-queue :is(button, select) { background: #433957; border-color: #8a779d; }
 .layout-queue button:hover { background: #57466d; }
 .layout-queue button:disabled, .layout-queue button[aria-disabled="true"] { color: #c7bbce; cursor: default; }
 .layout-queue button[aria-disabled="false"] { background: var(--queue-gold); color: #30223a; border-color: var(--queue-gold); }
 .layout-queue button[aria-disabled="false"]:hover { background: #ffdeaa; }
-.layout-queue button:focus-visible, .layout-queue input:focus-visible { outline-color: var(--queue-gold); }
+.layout-queue :is(button, input, select):focus-visible { outline: 2px solid var(--queue-gold); outline-offset: 3px; }
 
 .layout-queue-tray { border-radius: .75rem; background: #201c2e; }
 .layout-queue-list {

@@ -6,6 +6,7 @@ import './reading-queue.css'
 type Entry = { id: number; title: string }
 type Removal = { entry: Entry; index: number }
 
+const normalDuration = 0.25
 const firstEntries: Entry[] = [
   { id: 1, title: 'The night atlas' },
   { id: 2, title: 'Notes from the coast' },
@@ -43,7 +44,7 @@ export function ReadingQueue() {
   const [items, setItems] = createSignal(firstEntries)
   const [removed, setRemoved] = createSignal<Removal>()
   const [shown, setShown] = createSignal(true)
-  const [instant, setInstant] = createSignal(false)
+  const [duration, setDuration] = createSignal(normalDuration)
   let nextId = firstEntries.length + 1
   let undoButton: HTMLButtonElement | undefined
   let restoreNoteFor: number | undefined
@@ -81,7 +82,7 @@ export function ReadingQueue() {
       <span>PLAYGROUND / 02</span>
       <h2 id="layout-queue-title">Reading queue</h2>
       <p>Move the first title to the end, or add one at the top. Write a note, press Esc to remove the title,
-        then press Enter on Undo while it’s fading to keep your note.</p>
+        then press Enter on Undo while it’s fading to keep your note. Choose Slow for more time to undo.</p>
     </div>
     <div class="layout-queue-tools">
       <button type="button" onClick={() => setItems(entries => entries.length > 1 ? [...entries.slice(1), entries[0]!] : entries)}
@@ -91,12 +92,18 @@ export function ReadingQueue() {
         onClick={undo}>Undo removal</button>
       <button type="button" aria-expanded={shown() ? 'true' : 'false'} title="Hiding the list resets drafts"
         onClick={() => setShown(value => !value)}>{shown() ? 'Hide list' : 'Show list'}</button>
-      <label><input type="checkbox" checked={instant()} onChange={event => setInstant(event.currentTarget.checked)} /> Instant</label>
+      <label>Animation speed
+        <select value={String(duration())} onChange={event => setDuration(Number(event.currentTarget.value))}>
+          <option value={String(normalDuration)}>Normal</option>
+          <option value="2">Slow</option>
+          <option value="0">Instant</option>
+        </select>
+      </label>
     </div>
     <div class="layout-queue-tray">
       <Show when={shown()}>
         <ul class="layout-queue-list" role="list" aria-label="Queued titles" style="position:relative">
-          <LayoutList each={items()} by={item => item.id} transition={{ duration: instant() ? 0 : 0.25, ease: 'ease-out' }}>
+          <LayoutList each={items()} by={item => item.id} transition={{ duration: duration(), ease: 'ease-out' }}>
             {(item, index) => <Row entry={item()} index={index()} remove={remove} restoreNoteFocus={restoreNoteFocus} />}
           </LayoutList>
         </ul>
