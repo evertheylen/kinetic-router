@@ -1,4 +1,4 @@
-import { Lifecycle, onInOut, useLifecycle, type ShowProps } from '@kinetic-router/lifecycle'
+import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
 import { dynamic, type JSX } from '@solidjs/web'
 import { createEffect, createMemo, merge, omit, untrack } from 'solid-js'
 import type { AnimationTarget } from './keyframes.js'
@@ -34,9 +34,6 @@ interface MotionOptions {
 }
 
 export type MotionProps<Tag extends MotionTag> = Omit<JSX.IntrinsicElements[Tag], keyof MotionOptions> & MotionOptions
-
-/** The lifecycle's retained conditional, not a detector for arbitrary child removal. */
-export const AnimatePresence: <T>(props: ShowProps<T>) => JSX.Element = Lifecycle.Show
 
 const targetKeys = ['opacity', 'x', 'y', 'rotate', 'scale'] as const
 

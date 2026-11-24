@@ -1,20 +1,22 @@
 # Coming from Motion for React
 
-If you know Motion's [`motion` components](https://motion.dev/docs/react-motion-component)
-and [`AnimatePresence`](https://motion.dev/docs/react-animate-presence), the prop
-names will look familiar. The main change is where you declare what is present:
+The `initial`, `animate`, `exit`, and `transition` props will look familiar from
+[Motion for React](https://motion.dev/docs/react-motion-component). Instead of
+React's [`AnimatePresence`](https://motion.dev/docs/react-animate-presence), use
+the Solid lifecycle control that owns the condition, list, or branch:
 
 ```tsx
-import { AnimatePresence, motion } from '@kinetic-router/animations'
+import { motion } from '@kinetic-router/animations'
+import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 
-<AnimatePresence when={open()}>
+<Lc.Show when={open()}>
   <motion.section
     initial={{ opacity: 0, y: 12 }}
     animate={{ opacity: 1, y: 0, rotate: tilted() ? -5 : 0 }}
     exit={{ opacity: 0, y: 12 }}
     transition={{ duration: 0.2, ease: 'easeOut' }}
   >Preview</motion.section>
-</AnimatePresence>
+</Lc.Show>
 ```
 
 - **Use plain target objects instead of variants.** Read Solid signals in
@@ -24,8 +26,9 @@ import { AnimatePresence, motion } from '@kinetic-router/animations'
 - **Move the condition to `when`.** When `when` is truthy, the Solid boundary
   shows its content; when it becomes false, the boundary retains it for exit.
   It does not diff children. An ordinary conditional inside it still unmounts
-  its own content immediately. For keyed lists, use `Lifecycle.For` with a stable
-  key such as `by={item => item.id}`; see [Keyed For](../lifecycle/demo/main.tsx).
+  its own content immediately. For keyed lists, use `Lc.For` with a stable key
+  such as `by={item => item.id}`. For mutually exclusive branches, use
+  `Lc.Switch`/`Lc.Match`. See the [control flow examples](../lifecycle/demo/main.tsx).
 - **Undo before removal to keep local state.** Reopening a still-retained branch
   keeps the same node and retargets from the displayed pose, not necessarily by
   reversing the same animation timeline. The

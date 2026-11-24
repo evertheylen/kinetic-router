@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { createMemo, createRoot, createSignal, flush, Loading, onSettled } from 'solid-js'
 import { render, type JSX } from '@solidjs/web'
-import { Lifecycle, onExit } from '@kinetic-router/lifecycle'
-import { AnimatePresence, motion, type MotionProps, type MotionTarget } from './index.js'
+import { Lifecycle as Lc, onExit } from '@kinetic-router/lifecycle'
+import { motion, type MotionProps, type MotionTarget } from './index.js'
 
 class TargetAnimation {
   playState: AnimationPlayState = 'paused'
@@ -88,8 +88,7 @@ describe('motion', () => {
       onExit(() => hold)
       return <motion.li initial={false} animate={{ x: x(), opacity: 1 }} exit={{ opacity: 0 }} />
     }
-    const host = mount(() => <AnimatePresence when={when()}><Row /></AnimatePresence>)
-    expect(AnimatePresence).toBe(Lifecycle.Show)
+    const host = mount(() => <Lc.Show when={when()}><Row /></Lc.Show>)
     await settle()
     const row = host.firstElementChild
     show(false); await settle()
@@ -120,9 +119,9 @@ describe('motion', () => {
       const ready = createMemo(() => new Promise<string>(resolve => { reveal = () => resolve('ready') }))
       return <motion.section initial={initial} animate={{ opacity: opacity() }} exit={{ opacity: 0 }}>{ready()}</motion.section>
     }
-    const host = mount(() => <AnimatePresence when={true}>
+    const host = mount(() => <Lc.Show when={true}>
       <Loading fallback="loading"><Panel /></Loading>
-    </AnimatePresence>)
+    </Lc.Show>)
     try {
       await settle()
       expect(host.textContent).toBe('loading')

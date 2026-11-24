@@ -1,4 +1,5 @@
-import { AnimatePresence, motion } from '@kinetic-router/animations'
+import { motion } from '@kinetic-router/animations'
+import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 import { createSignal, onCleanup } from 'solid-js'
 import './postcard-studio.css'
 
@@ -59,9 +60,9 @@ export function PostcardStudio() {
     </div>
     <div class="postcard-stage">
       <span class="postcard-empty" aria-hidden="true">DRAFT TRAY</span>
-      <AnimatePresence when={shown()}>
+      <Lc.Show when={shown()}>
         <Postcard shown={shown()} tilted={tilted()} slow={slow()} discard={discard} onDiscarded={() => setCanUndo(false)} />
-      </AnimatePresence>
+      </Lc.Show>
     </div>
   </section>
 }

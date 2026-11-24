@@ -6,14 +6,15 @@ integration, dependencies on an animation engine, or per-frame JavaScript.
 
 ## Motion components
 
-`motion` and `AnimatePresence` are inspired by Motion for React, not a compatibility
-layer. The components animate through the native Web Animations API (WAAPI); no
-CSS transitions, data attributes, or JavaScript frame loop are required.
+`motion` animates native elements through the Web Animations API (WAAPI).
+Solid lifecycle controls decide when an exiting component may be removed.
+No CSS transitions, data attributes, or JavaScript frame loop are required.
 See [Coming from Motion for React](API-COMPARISON.md) for a migration guide.
 
 ```tsx
 import { createSignal } from 'solid-js'
-import { AnimatePresence, motion } from '@kinetic-router/animations'
+import { motion } from '@kinetic-router/animations'
+import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 
 function Preview() {
   const [shown, setShown] = createSignal(true)
@@ -22,7 +23,7 @@ function Preview() {
   return <>
     <button onClick={() => setShown(value => !value)}>{shown() ? 'Hide' : 'Show'} preview</button>
     <button aria-pressed={tilted() ? 'true' : 'false'} onClick={() => setTilted(value => !value)}>Tilt preview</button>
-    <AnimatePresence when={shown()}>
+    <Lc.Show when={shown()}>
       <motion.section
         aria-label="Preview"
         initial={{ opacity: 0, y: 12 }}
@@ -30,7 +31,7 @@ function Preview() {
         exit={{ opacity: 0, y: 12 }}
         transition={{ duration: 0.2, delay: 0, ease: 'easeOut' }}
       >Hello!</motion.section>
-    </AnimatePresence>
+    </Lc.Show>
   </>
 }
 ```
@@ -51,21 +52,23 @@ function Preview() {
 - Component `transition.duration` and `transition.delay` are in **seconds**. `ease`
   accepts CSS easing strings and `easeIn`, `easeOut`, and `easeInOut`. Timing
   changes apply on the next target change; they don't retime a running animation.
-- For a retained exit, configure `exit` at mount inside `AnimatePresence` or an
-  equivalent lifecycle boundary. `AnimatePresence` uses `Lifecycle.Show`; it does
-  not diff children. Use `Lifecycle.For` for keyed lists. Ordinary Solid
-  conditionals do not retain their children, and mounted target updates do not
-  require presence. Retained content remains interactive unless your app disables
-  it: move focus out before hiding and set `inert` when appropriate. Motion
-  respects reduced motion and snaps if retargeted while disconnected.
+- Configure `exit` at mount under the control that owns removal: `Lc.Show` for a
+  condition, `Lc.For` for keyed rows, or `Lc.Switch`/`Lc.Match` for alternative
+  branches. Ordinary Solid conditionals still unmount immediately. Entrance and
+  mounted target updates don't require a lifecycle boundary. Retained content
+  stays interactive: move focus out before hiding it and set `inert` when appropriate.
+  Motion respects reduced motion and snaps if retargeted while disconnected.
 
 The [Postcard studio](../lifecycle/demo/postcard-studio.tsx) shows a reactive tilt and
 how to keep a local draft on mid-flight Undo while moving focus outside the exiting card.
 
 ## Lower-level refs
 
+A custom component can render a `motion` element as its root, or keep its existing
+markup and bind a ref to the exact DOM element it wants to animate:
+
 ```tsx
-import { Lifecycle } from '@kinetic-router/lifecycle'
+import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 import { createTransition, fade } from '@kinetic-router/animations'
 
 function Panel() {
@@ -73,7 +76,7 @@ function Panel() {
   return <section ref={fadeRef}>Hello!</section>
 }
 
-<Lifecycle.Show when={open()}><Panel /></Lifecycle.Show>
+<Lc.Show when={open()}><Panel /></Lc.Show>
 ```
 
 `createTransition` uses WAAPI opacity/transform keyframes, reversible timelines,
