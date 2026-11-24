@@ -202,10 +202,20 @@ test('LayoutList moves survivors and animates flow height through remove and add
   expect(await tray.evaluate(element => element.scrollTop)).toBe(20)
 })
 
-test('an unrelated insertion does not restart or unpin an exit in a scrolling LayoutList host', async ({ page }) => {
+test('an unrelated insertion does not restart or unpin an exit in a scrolling LayoutList grid', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
-  // Cap the host itself here to exercise its scroll origin, not animated flow height.
-  await page.addStyleTag({ content: '.layout-queue-list { max-height: 115px; overflow-y: scroll; overflow-anchor: none; }' })
+  // Exercise both the host's scroll origin and the explicitly placed grid area's origin.
+  await page.addStyleTag({ content: `
+    .layout-queue-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: start;
+      max-height: 115px;
+      overflow-y: scroll;
+      overflow-anchor: none;
+    }
+    .layout-queue-list > li { grid-column: 2; }
+  ` })
   await queue.scrollIntoViewIfNeeded()
   await finish(queue)
   const list = queue.locator(listSelector)
@@ -213,9 +223,10 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
   expect(await scroll(20)).toBe(20)
   const before = await resting(queue, [1, 2, 3])
   const outgoing = queue.locator(rowSelector(2))
-  const [pinned] = await frames(queue, {
-    click: outgoing.getByRole('button', { name: 'Remove Notes from the coast' }), watch: [rowSelector(2)], seek: [0.5],
+  const [firstPin, pinned] = await frames(queue, {
+    click: outgoing.getByRole('button', { name: 'Remove Notes from the coast' }), watch: [rowSelector(2)], seek: [0, 0.5],
   })
+  sameBox(firstPin.rows[2], before.rows[2])
   sameBox(pinned.rows[2], before.rows[2])
   expect(pinned.rows[2].opacity).toBeGreaterThan(0)
   expect(pinned.rows[2].opacity).toBeLessThan(1)

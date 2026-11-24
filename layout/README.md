@@ -40,22 +40,31 @@ render(() => <Queue />, document.body)
 - Use one positioned, unscaled, natural-height parent for the rows (such as
   the `<ul>` above). Rows must keep their natural size as the container height
   animates: for a grid use `align-content: start`; in a column flexbox keep
-  rows from shrinking (`flex: none`). Let `LayoutList` control the parent
-  height and row movement, fade, and temporary exit positioning. Put
-  independent effects on descendants or use
+  rows from shrinking (`flex: none`). Prefer normal layout spacing such as `gap`:
+  retained exits are out of flow but still count for `:nth-child()` and sibling
+  selectors. Let `LayoutList` control parent height, row movement and fade, and
+  temporary exit positioning. Put independent effects on descendants or use
   [`@kinetic-router/animations`](../animations/README.md) for other targets.
-- Timing is in seconds, with CSS easing. Zero duration and reduced motion snap.
-  Focus and `inert` are application decisions: use a control outside the list
+- Height animation may reflow browser layout, but doesn't run per-frame JavaScript.
+  Duration is in seconds and easing is a CSS string. Timing is sampled on
+  structural edits; changing it alone doesn't retime running effects. Zero
+  duration snaps on the edit. Switching to reduced motion settles effects live.
+- Focus and `inert` are application decisions: use a control outside the list
   as a safe focus target, and mark retained exits inert if they shouldn't be
   interactive. On Undo, restore focus after the row commits and is no longer inert.
 - This is keyed list motion, not shared-element transitions or an observer of
   arbitrary resizing. Ordinary unmount disposes the list immediately.
 
-Run the [Reading queue](../lifecycle/demo/reading-queue.tsx) for add, reorder,
-remove, and keyboard Undo with focus restored to the draft:
+## Run
+
+From the repository root, build the optional package and run its browser checks,
+or open the [Reading queue](../lifecycle/demo/reading-queue.tsx) to try add,
+reorder, remove, and keyboard Undo:
 
 ```sh
 CI=true pnpm install
+pnpm --filter @kinetic-router/layout... -r build
+pnpm --filter @kinetic-router/lifecycle test:browser:container layout.e2e.ts
 pnpm --filter @kinetic-router/lifecycle dev
 # Open http://127.0.0.1:5173 and find Reading queue.
 ```
