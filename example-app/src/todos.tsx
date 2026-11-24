@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { Lifecycle, useLifecycle } from "@kinetic-router/lifecycle";
-import { createCssTransition, createTransition, motion } from "@kinetic-router/animations";
+import { createCssTransition, createTransition, Motion } from "@kinetic-router/animations";
 import "./todos.css";
 
 type Todo = { id: number; title: string; emoji: string };
@@ -45,27 +45,33 @@ function TodoCard(props: { todo: Todo; complete: () => void }) {
   </li>;
 }
 
+function VictoryCard() {
+  return <section class="todos-victory" aria-labelledby="todos-victory-title">
+    <div class="todos-confetti" aria-hidden="true">
+      {Array.from({ length: 12 }, (_, index) => <span style={{
+        "--piece": index,
+        "--drift": `${index % 2 ? 90 : -90}px`,
+      }} />)}
+    </div>
+    <span class="todos-trophy" aria-hidden="true">🏆</span>
+    <p class="todos-eyebrow">Achievement unlocked</p>
+    <h2 id="todos-victory-title">All done. All glory.</h2>
+    <p>You have defeated the list. Take a bow, hydrate, tell the cactus.</p>
+    <code>Lifecycle.Show + Motion → a very necessary celebration</code>
+  </section>;
+}
+
 function Victory() {
   const { phase } = useLifecycle();
   const space = animateSpace();
   const tuckedAway = { opacity: 0, y: 60, rotate: -12, scale: 0.3 };
   return <div class="todos-victory-slot todos-space" ref={space}
     inert={phase() === "exiting"} aria-hidden={phase() === "exiting" ? "true" : undefined}>
-    <div class="todos-content"><motion.section class="todos-victory" aria-labelledby="todos-victory-title"
+    <div class="todos-content"><Motion
       initial={tuckedAway} animate={{ opacity: 1, y: 0, rotate: 0, scale: 1 }} exit={tuckedAway}
       transition={{ duration: 1.2, ease: "easeOut" }}>
-      <div class="todos-confetti" aria-hidden="true">
-        {Array.from({ length: 12 }, (_, index) => <span style={{
-          "--piece": index,
-          "--drift": `${index % 2 ? 90 : -90}px`,
-        }} />)}
-      </div>
-      <span class="todos-trophy" aria-hidden="true">🏆</span>
-      <p class="todos-eyebrow">Achievement unlocked</p>
-      <h2 id="todos-victory-title">All done. All glory.</h2>
-      <p>You have defeated the list. Take a bow, hydrate, tell the cactus.</p>
-      <code>Lifecycle.Show + motion.section → a very necessary celebration</code>
-    </motion.section></div>
+      <VictoryCard />
+    </Motion></div>
   </div>;
 }
 

@@ -14,7 +14,7 @@ test.afterEach(() => { expect(errors).toEqual([]) })
 function studio(page: Page) {
   const root = page.getByRole('region', { name: 'Postcard studio', exact: true })
   return {
-    card: page.locator('.postcard-studio section.postcard'),
+    card: page.locator('.postcard-studio li.postcard'),
     discard: root.getByRole('button', { name: 'Discard draft', exact: true }),
     undo: root.getByRole('button', { name: 'Undo discard', exact: true }),
     newDraft: root.getByRole('button', { name: 'New postcard', exact: true }),
@@ -81,10 +81,19 @@ async function openSlowDraft(page: Page, tilted = false) {
   return controls
 }
 
-test('motion.section applies partial initial targets with native timing in seconds', async ({ page }) => {
+test('Motion targets the custom list item directly with partial initial targets and native timing in seconds', async ({ page }) => {
   const { card } = await openSlowDraft(page, true)
+  const list = page.getByRole('list', { name: 'Draft tray', exact: true })
+  await expect(list).toHaveJSProperty('tagName', 'UL')
+  await expect(list.locator(':scope > *')).toHaveCount(1)
+  await expect(list.locator(':scope > li.postcard')).toHaveCount(1)
+
   const start = await pose(card, 0)
   expect(start.effects.length).toBeGreaterThan(0)
+  expect(await card.evaluate(element => {
+    const effects = element.getAnimations({ subtree: true }).map(animation => animation.effect)
+    return effects.length > 0 && effects.every(effect => effect instanceof KeyframeEffect && effect.target === element)
+  })).toBe(true)
   for (const effect of start.effects) {
     expect(effect.native).toBe(true)
     expect(effect.timing).toMatchObject({ duration: 4000, delay: 125, easing: 'ease-out' })
@@ -178,7 +187,7 @@ test('keyboard Undo reenters from a partial exit, retaining the exact node and i
   expect((await pose(discard)).effects).toEqual([]) // initial={false}
   await note.fill('Keep this light')
   await note.press('Escape')
-  await expect(undo).toBeFocused() // keyboard handler and native button ref both forward
+  await expect(undo).toBeFocused() // The card's own handler focuses the motion.button via its ref.
   await expect(card).toHaveJSProperty('inert', true)
   const exiting = await pose(card, 0.5)
   expect(exiting.opacity).toBeGreaterThan(0)

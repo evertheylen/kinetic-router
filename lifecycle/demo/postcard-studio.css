@@ -36,6 +36,14 @@
   border-radius: .75rem;
   background: radial-gradient(circle, #669080 1px, transparent 1px) 0 0 / 14px 14px, #112923;
 }
+.postcard-stage > .postcard-drafts {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .postcard-empty {
   position: absolute;
   padding: .5rem .8rem;

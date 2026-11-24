@@ -6,19 +6,31 @@ React's [`AnimatePresence`](https://motion.dev/docs/react-animate-presence), use
 the Solid lifecycle control that owns the condition, list, or branch:
 
 ```tsx
-import { motion } from '@kinetic-router/animations'
+import { Motion } from '@kinetic-router/animations'
 import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 
+function Card() {
+  return <section aria-label="Preview">Hello!</section>
+}
+
 <Lc.Show when={open()}>
-  <motion.section
+  <Motion
     initial={{ opacity: 0, y: 12 }}
     animate={{ opacity: 1, y: 0, rotate: tilted() ? -5 : 0 }}
     exit={{ opacity: 0, y: 12 }}
     transition={{ duration: 0.2, ease: 'easeOut' }}
-  >Preview</motion.section>
+  >
+    <Card />
+  </Motion>
 </Lc.Show>
 ```
 
+- **Wrap the component in JSX, not in the DOM.** `Motion` animates the child's
+  single DOM `Element` without a host element or a forwarded ref. Keep attributes,
+  handlers, and refs on the actual markup. Empty, text-only, or multiple roots are
+  errors, as is swapping the root while `Motion` stays mounted. If you want an
+  actual tag or wrapper, use `motion.div`, `motion.span`, `motion.section`,
+  `motion.button`, or `motion.li`.
 - **Use plain target objects instead of variants.** Read Solid signals in
   `animate` to change the pose. Targets take finite scalar `opacity` (0–1),
   `x`/`y` (pixels), `rotate` (degrees), and `scale`. `initial` and `exit` can

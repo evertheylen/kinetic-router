@@ -1,22 +1,14 @@
-import { motion } from '@kinetic-router/animations'
+import { Motion, motion } from '@kinetic-router/animations'
 import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 import { createSignal, onCleanup } from 'solid-js'
 import './postcard-studio.css'
 
-function Postcard(props: { shown: boolean; tilted: boolean; slow: boolean; discard: () => void; onDiscarded: () => void }) {
+function Postcard(props: { shown: boolean; discard: () => void; onDiscarded: () => void }) {
   const [note, setNote] = createSignal('')
   onCleanup(() => props.onDiscarded())
 
-  return <motion.section
-    class="postcard"
-    aria-label="Afterglow postcard"
-    inert={!props.shown}
-    initial={{ opacity: 0.65, y: 24 }}
-    animate={{ opacity: 1, x: props.tilted ? 28 : 0, y: 0, rotate: props.tilted ? -5 : 0, scale: props.tilted ? 0.94 : 1 }}
-    exit={{ opacity: 0, y: 24 }}
-    transition={{ duration: props.slow ? 4 : 1.1, delay: props.slow ? 0.125 : 0, ease: 'easeOut' }}
-    onKeyDown={(event: KeyboardEvent) => { if (event.key === 'Escape') props.discard() }}
-  >
+  return <li class="postcard" aria-label="Afterglow postcard" inert={!props.shown}
+    onKeyDown={event => { if (event.key === 'Escape') props.discard() }}>
     <div class="postcard-print" aria-hidden="true"><span>35° N / 08° W</span><span>FIG. 01</span></div>
     <div class="postcard-paper">
       <div class="postcard-edition"><span>FIELD NOTES</span><span>COLOR STUDY № 01</span></div>
@@ -24,7 +16,7 @@ function Postcard(props: { shown: boolean; tilted: boolean; slow: boolean; disca
       <label>Note to self <input value={note()} onInput={event => setNote(event.currentTarget.value)}
         placeholder="Remember this light…" maxlength="80" /></label>
     </div>
-  </motion.section>
+  </li>
 }
 
 export function PostcardStudio() {
@@ -60,9 +52,18 @@ export function PostcardStudio() {
     </div>
     <div class="postcard-stage">
       <span class="postcard-empty" aria-hidden="true">DRAFT TRAY</span>
-      <Lc.Show when={shown()}>
-        <Postcard shown={shown()} tilted={tilted()} slow={slow()} discard={discard} onDiscarded={() => setCanUndo(false)} />
-      </Lc.Show>
+      <ul class="postcard-drafts" role="list" aria-label="Draft tray">
+        <Lc.Show when={shown()}>
+          <Motion
+            initial={{ opacity: 0.65, y: 24 }}
+            animate={{ opacity: 1, x: tilted() ? 28 : 0, y: 0, rotate: tilted() ? -5 : 0, scale: tilted() ? 0.94 : 1 }}
+            exit={{ opacity: 0, y: 24 }}
+            transition={{ duration: slow() ? 4 : 1.1, delay: slow() ? 0.125 : 0, ease: 'easeOut' }}
+          >
+            <Postcard shown={shown()} discard={discard} onDiscarded={() => setCanUndo(false)} />
+          </Motion>
+        </Lc.Show>
+      </ul>
     </div>
   </section>
 }
