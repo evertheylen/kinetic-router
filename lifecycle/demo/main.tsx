@@ -288,4 +288,8 @@ function Demo() {
   </main>
 }
 
-render(() => <Demo />, document.getElementById('app')!)
+const app = document.getElementById('app')!
+if (new URLSearchParams(location.search).has('page-presence')) {
+  const { mountPagePresenceFixture } = await import('./page-presence.js')
+  mountPagePresenceFixture(app)
+} else render(() => <Demo />, app)

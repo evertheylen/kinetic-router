@@ -10,6 +10,9 @@
   "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "*.ts"],
   "references": [
     { "path": "../definition/tsconfig.build.json" },
+    { "path": "../lifecycle/tsconfig.build.json" },
+    { "path": "../motion/tsconfig.build.json" },
+    { "path": "../motion-router/tsconfig.build.json" },
     { "path": "../solid/tsconfig.build.json" }
   ]
 }

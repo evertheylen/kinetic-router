@@ -30,9 +30,11 @@ export function createTargetDriver(readTiming: () => ReturnType<typeof timing>) 
       install(element, target, target, { duration: 0 }, true)
       setBound(true)
     },
-    snapTo(target: AnimationTarget) {
-      if (current && !sameTarget(target, current.target)) {
-        install(current.element, target, target, { duration: 0 }, true)
+    snapTo(target: AnimationTarget, reduced = target) {
+      if (!current) return
+      const next = reducedMotion.matches ? reduced : target
+      if (!sameTarget(next, current.target) || current.animation.playState !== 'finished') {
+        install(current.element, next, next, { duration: 0 }, true)
       }
     },
     retarget(target: AnimationTarget) {

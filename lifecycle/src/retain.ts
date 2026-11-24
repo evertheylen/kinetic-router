@@ -1,8 +1,8 @@
 import {
-  For, createEffect, createRenderEffect, createSignal, onCleanup,
+  For, createEffect, createRenderEffect, createSignal, onCleanup, useContext,
   type Accessor, type Element as SolidElement,
 } from 'solid-js'
-import { Scope, ScopeContext } from './scope.js'
+import { PresenceContext, Scope } from '@kinetic-router/presence'
 
 export interface Selection<T> { key: unknown; value: T }
 export type RetentionMode = 'parallel' | 'out-in'
@@ -14,6 +14,7 @@ export function retain<T>(
   mode: Accessor<RetentionMode> = () => 'parallel',
   beforeChange?: () => void | (() => void),
 ): SolidElement {
+  const page = useContext(PresenceContext)?.page ?? null
   function entry(initial: Selection<T>, index: number) {
     // A selection already boxes the item: even a function is data, not a signal updater.
     const [selection, setSelection] = createSignal(initial, {
@@ -21,7 +22,7 @@ export function retain<T>(
     })
     const [position, setIndex] = createSignal(index, { ownedWrite: true })
     return {
-      key: initial.key, scope: new Scope(invalidate),
+      key: initial.key, scope: new Scope(invalidate, page?.isDormant),
       value: () => selection().value, index: position, setSelection, setIndex,
     }
   }
@@ -46,7 +47,7 @@ export function retain<T>(
     if (rendered !== staged) return
     const committed = pendingAfterChange
     pendingAfterChange = undefined
-    committed?.()
+    if (!page?.isDormant) committed?.()
     const next = rendered.filter(row => !row.scope.advance())
     if (next.length !== rendered.length) stage(next)
   })
@@ -63,7 +64,7 @@ export function retain<T>(
     const reusable = new Map(staged.map(row => [row.key, row]))
     waitingForDisposal = mode === 'out-in' && [...mounted].some(row => !keys.has(row.key) || reusable.get(row.key) !== row)
     const allowed = waitingForDisposal ? selections.filter(selection => reusable.has(selection.key)) : selections
-    if (beforeChange && initialized && !pendingAfterChange) {
+    if (beforeChange && initialized && !pendingAfterChange && !page?.isDormant) {
       const previous = staged.filter(row => row.scope.direction === 'in')
       const changed = previous.length !== allowed.length || allowed.some(({ key }, index) => reusable.get(key) !== previous[index])
       if (changed) pendingAfterChange = beforeChange()
@@ -96,13 +97,14 @@ export function retain<T>(
     get each() { return visible() },
     children: retained => {
       mounted.add(retained)
+      page?.attach(retained.scope)
       onCleanup(() => {
         retained.scope.dispose()
         mounted.delete(retained)
         if (waitingForDisposal) retrySelection()
       })
-      return ScopeContext({
-        value: retained.scope,
+      return PresenceContext({
+        value: { boundary: retained.scope, page },
         get children() { return render(retained.value, retained.index) },
       })
     },

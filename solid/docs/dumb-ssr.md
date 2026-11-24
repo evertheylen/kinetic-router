@@ -47,6 +47,8 @@ matched layout must supply its child `Outlet`. Leaf outlets are empty. Missing
 or competing required outlets reject rather than silently dropping/duplicating
 matched content. Ordinary async Solid children and intentional error fallbacks
 are supported; a fallback must still supply the required matched stack.
+`MotionOutlet` renders the same markup as `Outlet` on the server. Motion on the
+page itself still needs a server-safe rendering path.
 
 Inputs are one-shot, frozen parameter objects, split by each page's
 `untrackedKeys`; inherited values follow parameter-definition identity, not key

@@ -66,8 +66,9 @@ export class Router<
     engine?: NavigationEngine,
     /** Maximum history-cached pages and retained entry stacks (default 10).
      * Nested ancestors count; shared instances count once. The visible stack is
-     * always kept, even above this limit. Zero keeps only the visible stack.
-     * Speculative output and construction-only pins have a separate budget.
+     * always kept, even above this limit. Zero caches only the visible stack.
+     * Speculation, in-progress construction and outgoing animations can keep
+     * pages alive independently of this history budget.
      * Must be a non-negative safe integer. Eviction preserves browser history
      * and saved parameters/scroll positions, but re-rendering resets local DOM state. */
     maxCachedPages?: number,

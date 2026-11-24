@@ -253,6 +253,8 @@ function Playground(props: { scenario: Scenario }) {
 
 if (location.pathname.startsWith('/link-test/')) {
   void import('./link-fixture.js').then(({ mountLinks }) => mountLinks(root));
+} else if (location.pathname.startsWith('/motion-test/')) {
+  void import('./route-motion-fixture.js').then(({ mountRouteMotion }) => mountRouteMotion(root));
 } else if (location.pathname === '/' || !scenarioId) {
   sessionStorage.removeItem(activeKey);
   render(() => <Picker />, root);

@@ -13,13 +13,16 @@ ordinary-looking links and render pages through `<Outlet>` components.
 - Cached page instances that preserve DOM state across Back/Forward navigation.
 - Opt-in, cancellable page preparation on hover, focus, or primary press.
 - Reactive lifecycle signals for loading resources, visibility, and page focus.
+- Experimental per-outlet page animations in this workspace: `MotionOutlet` from
+  `@kinetic-router/motion-router` pairs with the private `@kinetic-router/motion`
+  and `@kinetic-router/lifecycle` packages. These three packages are not published.
 - Injectable navigation engines, including a memory engine for headless use.
 - Optional [dumb SSR](solid/docs/dumb-ssr.md): public HTML followed by a fresh
   client render, without hydration or server-state transfer.
 
 Requires Solid 2 (`solid-js` and `@solidjs/web` 2.0.3 or newer within 2.x) and
 the Navigation API (Chrome 102+, Safari 26.2+, Firefox 147+). There is no
-History API fallback. Animated page transitions are not implemented yet.
+History API fallback.
 
 ## A small example
 

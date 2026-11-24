@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [solid()],
   resolve: {
     conditions: ['browser', 'development'],
-    alias: { '@kinetic-router/lifecycle': fileURLToPath(new URL('../lifecycle/src/index.ts', import.meta.url)) },
+    alias: {
+      '@kinetic-router/lifecycle': fileURLToPath(new URL('../lifecycle/src/index.ts', import.meta.url)),
+      '@kinetic-router/presence': fileURLToPath(new URL('../presence/src/index.ts', import.meta.url)),
+    },
   },
   test: {
     environment: 'happy-dom',

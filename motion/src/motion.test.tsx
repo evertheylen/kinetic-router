@@ -5,6 +5,7 @@ import {
 } from 'solid-js'
 import { Portal, render, type JSX } from '@solidjs/web'
 import { Lifecycle as Lc, onExit } from '@kinetic-router/lifecycle'
+import { createPagePresence, PresenceContext } from '@kinetic-router/presence'
 import { Motion, motion, type MotionProps, type MotionTagProps, type MotionTarget, type MotionTransition, type spring } from './index.js'
 
 class TargetAnimation {
@@ -51,6 +52,72 @@ afterEach(async () => {
   document.body.replaceChildren()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+})
+
+describe('motion with page presence', () => {
+  it('does not register exit work when an exit target is supplied only after mount', async () => {
+    const [exit, setExit] = createSignal<MotionTarget | undefined>()
+    let page!: ReturnType<typeof createPagePresence>
+    mount(() => {
+      page = createPagePresence()
+      return <PresenceContext value={page}>
+        <motion.div animate={{ opacity: 1 }} exit={exit()} />
+      </PresenceContext>
+    })
+    page.present(true); await settle()
+    expect(page.hasExitWork).toBe(false)
+    setExit({ opacity: 0 }); await settle()
+    expect(page.hasExitWork).toBe(false)
+  })
+
+  it('holds even entry-only Motion, snaps initial:false, and reprepares the same nodes on park', async () => {
+    const [opacity, setOpacity] = createSignal(0.75)
+    let page!: ReturnType<typeof createPagePresence>
+    const host = mount(() => {
+      page = createPagePresence()
+      return <PresenceContext value={page}>
+        <Motion initial={{ opacity: 0 }} animate={{ opacity: opacity() }}><article /></Motion>
+        <motion.div initial={false} animate={{ opacity: opacity() }} exit={{ opacity: 0 }} />
+      </PresenceContext>
+    })
+    const [article, div] = [...host.children] as HTMLElement[]
+    const effectFor = (node: Element) => effects.findLast(effect => effect.effect.target === node)!
+    const from = (effect: TargetAnimation) => effect.effect.getKeyframes()[0]?.opacity
+    const to = (effect: TargetAnimation) => effect.effect.getKeyframes().at(-1)?.opacity
+    setOpacity(0.6); await settle()
+    expect(effects).toHaveLength(2)
+    expect(from(effectFor(article!))).toBe('0')
+    expect(effects.every(effect => effect.playState === 'finished')).toBe(true)
+    page.present(true); await settle()
+    expect(effectFor(article!).playState).toBe('running')
+    expect(to(effectFor(article!))).toBe('0.6')
+    expect(effectFor(div!).playState).toBe('finished')
+    expect(from(effectFor(div!))).toBe('0.6')
+
+    const done = vi.fn()
+    page.exit(done); await settle()
+    const outgoing = effectFor(div!)
+    div!.style.opacity = '0.35' // happy-dom does not sample WAAPI interpolation
+    page.present(true); await settle()
+    expect(outgoing.playState).toBe('idle')
+    expect(done).not.toHaveBeenCalled()
+    expect(from(effectFor(div!))).toBe('0.35')
+    expect(to(effectFor(div!))).toBe('0.6')
+
+    host.remove(); page.park(); await settle()
+    expect(from(effectFor(article!))).toBe('0')
+    expect(effectFor(div!).playState).toBe('finished')
+    document.body.append(host)
+    page.present(true); await settle()
+    expect([...host.children]).toEqual([article, div])
+    expect(effectFor(article!).playState).toBe('running')
+    expect(effectFor(div!).playState).toBe('finished')
+    host.remove(); page.park()
+    document.body.append(host)
+    page.present(false); await settle()
+    expect(effectFor(article!).playState).toBe('finished')
+    expect(from(effectFor(article!))).toBe('0.6')
+  })
 })
 
 describe('motion', () => {

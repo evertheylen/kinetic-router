@@ -26,6 +26,7 @@
   "dependencies": {
     "@dovetail-js/utils": "catalog:",
     "@kinetic-router/definition": "workspace:*",
+    "@kinetic-router/presence": "workspace:*",
     "@kinetic-router/url": "workspace:*"
   },
   "peerDependencies": {

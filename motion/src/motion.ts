@@ -1,6 +1,6 @@
-import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
+import { PresenceContext, requirePresenceScope } from '@kinetic-router/presence'
 import { dynamic, type JSX } from '@solidjs/web'
-import { createEffect, createMemo, flatten, merge, omit, untrack } from 'solid-js'
+import { createEffect, createMemo, flatten, merge, omit, untrack, useContext } from 'solid-js'
 import type { AnimationTarget } from './keyframes.js'
 import { createTargetDriver } from './target-driver.js'
 import { timing } from './timing.js'
@@ -29,7 +29,7 @@ interface MotionOptions {
   animate: MotionTarget
   /** Overlay on the first animate target. Omit or use false to snap to animate at the first present commit. */
   initial?: MotionTarget | false
-  /** Overlay on the last present target, sampled at removal. Enable with a target at mount inside a lifecycle boundary. */
+  /** Overlay on the last present target, sampled at removal. Enable with a target at mount inside a lifecycle or routed page boundary. */
   exit?: MotionTarget
   /** Sampled at the start of each move, not used to retime a running effect. */
   transition?: MotionTransition
@@ -84,7 +84,10 @@ function createMotionBinding(props: MotionOptions) {
   })
   let skipInitialMotion = initial === undefined
   const exit = untrack(readExit)
-  const lifecycle = exit && useLifecycle()
+  const presence = useContext(PresenceContext)
+  const routed = presence?.page != null
+  const scope = exit || routed ? presence?.boundary ?? requirePresenceScope() : null
+  let routeEntryCommitted = false
   const declared = { ...present, ...initial, ...exit }
   let ownsOpacity = declared.opacity !== undefined
   let ownsTransform = hasTransform(declared)
@@ -103,31 +106,49 @@ function createMotionBinding(props: MotionOptions) {
   const driver = createTargetDriver(() => untrack(() => motionTiming(props.transition)))
   function bind(element: Element) {
     const visible = target(present)
-    const exiting = untrack(() => lifecycle?.phase()) === 'exiting'
+    const exiting = scope?.direction === 'out'
     if (exiting) skipInitialMotion = false
     const first = target({ ...present, ...(exiting ? exit : initial) })
     driver.prepare(element, first, exiting ? first : visible)
   }
 
-  if (lifecycle) onInOut(({ direction }) => {
-    // onInOut does not wait for an unrelated enter. Keep the old fill until
-    // a committed restore can retarget it; final owner cleanup cancels it.
-    if (direction !== 'out') return
-    const overlay = untrack(readExit)
+  function applyPresent(pose: MotionTarget, snap = false) {
+    present = pose
+    const next = target(pose)
+    if (snap || skipInitialMotion) driver.snapTo(next)
+    else driver.retarget(next)
+    skipInitialMotion = false
+  }
+
+  function commitRouteEntry(snap = false) {
+    applyPresent(snapshotMotionTarget(props.animate), snap)
+    routeEntryCommitted = true
+  }
+
+  scope?.register(exit ? 'inout' : 'enter', ({ direction }) => {
+    if (direction === 'in') {
+      if (routed) commitRouteEntry()
+      return
+    }
+    routeEntryCommitted = false
+    // Keep the current fill until a committed restore retargets it.
+    const overlay = readExit()
     if (overlay === undefined) return
     skipInitialMotion = false
     return driver.retarget(target({ ...present, ...overlay }))?.finished
-  })
+  }, routed ? {
+    snap: () => commitRouteEntry(true),
+    park() {
+      routeEntryCommitted = false
+      skipInitialMotion = initial === undefined
+      present = snapshotMotionTarget(props.animate)
+      driver.snapTo(target({ ...present, ...initial }), target(present))
+    },
+  } : undefined)
 
-  // Do not consume the first present pose until preparation has a real target.
-  createEffect(() => driver.bound() && lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
-    if (!pose) return
-    present = pose
-    const next = target(pose)
-    // The element can be prepared even while Loading holds the first present commit.
-    if (skipInitialMotion) driver.snapTo(next)
-    else driver.retarget(next)
-    skipInitialMotion = false
+  createEffect(() => driver.bound() && scope?.state.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
+    // The ref can be ready while Loading or a dormant route holds its first commit.
+    if (pose && (!routed || routeEntryCommitted)) applyPresent(pose)
   })
 
   return bind
@@ -142,7 +163,8 @@ function isElement(value: unknown): value is Element {
  * with no wrapper. Put DOM props and refs on the child; remount Motion to
  * animate a different root. Put Loading around Motion or inside the stable
  * root, not in place of the root.
- * An exit target needs an enclosing Lifecycle.For, Show, or Match boundary.
+ * An exit target needs a Lifecycle.For, Show, Match, or routed page boundary.
+ * Entry motion waits for live presentation in a route (including without `exit`).
  */
 export function Motion(props: MotionProps): JSX.Element {
   const bind = createMotionBinding(props)
@@ -190,7 +212,8 @@ function motionTag<Tag extends MotionTag>(tag: Tag) {
  * Later targets can claim a family, starting from its underlying style. Once
  * claimed, omitted components return to neutral (opacity/scale 1, x/y/rotate 0).
  * Retargeting while disconnected snaps. While exiting, only the exit target is
- * applied; restore uses the latest animate.
+ * applied; restore uses the latest animate. Routed entry waits for live
+ * presentation, just like Motion.
  */
 export const motion = {
   div: motionTag('div'),

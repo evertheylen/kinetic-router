@@ -20,7 +20,7 @@ prefix="kinetic-lifecycle-${workspace_id}"
 # Empty mount points only: the volumes hide host dependencies/build output, while
 # the rest of the checkout is read-only. Each worktree gets its own module volumes.
 mkdir -p "$root/node_modules" "$root/lifecycle/node_modules" "$root/motion/node_modules" \
-  "$root/motion-layout/node_modules" "$root/lifecycle/demo/dist"
+  "$root/motion-layout/node_modules" "$root/presence/node_modules" "$root/lifecycle/demo/dist"
 # The quoted script deliberately expands variables inside the container.
 # shellcheck disable=SC2016
 container=$("$engine" create --init --ipc=private --shm-size=1g --workdir /work \
@@ -29,6 +29,7 @@ container=$("$engine" create --init --ipc=private --shm-size=1g --workdir /work 
   --mount "type=volume,source=$prefix-lifecycle-modules,target=/work/lifecycle/node_modules" \
   --mount "type=volume,source=$prefix-motion-modules,target=/work/motion/node_modules" \
   --mount "type=volume,source=$prefix-motion-layout-modules,target=/work/motion-layout/node_modules" \
+  --mount "type=volume,source=$prefix-presence-modules,target=/work/presence/node_modules" \
   --mount "type=volume,source=$prefix-demo,target=/work/lifecycle/demo/dist" \
   --mount "type=volume,source=kinetic-lifecycle-package-cache,target=/cache" \
   --env CI=true \

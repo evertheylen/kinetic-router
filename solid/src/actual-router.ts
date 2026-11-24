@@ -14,6 +14,7 @@ import { SolidImplementationMap } from "./implementation-map.js";
 import { Accessor, createEffect, createSignal, runWithOwner, Setter } from "solid-js";
 import { reusableRoutes } from "./diff.js";
 import { RenderedRouteCache } from "./rendered-route-cache.js";
+import { RoutePresentation } from "./route-presentation.js";
 import { EngineBeforeCommit, EngineEntry, EngineNavigateEvent, EngineNavigationResult, EntrySource, NavigationEngine, NavigationInfo } from "./navigation-engine.js";
 import type { TransientHandle } from './router.js';
 import { Backstage } from './backstage.js';
@@ -88,6 +89,7 @@ export class ActualRouter<
   readonly implCache = new Map<Route<any>, Page<ExtraOutput, any, any>>();
 
   readonly rrCache: RenderedRouteCache;
+  private readonly presentation: RoutePresentation;
 
   protected readonly urls: ReturnType<typeof createRouteUrls>;
   protected readonly preparations: PreparationRegistry;
@@ -130,6 +132,7 @@ export class ActualRouter<
     this.implMap = implMap;
     this.engine = engine;
     this.rrCache = rrCache;
+    this.presentation = new RoutePresentation(rrCache);
     this.preparations = preparations;
     this.urls = urls;
 
@@ -422,6 +425,7 @@ export class ActualRouter<
     this.pendingTransition?.abort();
     this.pendingTransition = undefined;
     this.disposePreparations();
+    this.presentation.dispose();
     this.rrCache.dispose();
     this.bookmarks.clear();
   }
@@ -661,7 +665,7 @@ export class ActualRouter<
     let stageOutlet: OutletDelegate | undefined = {
       setElement: node => backstage.replaceChildren(node), clear: () => backstage.replaceChildren(),
     };
-    let releaseRoutes = this.rrCache.retainForRender(reused);
+    let releaseRoutes = this.rrCache.pin(reused);
     let renderedRoutes: readonly RenderedRoute[] = reused;
     let phase: 'constructing' | 'adopted' | 'disposed' = 'constructing';
     let requested = true;
@@ -688,7 +692,7 @@ export class ActualRouter<
       // History owns the output now, but outstanding consumers still pin the
       // complete tree and request fetching, even if history later evicts it.
       const releaseReused = releaseRoutes;
-      releaseRoutes = this.rrCache.retainForRender(renderedRoutes);
+      releaseRoutes = this.rrCache.pin(renderedRoutes);
       detach();
       releaseReused();
     };
@@ -781,18 +785,20 @@ export class ActualRouter<
       }
     }
     for (const rendered of prepared.routes.slice(prepared.reusedCount)) rendered.renderArgs.params.activate();
-    outlet = this.rootOutlet;
-    for (const rendered of prepared.routes) {
+    const applyPresence = this.presentation.mount(this.rootOutlet, prepared.routes, signal);
+    let committed = false;
+    try {
       signal.throwIfAborted();
-      outlet!.setElement(rendered.renderOutput!.html);
-      outlet = rendered.subOutlet;
+      this.restoreScrollPositions(state);
+      signal.throwIfAborted();
+      this.currentState = state;
+      this.rrCache.markUsedFor(state.id, prepared.routes, () => {
+        prepared.adopt();
+        committed = true;
+      });
+    } finally {
+      if (!this.disposed) applyPresence(committed);
     }
-    signal.throwIfAborted();
-    outlet?.clear();
-    this.restoreScrollPositions(state);
-    signal.throwIfAborted();
-    this.currentState = state;
-    this.rrCache.markUsedFor(state.id, prepared.routes, prepared.adopt);
     signal.throwIfAborted();
     this.transientStacksByEntry.set(state.id, []);
     this._setCurrentLocator(state.locator);

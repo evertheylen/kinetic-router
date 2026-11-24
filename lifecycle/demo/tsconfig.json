@@ -7,6 +7,7 @@
     "types": ["vite/client"],
     "paths": {
       "@kinetic-router/lifecycle": ["../src/index.ts"],
+      "@kinetic-router/presence": ["../../presence/src/index.ts"],
       "@kinetic-router/motion": ["../../motion/src/index.ts"],
       "@kinetic-router/motion-layout": ["../../motion-layout/src/index.ts"]
     },

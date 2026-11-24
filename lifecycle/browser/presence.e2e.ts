@@ -1,0 +1,47 @@
+import { expect, test } from '@playwright/test'
+
+test('managed CSS and nested keyframes are dormant in connected staging and replay on cached presentation', async ({ page }) => {
+  await page.goto('/?page-presence')
+  const css = page.locator('#routed-css'), native = page.locator('#routed-native')
+  const present = page.getByRole('button', { name: 'Present', exact: true })
+  await expect(page.locator('#staged #routed-css')).toHaveCount(1)
+  await expect(css).toHaveCSS('opacity', '0.15')
+  expect(await css.evaluate(element => element.getAnimations().length)).toBe(0)
+  await expect(native).toHaveCSS('opacity', '0')
+  expect(await native.evaluate(element => element.getAnimations()[0]!.currentTime)).toBe(0)
+
+  await present.click()
+  await expect(page.locator('#live #routed-css')).toHaveCount(1)
+  await expect.poll(() => css.evaluate(element => element.getAnimations()[0]?.playState)).toBe('running')
+  await expect.poll(() => native.evaluate(element => element.getAnimations()[0]?.playState)).toBe('running')
+  const retained = await native.elementHandle()
+  await css.evaluate(element => element.getAnimations()[0]!.finish())
+  await native.evaluate(element => element.getAnimations()[0]!.finish())
+  await page.getByRole('button', { name: 'Exit', exact: true }).click()
+  await expect(css).toHaveAttribute('data-direction', 'out')
+  await css.evaluate(element => element.getAnimations()[0]!.finish())
+  await expect(native).toHaveCount(0)
+
+  await present.click()
+  expect(await native.evaluate((element, retained) => element === retained, retained)).toBe(true)
+  await expect.poll(() => css.evaluate(element => element.getAnimations()[0]?.playState)).toBe('running')
+  await expect(native).toHaveCSS('opacity', '0')
+  await expect.poll(() => native.evaluate(element => element.getAnimations()[0]?.playState)).toBe('running')
+})
+
+test('plain presentation snaps without playing, and parking reprepares poses without an exit', async ({ page }) => {
+  await page.goto('/?page-presence')
+  const css = page.locator('#routed-css'), native = page.locator('#routed-native')
+  await expect(css).toHaveCSS('opacity', '0.15')
+  await page.getByRole('button', { name: 'Snap', exact: true }).click()
+  await expect(css).toHaveCSS('opacity', '1')
+  await expect(native).toHaveCSS('opacity', '1')
+  expect(await css.evaluate(element => element.getAnimations().every(animation => animation.playState === 'finished'))).toBe(true)
+  expect(await native.evaluate(element => element.getAnimations()[0]!.playState)).toBe('finished')
+
+  await page.getByRole('button', { name: 'Park', exact: true }).click()
+  await expect(css).toHaveCount(0)
+  await page.getByRole('button', { name: 'Present', exact: true }).click()
+  await expect.poll(() => css.evaluate(element => element.getAnimations()[0]?.playState)).toBe('running')
+  await expect.poll(() => native.evaluate(element => element.getAnimations()[0]?.playState)).toBe('running')
+})

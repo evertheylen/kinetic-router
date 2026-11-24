@@ -5,6 +5,7 @@ import {
   type Accessor, type Element as SolidElement,
 } from 'solid-js'
 import { Portal, render } from '@solidjs/web'
+import { createPagePresence, PresenceContext } from '@kinetic-router/presence'
 import { Lifecycle, onEnter, onExit, onInOut, useLifecycle, type Direction } from './index.js'
 
 const deferred = () => Promise.withResolvers<void>()
@@ -27,6 +28,143 @@ afterEach(async () => {
   await settle()
   document.body.replaceChildren()
   vi.restoreAllMocks()
+})
+
+describe('page presence', () => {
+  it('defers connected construction, scopes exit independently, and cancels stale completion on reentry', async () => {
+    const [local, setLocal] = createSignal(true)
+    const localWork = deferred(), exitWork = deferred()
+    const runs: { label: string; signal: AbortSignal }[] = []
+    let page!: ReturnType<typeof createPagePresence>
+    function Animated(props: { name: string; exitWork: Promise<void> }) {
+      const phase = useLifecycle().phase
+      const ref = onInOut<HTMLElement>({
+        prepare(element) { element.style.opacity = '0' },
+        run({ element, direction, signal }) {
+          runs.push({ label: `${props.name}:${direction}:${element.dataset.phase}:${element.isConnected}`, signal })
+          if (direction === 'out') return props.exitWork
+        },
+      })
+      return <p ref={ref} data-phase={phase()}>{props.name}</p>
+    }
+    const { host } = mount(() => {
+      page = createPagePresence()
+      return <PresenceContext value={page}>
+        <Animated name="page" exitWork={exitWork.promise} />
+        <Lifecycle.Show when={local()}><Animated name="local" exitWork={localWork.promise} /></Lifecycle.Show>
+      </PresenceContext>
+    })
+    await settle()
+    expect([...host.children].map(element => element.getAttribute('style'))).toEqual(['opacity: 0;', 'opacity: 0;'])
+    expect(runs).toEqual([])
+    page.present(true); await settle()
+    expect(runs.map(run => run.label)).toEqual(['page:in:present:true', 'local:in:present:true'])
+    const stale = vi.fn(), done = vi.fn()
+    page.exit(stale); await settle()
+    page.present(true); await settle()
+    expect(runs[2]).toMatchObject({ label: 'page:out:exiting:true', signal: { aborted: true } })
+    expect(runs[3]?.label).toBe('page:in:present:true')
+    exitWork.resolve(); await settle()
+    expect(stale).not.toHaveBeenCalled()
+    expect(runs[1]?.signal.aborted).toBe(false)
+    setLocal(false); await settle()
+    page.exit(done)
+    await vi.waitFor(() => expect(done).toHaveBeenCalledOnce())
+    expect(host.textContent).toBe('pagelocal')
+    host.remove(); page.park()
+    document.body.append(host)
+    page.present(true); await settle()
+    const localOut = runs.filter(run => run.label.startsWith('local:out'))
+    expect(localOut).toHaveLength(1)
+    expect(localOut[0]?.signal.aborted).toBe(true)
+    expect(host.textContent).toBe('page')
+    localWork.resolve(); await settle()
+  })
+
+  it('counts only committed page exit work, including a first hook added after presentation', async () => {
+    const [appear, setAppear] = createSignal(false)
+    const load = deferred(), hold = deferred()
+    const exit = vi.fn(() => hold.promise), done = vi.fn()
+    let page!: ReturnType<typeof createPagePresence>
+    function Late() {
+      const loaded = createMemo(() => load.promise.then(() => 'loaded'))
+      onExit(exit)
+      return <p>{loaded()}</p>
+    }
+    const { host } = mount(() => {
+      page = createPagePresence()
+      return <PresenceContext value={page}>
+        {appear() && <Loading fallback="waiting"><Late /></Loading>}
+      </PresenceContext>
+    })
+    try {
+      page.present(true)
+      expect(page.hasExitWork).toBe(false)
+      setAppear(true); await settle()
+      expect(host.textContent).toBe('waiting')
+      expect(page.hasExitWork).toBe(false)
+      load.resolve()
+      await vi.waitFor(() => expect(page.hasExitWork).toBe(true))
+      page.exit(done); await settle()
+      expect(exit).toHaveBeenCalledOnce()
+      expect(done).not.toHaveBeenCalled()
+      hold.resolve()
+      await vi.waitFor(() => expect(done).toHaveBeenCalledOnce())
+    } finally {
+      load.resolve(); hold.resolve(); await settle()
+    }
+  })
+
+  it('snaps prepared and Loading-held entries in a plain outlet but animates future local selections', async () => {
+    const [local, setLocal] = createSignal(false)
+    const load = deferred()
+    const runs: string[] = []
+    let page!: ReturnType<typeof createPagePresence>
+    function Animated(props: { name: string }) {
+      onEnter(() => { runs.push(`handler:${props.name}`) })
+      const ref = onEnter<HTMLElement>({
+        prepare(element) { element.dataset.pose = 'first' },
+        run({ element }) { element.dataset.pose = 'animated'; runs.push(`adapter:${props.name}`) },
+        snap(element) { element.dataset.pose = 'final' },
+        park(element) { element.dataset.pose = 'first' },
+      })
+      return <p ref={ref} id={props.name}>{props.name}</p>
+    }
+    function Late() {
+      const loaded = createMemo(() => load.promise.then(() => 'loaded'))
+      return <><Animated name="late" /><p>{loaded()}</p></>
+    }
+    const { host } = mount(() => {
+      page = createPagePresence()
+      return <PresenceContext value={page}>
+        <Animated name="page" />
+        <Lifecycle.Show when={true}>
+          <Animated name="local" />
+          <Loading fallback="loading"><Late /></Loading>
+        </Lifecycle.Show>
+        <Lifecycle.Show when={local()}><Animated name="later" /></Lifecycle.Show>
+      </PresenceContext>
+    })
+    try {
+      await settle()
+      expect(host.querySelector('#local')?.getAttribute('data-pose')).toBe('first')
+      page.present(false); await settle()
+      for (const id of ['page', 'local']) expect(host.querySelector(`#${id}`)?.getAttribute('data-pose')).toBe('final')
+      load.resolve()
+      await vi.waitFor(() => expect(host.querySelector('#late')?.getAttribute('data-pose')).toBe('final'))
+      expect(runs).toEqual(['handler:local', 'handler:late'])
+      setLocal(true); await settle()
+      expect(runs).toEqual(['handler:local', 'handler:late', 'handler:later', 'adapter:later'])
+      host.remove(); page.park(); flush()
+      expect(host.querySelector('#page')?.getAttribute('data-pose')).toBe('first')
+      document.body.append(host)
+      page.present(true); await settle()
+      expect(host.querySelector('#page')?.getAttribute('data-pose')).toBe('animated')
+      expect(host.querySelector('#local')?.getAttribute('data-pose')).toBe('animated')
+    } finally {
+      load.resolve(); await settle()
+    }
+  })
 })
 
 describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {

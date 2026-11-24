@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@kinetic-router/definition": "workspace:*",
+    "@kinetic-router/lifecycle": "workspace:*",
+    "@kinetic-router/motion": "workspace:*",
+    "@kinetic-router/motion-router": "workspace:*",
     "@kinetic-router/solid": "workspace:*",
     "@kinetic-router/testing-utils": "workspace:*",
     "@solidjs/web": "catalog:",

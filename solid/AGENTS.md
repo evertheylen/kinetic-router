@@ -29,3 +29,8 @@ changing interaction semantics.
 - Cache eviction must retain complete ancestor stacks and protect visible output.
   History and saved parameters/scroll positions survive eviction; local DOM state
   does not. Test cache changes in `src/preparation.test.ts` and `src/router.test.ts`.
+- Route presentation is per outlet and independent of page fetching/focus. Keep
+  Backstage dormant, compare actual displayed instances for live updates, and pin
+  complete ancestor stacks for retained exits. Cancel nested outlet exits when their
+  ancestor departs; park cacheable output only after detaching it. The router must
+  not depend on motion or lifecycle.

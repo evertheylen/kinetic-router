@@ -17,6 +17,9 @@
     "test:browser:dev": "LIFECYCLE_DEV=1 playwright test",
     "test:browser:container": "bash ./test-browser-container.sh"
   },
+  "dependencies": {
+    "@kinetic-router/presence": "workspace:*"
+  },
   "peerDependencies": {
     "solid-js": "catalog:"
   },

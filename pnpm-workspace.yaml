@@ -2,9 +2,11 @@ packages:
   - definition
   - url
   - solid
+  - presence
   - lifecycle
   - motion
   - motion-layout
+  - motion-router
   - example-app
   - integration-tests
   - testing-utils

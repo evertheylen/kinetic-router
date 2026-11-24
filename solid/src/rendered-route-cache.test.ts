@@ -161,8 +161,8 @@ describe('RenderedRouteCache', () => {
     const parent = page(), child = page(parent.rendered), outside = page();
     cache.markUsedFor('nested', [parent.rendered, child.rendered]);
     cache.markUsedFor('outside', [outside.rendered]);
-    const first = cache.retainForRender([parent.rendered]);
-    const second = cache.retainForRender([parent.rendered]);
+    const first = cache.pin([parent.rendered]);
+    const second = cache.pin([parent.rendered]);
     cache.unreference('nested');
     expect(parent.cleanup).not.toHaveBeenCalled();
     expect(child.cleanup).toHaveBeenCalledOnce();
@@ -177,7 +177,7 @@ describe('RenderedRouteCache', () => {
     const cache = new RenderedRouteCache(2);
     const parent = page(), child = page(parent.rendered), a = page(), b = page();
     cache.markUsedFor('nested', [parent.rendered, child.rendered]);
-    const release = cache.retainForRender([parent.rendered]);
+    const release = cache.pin([parent.rendered]);
     cache.markUsedFor('a', [a.rendered]);
     cache.markUsedFor('b', [b.rendered]);
     expect([...cache.cache.keys()]).toEqual(['a', 'b']);

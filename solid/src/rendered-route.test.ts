@@ -1,22 +1,27 @@
 import { expect, it, vi } from 'vitest';
 import { route } from '@kinetic-router/definition';
+import { usePresenceScope } from '@kinetic-router/presence';
 import { createEffect, createSignal, flush, onCleanup, runWithOwner, useContext } from 'solid-js';
 import { createParamStorage } from './params.js';
 import type { Page, PagePreparationContext } from './page.js';
 import { InRenderedRoute, renderRoute, type RenderedRoute } from './rendered-route.js';
 import { createSolidRoot } from './utils.js';
 
-it('provides the rendered route without leaking context to unrelated owners', async () => {
+it('provides route presence in setup and output without leaking to unrelated owners', async () => {
   const home = route({});
   const unrelated = createSolidRoot();
   let seenContext: RenderedRoute | null = null;
+  let setupPresence: ReturnType<typeof usePresenceScope> = null;
+  let outputPresence: ReturnType<typeof usePresenceScope> = null;
   const [text, setText] = createSignal('initial');
   const cleanup = vi.fn();
   const implementation: Page<{}> = {
     untrackedKeys: [],
     async render() {
+      setupPresence = usePresenceScope();
       return () => {
         seenContext = useContext(InRenderedRoute);
+        outputPresence = usePresenceScope();
         const html = document.createElement('div');
         createEffect(text, value => { html.textContent = value; });
         onCleanup(cleanup);
@@ -33,7 +38,10 @@ it('provides the rendered route without leaking context to unrelated owners', as
       signal: new AbortController().signal,
     });
     expect(seenContext).toBe(rendered);
+    expect(setupPresence).not.toBeNull();
+    expect(outputPresence).toBe(setupPresence);
     expect(runWithOwner(unrelated.owner, () => useContext(InRenderedRoute))).toBe(null);
+    expect(runWithOwner(unrelated.owner, usePresenceScope)).toBeNull();
     flush();
     expect(rendered.renderOutput!.html.textContent).toBe('initial');
     expect(cleanup).not.toHaveBeenCalled();

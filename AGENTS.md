@@ -11,6 +11,8 @@ and assume node is configured with `--enable-source-maps` so there's no need for
 | `@kinetic-router/definition` | `definition/` | Framework-agnostic DSL for declaring routes, params, and sitemaps. No runtime routing. |
 | `@kinetic-router/url` | `url/` | `Locator` ⇄ URL (de)serialization. Depends on `definition`. |
 | `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js` and `@solidjs/web`, both Solid 2.x). |
+| `@kinetic-router/presence` | `presence/` | Shared Solid 2 presence scopes, independent of routing, motion, and control flow. |
+| `@kinetic-router/motion-router` | `motion-router/` | Private, experimental `MotionOutlet` adapter for per-outlet route animation. |
 | `@kinetic-router/lifecycle` | `lifecycle/` | Private Solid 2 control flow for retaining exiting rows and branches. |
 | `@kinetic-router/motion` | `motion/` | Private Solid 2 motion components and browser-native animation helpers. |
 | `@kinetic-router/motion-layout` | `motion-layout/` | Optional private FLIP list and grid animations on lifecycle-retained rows. |
@@ -89,6 +91,8 @@ There is no `<Route>` component or `useNavigate`. The model is:
    Registered via `router.implement(route, page)` or `implementLazy`.
 4. **Outlets** (`solid/src/outlet.ts`): containers for page content. The root outlet
    carries id `__kinetic_router_root_outlet` and an `OutletDelegate` attached to its DOM element.
+   Plain outlets snap; `MotionOutlet` enables presentation animations for its
+   direct page only. The router shares presence scopes, not motion or lifecycle.
 5. **Links** (`solid/src/link.ts`): standalone `<Link route={...}>` captures the
    single active Router when mounted; do not expose a router-bound component.
    Plain `<a href={router.toUrl(route.locate({...}))}>` remains supported, but discouraged.

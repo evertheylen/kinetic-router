@@ -72,7 +72,9 @@ function retime(animation: Animation, { duration, delay }: ReturnType<typeof tim
  * Directional durations retime the same effect at its current progress on reversal;
  * delay remains unchanged. Separate in/out effects use their respective durations.
  * Zero duration snaps the active portion; a nonzero delay is still traversed.
- * No per-frame JS, layout animation, or automatic router page transitions.
+ * A routed page prepares without playing, then enters on live presentation or
+ * snaps to the endpoint in an ordinary Outlet. Cached output reprepares on park.
+ * No per-frame JS or layout animation.
  */
 export function createTransition(transition: Transition, options: TransitionOptions = {}): (element: Element) => void {
   if (Object.keys(transition).some(key => !['inout', 'in', 'out'].includes(key))
@@ -90,7 +92,7 @@ export function createTransition(transition: Transition, options: TransitionOpti
     return animation = next
   }
 
-  function play(current: Animation, options: ReturnType<typeof timing>, backwards = false) {
+  function play(current: Animation, options: ReturnType<typeof timing>, backwards = false, snap = false) {
     const end = options.delay + options.duration
     if (end === 0) {
       // Both endpoints have time 0. Select the endpoint with the effect's native
@@ -103,7 +105,7 @@ export function createTransition(transition: Transition, options: TransitionOpti
       current.updatePlaybackRate(backwards ? -1 : 1)
       // play() auto-rewinds at the target; don't replay an already reached endpoint.
       const time = Number(current.currentTime)
-      if (reducedMotion.matches || (backwards ? time <= 0 : time >= end)) current.finish()
+      if (snap || reducedMotion.matches || (backwards ? time <= 0 : time >= end)) current.finish()
       else current.play()
     }
     return current.finished
@@ -111,29 +113,35 @@ export function createTransition(transition: Transition, options: TransitionOpti
 
   let bind: (element: Element) => void
   if (inout) {
+    function prepare(element: Element, direction: 'in' | 'out') {
+      const current = install(element, inout!, settings[direction])
+      if (direction === 'out') {
+        current.currentTime = Number(current.effect!.getComputedTiming().endTime)
+        current.playbackRate = -1
+      }
+      if (reducedMotion.matches) play(current, settings[direction], direction === 'out')
+    }
     bind = onInOut({
-      prepare(element, { direction }) {
-        const current = install(element, inout, settings[direction])
-        if (direction === 'out') {
-          current.currentTime = Number(current.effect!.getComputedTiming().endTime)
-          current.playbackRate = -1
-        }
-        if (reducedMotion.matches) play(current, settings[direction], direction === 'out')
-      },
+      prepare: (element, { direction }) => prepare(element, direction),
       run: ({ direction }) => play(animation!, settings[direction], direction === 'out'),
+      park: element => prepare(element, 'in'),
+      snap: () => { play(animation!, settings.in, false, true) },
     })
   } else {
     let element: Element | undefined
+    function prepareEnter(target: Element) {
+      const current = install(target, enter!, settings.in)
+      if (reducedMotion.matches) current.finish()
+    }
     const bindEnter = enter && onEnter({
-      prepare(target) {
-        const current = install(target, enter, settings.in)
-        if (reducedMotion.matches) current.finish()
-      },
+      prepare: prepareEnter,
       run({ element }) {
         const current = animation ?? install(element, enter, settings.in)
         current.currentTime = 0
         return play(current, settings.in)
       },
+      park: prepareEnter,
+      snap: target => { (animation ?? install(target, enter, settings.in)).finish() },
     })
     if (exit) onExit(({ signal }) => {
       if (!element) throw new Error('Bind the ref returned by createTransition')

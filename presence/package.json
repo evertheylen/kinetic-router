@@ -1,0 +1,19 @@
+{
+  "name": "@kinetic-router/presence",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "peerDependencies": {
+    "solid-js": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

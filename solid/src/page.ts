@@ -15,11 +15,14 @@ export type PageStatus = {
    * accessor in reactive resource code and pass the signal to your loaders. */
   fetchSignal: () => AbortSignal | undefined,
 
-  /** True for the active page stack, including its ancestor layouts. */
+  /** True for the active page stack, including its ancestor layouts. Gate
+   * external portals and native modal dialogs with this accessor (for example,
+   * mount them inside a Show). A dialog opened with showModal() escapes even an
+   * inert ancestor and otherwise blocks interaction with the incoming page. */
   isVisible: () => boolean,
 
-  /** Reserved for page transitions; currently always false. The Navigation API's
-   * navigation.transition tracks pending rendering, not visual animation. */
+  /** Reserved; always false. Outlet motion does not drive page status or delay
+   * navigation.finished. The Navigation API's transition tracks rendering. */
   isAnimating: () => boolean,
 
   /** True only for the active leaf page, not its ancestor layouts. */

@@ -1,8 +1,8 @@
 # @kinetic-router/motion (prototype)
 
 Browser-native reactive and lifecycle animations for Solid 2. Client-only, private,
-experimental; uses the workspace's Solid 2 catalog version. No router
-integration, dependencies on an animation engine, or per-frame JavaScript.
+experimental; uses the workspace's Solid 2 catalog version. No router dependency,
+external animation engine, or per-frame JavaScript.
 For keyed list reordering and animated flow height, use
 [`LayoutList` from `@kinetic-router/motion-layout`](../motion-layout/README.md).
 
@@ -76,6 +76,31 @@ function Preview() {
 The [Postcard studio](../lifecycle/demo/postcard-studio.tsx) animates a custom
 postcard whose `<li>` stays directly inside its `<ul>`. Undo during exit keeps the
 same card and its local draft.
+
+## Routed pages
+
+Use `MotionOutlet` in the layout that displays the page, and `Motion` or a motion
+tag in the page itself. No `Lc.Show` around the page is necessary:
+
+```tsx
+import { MotionOutlet } from '@kinetic-router/motion-router'
+import { motion } from '@kinetic-router/motion'
+
+function Layout() {
+  return <MotionOutlet component="main" />
+}
+
+function StatusPage() {
+  return <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <h1>Service status</h1>
+  </motion.section>
+}
+```
+
+The page prepares its initial pose in Backstage and plays only on live entry.
+A cached return reuses the same DOM; returning during exit reverses the motion.
+Each receiving outlet opts in separately. An ordinary `Outlet` swaps immediately.
+Motion does not change when the page may fetch; for polling, track `pageStatus.fetchSignal`.
 
 ## Lower-level refs
 

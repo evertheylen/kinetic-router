@@ -13,7 +13,7 @@ export class RenderedRouteCache {
   // A replaced entry can be disposed before its successor finishes rendering.
   // Keep the displayed stack alive until markUsedFor installs its replacement.
   protected current: readonly RenderedRoute[] = [];
-  protected rendering = new Set<readonly RenderedRoute[]>();
+  protected pins = new Set<readonly RenderedRoute[]>();
 
   constructor(maxPages = 10) {
     if (!Number.isSafeInteger(maxPages) || maxPages < 0) {
@@ -31,12 +31,12 @@ export class RenderedRouteCache {
     return this.current;
   }
 
-  /** A source entry may disappear while its ancestors are being reused. */
-  retainForRender(routes: readonly RenderedRoute[]): () => void {
+  /** Retain a complete stack independently of history and the active view. */
+  pin(routes: readonly RenderedRoute[]): () => void {
     const stack = [...routes];
-    this.rendering.add(stack);
+    this.pins.add(stack);
     return () => {
-      if (this.rendering.delete(stack)) this.disposeUnused(new Set(stack));
+      if (this.pins.delete(stack)) this.disposeUnused(new Set(stack));
     };
   }
 
@@ -55,7 +55,7 @@ export class RenderedRouteCache {
     adoptConstruction?.();
 
     for (const entryId of this.cache.keys()) {
-      // Construction pins protect ownership, but don't consume the history budget.
+      // Construction and exit pins do not consume the history budget.
       // The visible stack is the newest entry and must never be evicted.
       if (this.cache.size === 1 || (
         this.cache.size <= this.maxPages && new Set([...this.cache.values()].flat()).size <= this.maxPages
@@ -81,12 +81,12 @@ export class RenderedRouteCache {
     const previous = this.pages();
     this.cache.clear();
     this.current = [];
-    this.rendering.clear();
+    this.pins.clear();
     this.disposeUnused(previous);
   }
 
   protected pages(): Set<RenderedRoute> {
-    return new Set([...this.cache.values(), this.current, ...this.rendering].flat());
+    return new Set([...this.cache.values(), this.current, ...this.pins].flat());
   }
 
   protected disposeUnused(previous: Set<RenderedRoute>) {

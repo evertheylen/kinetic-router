@@ -5,7 +5,7 @@ import { Dynamic, isDev, isServer } from '@solidjs/web';
 import { DumbSsrUrlError, renderDumbSsr } from './dumb-ssr.js';
 import { SolidImplementationMap } from './implementation-map.js';
 import { Link } from './link.js';
-import { Outlet, rootOutletId } from './outlet.js';
+import { createOutlet, Outlet, rootOutletId } from './outlet.js';
 import type { PagePreparationContext } from './page.js';
 
 const url = (path = '/go/') => new URL(path, 'https://public.example');
@@ -44,6 +44,19 @@ it('runs with server Solid and no browser globals, escapes HTML, emits no script
   expect(f.cleanup).toHaveBeenCalledOnce();
   expect(f.context().signal.aborted).toBe(true);
   expect(f.context().pageStatus.shouldFetch()).toBe(false);
+});
+
+it('renders an animation-enabled outlet without DOM refs, ids or layers', async () => {
+  const f = fixture();
+  const createLayer = vi.fn(() => { throw new Error('Server must not create an outgoing layer'); });
+  const RetainingOutlet = createOutlet(createLayer);
+  const ref = vi.fn();
+  const result = await renderDumbSsr({
+    ...f, url: url(), app: () => createComponent(RetainingOutlet, { component: 'main', ref }),
+  });
+  expect(result.html).toBe('<main><h1>Public &lt;&amp;></h1></main>');
+  expect(ref).not.toHaveBeenCalled();
+  expect(createLayer).not.toHaveBeenCalled();
 });
 
 it('reads HTML/metadata getters once while output is live, before cleanup', async () => {

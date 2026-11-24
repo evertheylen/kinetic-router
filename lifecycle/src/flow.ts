@@ -21,7 +21,8 @@ export interface ForProps<T> {
   by?: (item: T) => unknown
   /** Runs during committed rendering, before changing the selected keys or their
    * order. The previous rows are still rendered. Not called for initial rendering,
-   * same-key value updates, or final disposal of an already-exiting row. A returned
+   * a dormant routed page, same-key value updates, or final disposal of an
+   * already-exiting row. A returned
    * callback coalesces further structural changes until the latest selection commits:
    * it runs once after that DOM update, before lifecycle handlers. Returning nothing
    * leaves subsequent before-change notifications enabled. */

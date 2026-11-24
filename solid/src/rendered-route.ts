@@ -1,6 +1,7 @@
-import { createComponent, createContext, createMemo, createSignal, flatten, onCleanup, runWithOwner, untrack } from "solid-js";
+import { createComponent, createContext, createMemo, createSignal, flatten, getOwner, onCleanup, runWithOwner, untrack, type Owner } from "solid-js";
 
 import { Route } from "@kinetic-router/definition/routes.js";
+import { createPagePresence, PresenceContext } from "@kinetic-router/presence";
 
 import { Page, PageStatus } from "./page.js";
 import { ParamStorage } from "./params.js";
@@ -26,10 +27,16 @@ export type RenderArgs = {
 };
 
 type PageLifecycleState = 'preparing' | 'retained' | 'active' | 'disposed';
+type PageLifecycle = {
+  status: PageStatus;
+  setState(next: PageLifecycleState, focus?: boolean): void;
+  requestFetch(): () => void;
+  presence: ReturnType<typeof createPagePresence>;
+};
 
 /** Owned by one rendered instance. Independent signals keep focus/visibility
  * changes from invalidating resources that only track their fetch signal. */
-export function createPageLifecycle() {
+export function createPageLifecycle(): PageLifecycle {
   let controller: AbortController | undefined = new AbortController();
   let state: PageLifecycleState = 'preparing';
   let focused = false;
@@ -72,7 +79,7 @@ export function createPageLifecycle() {
     fetchSignal, isVisible, hasFocus,
     isAnimating: () => false,
   };
-  return { status, setState, requestFetch };
+  return { status, setState, requestFetch, presence: createPagePresence() };
 }
 
 export async function renderRoute({ route, implementation, renderArgs, signal }: {
@@ -87,7 +94,21 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
       signal.throwIfAborted();
       const lifecycle = runWithOwner(owner, createPageLifecycle);
       const pageStatus = lifecycle.status;
-      const renderFunc = await runWithOwner(owner, () => implementation.render(
+      // Keep the same dormant scope for both synchronous factory setup and
+      // the eventual output; nested route factories do not wait on this one.
+      const pageOwner = runWithOwner(owner, () => {
+        let scopedOwner!: Owner;
+        const scope = createComponent(PresenceContext, {
+          value: lifecycle.presence,
+          get children() {
+            scopedOwner = getOwner()!;
+            return undefined;
+          },
+        });
+        createMemo(() => flatten(scope))();
+        return scopedOwner;
+      });
+      const renderFunc = await runWithOwner(pageOwner, () => implementation.render(
         renderArgs.params.untrackedObject, { signal, pageStatus },
       ));
       // Arbitrary application promises may finish after cancellation disposed us.
@@ -101,7 +122,7 @@ export async function renderRoute({ route, implementation, renderArgs, signal }:
         subOutlet: undefined,  // to be set later
       };
 
-      runWithOwner(owner, () => {
+      runWithOwner(pageOwner, () => {
         // Use the public context provider: owner internals are mangled in production.
         const content = createComponent(InRenderedRoute, {
           value: res,
