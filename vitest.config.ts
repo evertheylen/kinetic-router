@@ -8,6 +8,7 @@ export default defineConfig({
       'solid',
       'solid/vitest.server.config.ts',
       'lifecycle',
+      'layout',
       'animations',
     ],
   },

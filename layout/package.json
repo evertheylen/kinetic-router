@@ -18,6 +18,10 @@
     "solid-js": "catalog:"
   },
   "devDependencies": {
-    "typescript": "catalog:"
+    "@solidjs/vite-plugin": "catalog:",
+    "@solidjs/web": "catalog:",
+    "happy-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

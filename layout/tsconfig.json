@@ -2,8 +2,10 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "jsx": "preserve",
+    "jsxImportSource": "@solidjs/web"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [{ "path": "../lifecycle/tsconfig.build.json" }]
 }

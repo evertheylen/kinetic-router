@@ -745,6 +745,26 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     }
   })
 
+  it.each(['paired', 'before-only'] as const)('coalesces only pending paired change notifications (%s)', async kind => {
+    const [items, setItems] = createSignal(['a', 'b', 'c'])
+    const before: string[] = [], after: string[] = []
+    const { host } = mount(() => <Lifecycle.For each={items()} onBeforeChange={() => {
+      before.push(host.textContent!)
+      // Stage a superseding render before the first after-change can run.
+      if (before.length === 1) setItems(['b', 'c', 'a'])
+      if (kind === 'paired') return () => { after.push(host.textContent!) }
+    }}>{item => <p>{item()}</p>}</Lifecycle.For>)
+    await settle()
+    setItems(['c', 'a', 'b']); await settle()
+    expect(host.textContent).toBe('bca')
+    expect(before[0]).toBe('abc')
+    expect(before).toHaveLength(kind === 'paired' ? 1 : 2)
+    expect(after).toEqual(kind === 'paired' ? ['bca'] : [])
+    setItems(['a', 'b', 'c']); await settle()
+    expect(before.at(-1)).toBe('bca')
+    expect(after).toEqual(kind === 'paired' ? ['bca', 'abc'] : [])
+  })
+
   it('rejects duplicate keys before mounting any rows', async () => {
     const row = vi.fn(() => <p>row</p>)
     const { host } = mount(() => <Errored fallback={error => <p>{String(error())}</p>}>

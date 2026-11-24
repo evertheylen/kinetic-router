@@ -34,7 +34,7 @@ export function retain<T>(
   const mounted = new Set<Entry>()
   let waitingForDisposal = false
   let initialized = false
-  let afterChange: void | (() => void)
+  let pendingAfterChange: void | (() => void)
   const [disposal, retrySelection] = createSignal(undefined, { equals: false, ownedWrite: true })
   let staged: Entry[] = []
   const [visible, setVisible] = createSignal(staged, { ownedWrite: true })
@@ -49,8 +49,8 @@ export function retain<T>(
     // A completion may have woken this effect just as reconciliation staged new
     // rows/phases. Dispatch only for the snapshot Solid has committed to the DOM.
     if (rendered !== staged) return
-    const committed = afterChange
-    afterChange = undefined
+    const committed = pendingAfterChange
+    pendingAfterChange = undefined
     committed?.()
     const next = rendered.filter(row => !row.scope.advance())
     if (next.length !== rendered.length) stage(next)
@@ -68,10 +68,10 @@ export function retain<T>(
     const reusable = new Map(staged.map(row => [row.key, row]))
     waitingForDisposal = mode === 'out-in' && [...mounted].some(row => !keys.has(row.key) || reusable.get(row.key) !== row)
     const allowed = waitingForDisposal ? selections.filter(selection => reusable.has(selection.key)) : selections
-    if (beforeChange) {
+    if (beforeChange && !pendingAfterChange) {
       const previous = staged.filter(row => row.scope.direction === 'in')
       if (initialized && (previous.length !== allowed.length
-        || allowed.some((selection, index) => reusable.get(selection.key) !== previous[index]))) afterChange = beforeChange()
+        || allowed.some((selection, index) => reusable.get(selection.key) !== previous[index]))) pendingAfterChange = beforeChange()
       initialized = true
     }
     const selected = allowed.map((selection, index) => {
