@@ -1,5 +1,5 @@
 import { Lifecycle, onInOut, useLifecycle, type ForProps } from '@kinetic-router/lifecycle'
-import { children, createMemo, onCleanup, untrack, type Accessor, type Element as SolidElement } from 'solid-js'
+import { createMemo, flatten, onCleanup, untrack, type Accessor, type Element as SolidElement } from 'solid-js'
 
 /** Native timing sampled at each structural change. Duration is seconds (default
  * 0.25); zero skips playback. Ease is a CSS easing string (default 'ease-out'). */
@@ -19,7 +19,8 @@ interface Row {
 }
 
 function isHTMLRoot(node: unknown): node is HTMLElement {
-  return node instanceof HTMLElement
+  const element = node as Element | null | undefined
+  return element?.nodeType === Node.ELEMENT_NODE && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
 }
 
 function pixels(value: number) { return `${value}px` }
@@ -46,17 +47,48 @@ function measureRow(root: HTMLElement, origin: { left: number; top: number }) {
 
 type Pose = ReturnType<typeof measureRow>
 
-function capture(container: HTMLElement, rows: Iterable<Row>) {
-  const style = getComputedStyle(container)
-  if (style.position === 'static') {
-    throw new TypeError('LayoutList requires a positioned parent; set position: relative on its parent')
-  }
+function captureFirst(container: HTMLElement, style: CSSStyleDeclaration, rows: Iterable<Row>) {
   const box = measureContainer(container, style)
   const poses = new Map<HTMLElement, Pose>()
   for (const { root, exit } of rows) {
     if (root.parentNode === container && exit?.hasPose !== false) poses.set(root, measureRow(root, box))
   }
   return { parent: container, height: box.height, poses }
+}
+
+function moveFrames(first: Pose | undefined, last: Pose): Keyframe[] | undefined {
+  const dx = first ? first.left - last.left : 0
+  const dy = first ? first.top - last.top : 0
+  const fade = !first || first.opacity !== last.opacity
+  if (!dx && !dy && !fade) return
+  const from: Keyframe = {}, to: Keyframe = {}
+  if (dx || dy) {
+    from.translate = `${pixels(dx)} ${pixels(dy)}`
+    to.translate = '0px 0px'
+  }
+  if (fade) {
+    from.opacity = first?.opacity ?? 0
+    to.opacity = last.opacity
+  }
+  return [from, to]
+}
+
+function exitFrames(pose: Pose | undefined): Keyframe[] {
+  // Reset grid placement so the containing block is the parent's padding edge,
+  // not the row's authored grid area.
+  const pin: Keyframe = { position: 'absolute', gridArea: 'auto' }
+  if (pose) Object.assign(pin, {
+    boxSizing: 'border-box',
+    left: pixels(pose.left), top: pixels(pose.top), right: 'auto', bottom: 'auto',
+    width: pixels(pose.width), height: pixels(pose.height),
+    minWidth: '0px', minHeight: '0px', maxWidth: 'none', maxHeight: 'none',
+    marginLeft: '0px', marginRight: '0px', marginTop: '0px', marginBottom: '0px',
+  })
+  return [{ ...pin, opacity: pose?.opacity ?? 0 }, { ...pin, opacity: 0 }]
+}
+
+function animate(root: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptions) {
+  if (typeof root.animate === 'function') return root.animate(frames, { ...timing, fill: 'both' })
 }
 
 /**
@@ -67,15 +99,17 @@ function capture(container: HTMLElement, rows: Iterable<Row>) {
  * Same-key undo during an exit restores the same row owner and DOM.
  *
  * Use one authored HTML parent with non-static positioning (e.g. `position: relative`),
- * natural height and untransformed geometry. Positioning is checked when measuring
- * a structural change for motion. Rows must lay out normally and not redistribute
- * spare height (e.g. use `align-content: start` on a grid). Put visual transforms on
- * a child of the row. While animating, LayoutList controls row translate/opacity,
- * the positioning and box geometry of exiting rows, and parent height; don't
+ * natural height and untransformed geometry. Positioning is checked on structural
+ * edits to a rendered, animation-capable parent. Rows must lay out normally and
+ * not redistribute spare height (e.g. use `align-content: start` on a grid). Put
+ * visual transforms on a child of the row. While animating, LayoutList controls
+ * row translate/opacity, exit positioning and box geometry, and parent height; don't
  * animate those same CSS properties independently. Inline styles are not changed.
- * Initial rows do not enter; structural changes after mount do. Reduced motion
- * disables playback. A structural change while detached snaps to the new layout
- * and keeps any retained exits invisible and out of flow.
+ * Initial rows do not enter; structural changes after mount do. Zero duration
+ * and reduced motion skip playback. An edit that starts in either mode or lacks
+ * a parent layout box (e.g. detached or display: none) snaps without a recorded
+ * position. New exits stay invisible and out of flow; undo does not animate
+ * from a guessed box.
  */
 export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
   const render = props.children
@@ -84,47 +118,52 @@ export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
   const anchor = document.createComment('LayoutList')
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
   const rows = new Map<HTMLElement, Row>()
-  const effects = new Map<HTMLElement, Animation>()
+  const transients = new Map<HTMLElement, Animation>()
 
-  function clearEffect(root: HTMLElement) {
-    const effect = effects.get(root)
-    if (!effect) return
-    effects.delete(root)
-    const row = rows.get(root)
-    if (row?.exit?.animation === effect) row.exit = undefined
-    effect.cancel()
+  function clearTransient(root: HTMLElement) {
+    const animation = transients.get(root)
+    transients.delete(root)
+    animation?.cancel()
   }
 
-  function clear() {
-    for (const root of effects.keys()) clearEffect(root)
+  function clearTransients() {
+    for (const root of transients.keys()) clearTransient(root)
   }
 
-  function play(root: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptions, holdFinished = false) {
-    const animation = root.animate(frames, { ...timing, fill: 'both' })
-    effects.set(root, animation)
-    const clearCurrent = () => { if (effects.get(root) === animation) clearEffect(root) }
-    // Finished exits remain pinned and invisible if independent lifecycle
-    // handlers still hold the row. Its owner disposes the pin on removal.
-    void animation.finished.then(holdFinished ? undefined : clearCurrent, clearCurrent)
-    return animation
+  function playTransient(root: HTMLElement, frames: Keyframe[], timing: KeyframeAnimationOptions) {
+    const animation = animate(root, frames, timing)
+    if (!animation) return
+    transients.set(root, animation)
+    const clearCurrent = () => { if (transients.get(root) === animation) clearTransient(root) }
+    void animation.finished.then(clearCurrent, clearCurrent)
+  }
+
+  function clearExit(row: Row) {
+    const exit = row.exit
+    row.exit = undefined
+    exit?.animation.cancel()
+  }
+
+  function finishExit(row: Row) {
+    const animation = row.exit?.animation
+    if (animation && animation.playState !== 'finished') animation.finish()
   }
 
   function pinExit(row: Row, pose: Pose | undefined, timing: KeyframeAnimationOptions) {
-    // Reset grid placement so the containing block is the parent's padding edge,
-    // not the row's authored grid area.
-    const pin: Keyframe = { position: 'absolute', gridArea: 'auto' }
-    if (pose) Object.assign(pin, {
-      boxSizing: 'border-box',
-      left: pixels(pose.left), top: pixels(pose.top), right: 'auto', bottom: 'auto',
-      width: pixels(pose.width), height: pixels(pose.height),
-      minWidth: '0px', minHeight: '0px', maxWidth: 'none', maxHeight: 'none',
-      marginLeft: '0px', marginRight: '0px', marginTop: '0px', marginBottom: '0px',
-    })
     // With no measurable pose, only apply the invisible, out-of-flow endpoint.
-    const animation = play(row.root, [{ ...pin, opacity: pose?.opacity ?? 0 }, { ...pin, opacity: 0 }],
-      pose ? timing : { duration: 0 }, true)
-    row.exit = { animation, hasPose: !!pose }
-    if (!pose || timing.duration === 0) animation.finish()
+    const animation = animate(row.root, exitFrames(pose), pose ? timing : { duration: 0 })
+    if (!animation) return
+    const exit = { animation, hasPose: !!pose }
+    row.exit = exit
+    // Completion alone does not release the pin: other lifecycle handlers can
+    // still hold the row. Only cancellation, reentry or disposal clears it.
+    void animation.finished.catch(() => { if (row.exit === exit) clearExit(row) })
+    if (!pose || timing.duration === 0) finishExit(row)
+  }
+
+  function clearEffects() {
+    clearTransients()
+    for (const row of rows.values()) clearExit(row)
   }
 
   function container() {
@@ -145,33 +184,41 @@ export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
     get by() { return props.by },
     onBeforeChange() {
       const parent = container()
-      if (!parent?.isConnected || typeof parent.animate !== 'function') return apply
+      if (!parent?.isConnected || typeof parent.animate !== 'function') return commitLayout
       try {
+        // Test for a layout box, not a nonzero height: an empty list can grow.
+        if (parent.getClientRects().length === 0) return commitLayout
         const timing = untrack(transitionTiming)
-        const before = capture(parent, rows.values())
-        return () => apply(before, timing)
+        const style = getComputedStyle(parent)
+        if (style.position === 'static') {
+          throw new TypeError('LayoutList requires a positioned parent; set position: relative on its parent')
+        }
+        if (timing.duration === 0 || reduced.matches) return commitLayout
+        const first = captureFirst(parent, style, rows.values())
+        return () => commitLayout(first, timing)
       } catch (error) {
-        clear()
+        clearEffects()
         throw error
       }
     },
     children(item, index) {
       const { phase } = useLifecycle()
       let row: Row | undefined
+      // Join the exit immediately, without waiting for standalone enter hooks.
       onInOut(({ direction }) => direction === 'out' ? row?.exit?.animation.finished.catch(() => undefined) : undefined)
       onCleanup(() => {
         if (!row) return
-        clearEffect(row.root)
+        clearTransient(row.root)
+        clearExit(row)
         rows.delete(row.root)
       })
       // Lifecycle.For invokes setup untracked in the row owner. Resolve only its
       // returned JSX reactively, never the row factory itself.
       const output = render(item, index)
-      const content = children(() => output)
       return createMemo(() => {
-        const roots = content.toArray().filter(node => node != null && typeof node !== 'boolean' && node !== '')
-        const root = roots[0]
-        if (roots.length !== 1 || !isHTMLRoot(root)) throw new TypeError('LayoutList requires one stable HTML root per row')
+        const content: unknown = flatten(output, { skipNonRendered: true })
+        const root = Array.isArray(content) && content.length === 1 ? content[0] : content
+        if (!isHTMLRoot(root)) throw new TypeError('LayoutList requires one stable HTML root per row')
         if (row && row.root !== root) throw new TypeError('LayoutList row replaced its root; keep the row root stable')
         if (!row) {
           if (rows.has(root)) throw new TypeError('LayoutList rows cannot share a root')
@@ -183,64 +230,57 @@ export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
     },
   })
 
-  function apply(before?: ReturnType<typeof capture>, sampled: KeyframeAnimationOptions = { duration: 0 }) {
+  function commitLayout(before?: ReturnType<typeof captureFirst>, sampled: KeyframeAnimationOptions = { duration: 0 }) {
     const parent = container()
-    const old = parent?.isConnected && before?.parent === parent ? before : undefined
     try {
-      const timing = old && !reduced.matches ? sampled : { duration: 0 }
-      for (const [root, animation] of effects) {
-        const row = rows.get(root)
-        // Keep an exit's endpoint through unrelated edits, even when cached
-        // output is detached. Do not restart its fade or its lifecycle wait.
-        if (row?.exit?.animation === animation && untrack(row.exiting)) {
-          if (timing.duration === 0 && animation.playState !== 'finished') animation.finish()
-        } else clearEffect(root)
-      }
-      if (!parent) return
-      const committed = [...rows.values()].filter(row => row.root.parentNode === parent)
-        .map(row => ({ row, exiting: untrack(row.exiting) }))
-      for (const { row, exiting } of committed) {
-        if (exiting && !row.exit && typeof row.root.animate === 'function') {
-          pinExit(row, old?.poses.get(row.root), timing)
+      clearTransients()
+      const first = parent?.isConnected && before?.parent === parent && parent.getClientRects().length > 0 ? before : undefined
+      const timing = first && !reduced.matches ? sampled : { duration: 0 }
+
+      // Keep each retained exit's original pin through unrelated edits, even
+      // while detached. Release pins on reentry before reading the flow layout.
+      const liveRoots: HTMLElement[] = []
+      for (const row of rows.values()) {
+        if (!untrack(row.exiting)) {
+          clearExit(row)
+          if (row.root.parentNode === parent) liveRoots.push(row.root)
+        } else if (row.exit) {
+          if (timing.duration === 0) finishExit(row)
+        } else if (parent ? row.root.parentNode === parent : !anchor.isConnected && !row.root.isConnected) {
+          // Cached output can be removed without its authored parent; its
+          // retained exits must already be invisible when it is reinserted.
+          pinExit(row, first?.poses.get(row.root), timing)
         }
       }
-      if (!old || timing.duration === 0) return
+
+      if (!parent || !first || timing.duration === 0) return
+      // Read all Last geometry before installing effects that can change it.
       const lastBox = measureContainer(parent)
-      const moves = committed.filter(({ exiting }) => !exiting).map(({ row: { root } }) => {
-        const last = measureRow(root, lastBox)
-        const first = old.poses.get(root)
-        const from: Keyframe = {}, to: Keyframe = {}
-        if (first && (first.left !== last.left || first.top !== last.top)) {
-          from.translate = `${pixels(first.left - last.left)} ${pixels(first.top - last.top)}`
-          to.translate = '0px 0px'
-        }
-        if (!first || first.opacity !== last.opacity) {
-          from.opacity = first?.opacity ?? 0
-          to.opacity = last.opacity
-        }
-        return { root, from, to }
-      })
-      if (old.height !== lastBox.height) {
-        play(parent, [old.height, lastBox.height].map(value => ({ height: pixels(Math.max(0, value - lastBox.heightOffset)) })), timing)
+      const lastPoses = liveRoots.map(root => ({ root, pose: measureRow(root, lastBox) }))
+
+      if (first.height !== lastBox.height) {
+        const frames = [first.height, lastBox.height].map(height => ({ height: pixels(Math.max(0, height - lastBox.heightOffset)) }))
+        playTransient(parent, frames, timing)
       }
-      for (const { root, from, to } of moves) if (Object.keys(from).length) play(root, [from, to], timing)
+      for (const { root, pose } of lastPoses) {
+        const frames = moveFrames(first.poses.get(root), pose)
+        if (frames) playTransient(root, frames, timing)
+      }
     } catch (error) {
-      clear()
+      clearEffects()
       throw error
     }
   }
 
   function motionPreferenceChanged(event: MediaQueryListEvent) {
     if (!event.matches) return
-    for (const [root, animation] of effects) {
-      if (rows.get(root)?.exit?.animation === animation) animation.finish()
-      else clearEffect(root)
-    }
+    clearTransients()
+    for (const row of rows.values()) finishExit(row)
   }
   reduced.addEventListener('change', motionPreferenceChanged)
   onCleanup(() => {
     reduced.removeEventListener('change', motionPreferenceChanged)
-    clear()
+    clearEffects()
   })
   return [anchor, output]
 }
