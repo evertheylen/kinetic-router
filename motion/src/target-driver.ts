@@ -1,4 +1,4 @@
-import { onCleanup } from 'solid-js'
+import { createSignal, onCleanup } from 'solid-js'
 import { filledAnimation, type AnimationTarget } from './keyframes.js'
 import { onReducedMotion, type AnimationOptions, type timing } from './timing.js'
 
@@ -8,6 +8,7 @@ function sameTarget(a: AnimationTarget, b: AnimationTarget) {
 
 /** Own a single filled target effect, including while presence work is retained. */
 export function createTargetDriver(readTiming: () => ReturnType<typeof timing>) {
+  const [bound, setBound] = createSignal(false, { ownedWrite: true })
   let current: { element: Element; target: AnimationTarget; animation: Animation } | undefined
   const reducedMotion = onReducedMotion(() => current?.animation.finish())
   onCleanup(() => current?.animation.cancel())
@@ -22,10 +23,12 @@ export function createTargetDriver(readTiming: () => ReturnType<typeof timing>) 
   }
 
   return {
+    bound,
     prepare(element: Element, initial: AnimationTarget, reduced = initial) {
       if (current) return
       const target = reducedMotion.matches ? reduced : initial
       install(element, target, target, { duration: 0 }, true)
+      setBound(true)
     },
     snapTo(target: AnimationTarget) {
       if (current && !sameTarget(target, current.target)) {

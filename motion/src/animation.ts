@@ -1,4 +1,4 @@
-import { createEffect, createSignal, getOwner, isDisposed, untrack, type Accessor } from 'solid-js'
+import { createEffect, getOwner, isDisposed, untrack, type Accessor } from 'solid-js'
 import { snapshotTarget, type AnimationTarget } from './keyframes.js'
 import { createTargetDriver } from './target-driver.js'
 import { timing, type AnimationOptions } from './timing.js'
@@ -21,12 +21,11 @@ export function createAnimation(target: Accessor<AnimationTarget>, options: Anim
   const settings = timing(options)
   const owner = getOwner()
   if (!owner) throw new Error('createAnimation requires a reactive owner')
-  const [bound, setBound] = createSignal(false, { ownedWrite: true })
   const driver = createTargetDriver(() => settings)
   let element: Element | undefined
   let initial: AnimationTarget | undefined
 
-  createEffect(() => bound() ? snapshotTarget(target()) : undefined, value => {
+  createEffect(() => driver.bound() ? snapshotTarget(target()) : undefined, value => {
     if (!value || !initial) return
     if ((value.opacity === undefined) !== (initial.opacity === undefined)
       || (value.transform === undefined) !== (initial.transform === undefined)) {
@@ -39,9 +38,8 @@ export function createAnimation(target: Accessor<AnimationTarget>, options: Anim
     if (element === targetElement) return
     if (element) throw new Error('Bind each createAnimation ref to only one element')
     if (isDisposed(owner)) throw new Error('Cannot bind an animation after disposal')
-    initial = snapshotTarget(untrack(target))
+    initial = untrack(() => snapshotTarget(target()))
     driver.prepare(targetElement, initial)
     element = targetElement
-    setBound(true)
   }
 }

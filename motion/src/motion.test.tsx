@@ -5,7 +5,7 @@ import {
 } from 'solid-js'
 import { Portal, render, type JSX } from '@solidjs/web'
 import { Lifecycle as Lc, onExit } from '@kinetic-router/lifecycle'
-import { Motion, motion, type MotionProps, type MotionTagProps, type MotionTarget } from './index.js'
+import { Motion, motion, type MotionProps, type MotionTagProps, type MotionTarget, type MotionTransition, type spring } from './index.js'
 
 class TargetAnimation {
   playState: AnimationPlayState = 'paused'
@@ -168,6 +168,7 @@ describe('motion', () => {
     expectTypeOf<keyof typeof motion>().toEqualTypeOf<'div' | 'span' | 'section' | 'button' | 'li'>()
     expectTypeOf<MotionTagProps<'button'>['ref']>().toEqualTypeOf<JSX.Ref<HTMLButtonElement>>()
     expectTypeOf<MotionTagProps<'li'>['animate']>().toEqualTypeOf<MotionTarget>()
+    expectTypeOf<ReturnType<typeof spring>>().not.toExtend<MotionTransition>()
     expect(Object.keys(motion)).toEqual(['div', 'span', 'section', 'button', 'li'])
   })
 })

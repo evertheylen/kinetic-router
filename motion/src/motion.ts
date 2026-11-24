@@ -1,6 +1,6 @@
 import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
 import { dynamic, type JSX } from '@solidjs/web'
-import { children, createEffect, createMemo, createSignal, merge, omit, untrack } from 'solid-js'
+import { createEffect, createMemo, flatten, merge, omit, untrack } from 'solid-js'
 import type { AnimationTarget } from './keyframes.js'
 import { createTargetDriver } from './target-driver.js'
 import { timing } from './timing.js'
@@ -14,12 +14,14 @@ export interface MotionTarget {
   scale?: number
 }
 
-/** A single native timing, in seconds. Defaults: 0.2s, no delay, 'easeOut'. */
+/** Component timing in seconds. Defaults: 0.2s, no delay, 'easeOut'. */
 export interface MotionTransition {
   duration?: number
   delay?: number
   /** CSS easing, or 'easeIn', 'easeOut', 'easeInOut'. */
   ease?: string
+  /** Native options with `easing` use milliseconds, not component timing. */
+  easing?: never
 }
 
 type MotionTag = keyof HTMLElementTagNameMap & keyof JSX.IntrinsicElements
@@ -99,14 +101,12 @@ function createMotionBinding(props: MotionOptions) {
   }
 
   const driver = createTargetDriver(() => untrack(() => motionTiming(props.transition)))
-  const [bound, setBound] = createSignal(false, { ownedWrite: true })
   function bind(element: Element) {
     const visible = target(present)
     const exiting = untrack(() => lifecycle?.phase()) === 'exiting'
     if (exiting) skipInitialMotion = false
     const first = target({ ...present, ...(exiting ? exit : initial) })
     driver.prepare(element, first, exiting ? first : visible)
-    setBound(true)
   }
 
   if (lifecycle) onInOut(({ direction }) => {
@@ -120,7 +120,7 @@ function createMotionBinding(props: MotionOptions) {
   })
 
   // Do not consume the first present pose until preparation has a real target.
-  createEffect(() => bound() && lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
+  createEffect(() => driver.bound() && lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
     if (!pose) return
     present = pose
     const next = target(pose)
@@ -146,15 +146,17 @@ function isElement(value: unknown): value is Element {
  */
 export function Motion(props: MotionProps): JSX.Element {
   const bind = createMotionBinding(props)
-  const content = children(() => props.children)
+  // Construct the child separately: resolving a nested accessor again must not
+  // recreate the component, its owner, or its refs.
+  const child = createMemo(() => props.children, { lazy: true })
   let root: Element | undefined
 
   // Keep the resolved child owned even if the caller temporarily stops rendering
   // this output. Prepare before Solid inserts it; JSX.Element omits accessor output.
   return createMemo(() => {
-    const rendered = content.toArray().filter(child => child != null && typeof child !== 'boolean' && child !== '')
-    const element = rendered[0]
-    if (rendered.length !== 1 || !isElement(element)) {
+    const rendered: unknown = flatten(child(), { skipNonRendered: true })
+    const element = Array.isArray(rendered) && rendered.length === 1 ? rendered[0] : rendered
+    if (!isElement(element)) {
       throw new TypeError('Motion requires one DOM Element child. Render a single stable root element.')
     }
     if (root && root !== element) {

@@ -127,8 +127,10 @@ const slideRef = createTransition(slide({ x: 100, y: 0 }), spring({
 }))
 ```
 
-`spring()` returns `{ duration, easing }`, usable with either helper or WAAPI.
-It preserves overshoot using CSS `linear()`; it never runs physics each frame.
+`spring()` returns native `{ duration, easing }` options in milliseconds, usable
+with either ref helper or WAAPI. For a component, convert explicitly:
+`transition={{ duration: curve.duration / 1000, ease: curve.easing }}` where `curve = spring()`.
+The CSS `linear()` curve preserves overshoot without running physics each frame.
 
 `createCssTransition` sets authored CSS state and waits for the named transitions
 or keyframe animations on that element. List exact longhand or custom property names.
