@@ -47,15 +47,6 @@ function measureRow(root: HTMLElement, origin: { left: number; top: number }) {
 
 type Pose = ReturnType<typeof measureRow>
 
-function captureFirst(container: HTMLElement, style: CSSStyleDeclaration, rows: Iterable<Row>) {
-  const box = measureContainer(container, style)
-  const poses = new Map<HTMLElement, Pose>()
-  for (const { root, exit } of rows) {
-    if (root.parentNode === container && exit?.hasPose !== false) poses.set(root, measureRow(root, box))
-  }
-  return { parent: container, height: box.height, poses }
-}
-
 function moveFrames(first: Pose | undefined, last: Pose): Keyframe[] | undefined {
   const dx = first ? first.left - last.left : 0
   const dy = first ? first.top - last.top : 0
@@ -106,10 +97,9 @@ function animate(root: HTMLElement, frames: Keyframe[], timing: KeyframeAnimatio
  * row translate/opacity, exit positioning and box geometry, and parent height; don't
  * animate those same CSS properties independently. Inline styles are not changed.
  * Initial rows do not enter; structural changes after mount do. Zero duration
- * and reduced motion skip playback. An edit that starts in either mode or lacks
- * a parent layout box (e.g. detached or display: none) snaps without a recorded
- * position. New exits stay invisible and out of flow; undo does not animate
- * from a guessed box.
+ * and reduced motion skip playback. If the parent has no layout box before or
+ * after the edit (e.g. detached or display: none), the list snaps as well. On a
+ * snap, new exits stay invisible and out of flow; undo never moves from a guessed box.
  */
 export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
   const render = props.children
@@ -149,16 +139,17 @@ export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
     if (animation && animation.playState !== 'finished') animation.finish()
   }
 
-  function pinExit(row: Row, pose: Pose | undefined, timing: KeyframeAnimationOptions) {
+  function pinExit(row: Row, first?: FirstLayout) {
     // With no measurable pose, only apply the invisible, out-of-flow endpoint.
-    const animation = animate(row.root, exitFrames(pose), pose ? timing : { duration: 0 })
+    const pose = first?.poses.get(row.root)
+    const animation = animate(row.root, exitFrames(pose), first && pose ? first.timing : { duration: 0 })
     if (!animation) return
     const exit = { animation, hasPose: !!pose }
     row.exit = exit
     // Completion alone does not release the pin: other lifecycle handlers can
     // still hold the row. Only cancellation, reentry or disposal clears it.
     void animation.finished.catch(() => { if (row.exit === exit) clearExit(row) })
-    if (!pose || timing.duration === 0) finishExit(row)
+    if (!pose) finishExit(row)
   }
 
   function clearEffects() {
@@ -171,31 +162,36 @@ export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
     return isHTMLRoot(parent) ? parent : undefined
   }
 
-  function transitionTiming(): KeyframeAnimationOptions {
+  function captureFirst() {
+    const parent = container()
+    if (!parent?.isConnected || typeof parent.animate !== 'function') return
     const { duration = 0.25, ease: easing = 'ease-out' } = props.transition ?? {}
     if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(duration * 1000)) {
       throw new TypeError('LayoutList duration must be finite non-negative seconds')
     }
-    return duration === 0 ? { duration: 0 } : { duration: duration * 1000, easing }
+    const style = getComputedStyle(parent)
+    if (style.position === 'static') {
+      if (!parent.getClientRects().length) return
+      throw new TypeError('LayoutList requires a positioned parent; set position: relative on its parent')
+    }
+    // Even a zero-height list has a real first box. A hidden list has none.
+    if (duration === 0 || reduced.matches || !parent.getClientRects().length) return
+    const box = measureContainer(parent, style)
+    const poses = new Map<HTMLElement, Pose>()
+    for (const { root, exit } of rows.values()) {
+      if (root.parentNode === parent && exit?.hasPose !== false) poses.set(root, measureRow(root, box))
+    }
+    return { parent, height: box.height, poses, timing: { duration: duration * 1000, easing } }
   }
+  type FirstLayout = NonNullable<ReturnType<typeof captureFirst>>
 
   const output = Lifecycle.For({
     get each() { return props.each },
     get by() { return props.by },
     onBeforeChange() {
-      const parent = container()
-      if (!parent?.isConnected || typeof parent.animate !== 'function') return commitLayout
       try {
-        // Test for a layout box, not a nonzero height: an empty list can grow.
-        if (parent.getClientRects().length === 0) return commitLayout
-        const timing = untrack(transitionTiming)
-        const style = getComputedStyle(parent)
-        if (style.position === 'static') {
-          throw new TypeError('LayoutList requires a positioned parent; set position: relative on its parent')
-        }
-        if (timing.duration === 0 || reduced.matches) return commitLayout
-        const first = captureFirst(parent, style, rows.values())
-        return () => commitLayout(first, timing)
+        const first = untrack(captureFirst)
+        return () => commitLayout(first)
       } catch (error) {
         clearEffects()
         throw error
@@ -230,42 +226,43 @@ export function LayoutList<T>(props: LayoutListProps<T>): SolidElement {
     },
   })
 
-  function commitLayout(before?: ReturnType<typeof captureFirst>, sampled: KeyframeAnimationOptions = { duration: 0 }) {
+  // Leave ongoing exits alone. Release reentered rows back into the flow before
+  // measuring, and keep newly exiting rows out of it even in cached output.
+  function updateExitPins(parent: HTMLElement | undefined, first?: FirstLayout) {
+    const liveRoots: HTMLElement[] = []
+    for (const row of rows.values()) {
+      if (!untrack(row.exiting)) {
+        clearExit(row)
+        if (first && row.root.parentNode === parent) liveRoots.push(row.root)
+      } else if (row.exit) {
+        if (!first) finishExit(row)
+      } else if (parent ? row.root.parentNode === parent : !anchor.isConnected && !row.root.isConnected) {
+        pinExit(row, first)
+      }
+    }
+    return liveRoots
+  }
+
+  function commitLayout(first?: FirstLayout) {
     const parent = container()
     try {
+      if (first && (first.parent !== parent || !parent.isConnected || reduced.matches || !parent.getClientRects().length)) {
+        first = undefined
+      }
       clearTransients()
-      const first = parent?.isConnected && before?.parent === parent && parent.getClientRects().length > 0 ? before : undefined
-      const timing = first && !reduced.matches ? sampled : { duration: 0 }
+      const liveRoots = updateExitPins(parent, first)
+      if (!first) return
 
-      // Keep each retained exit's original pin through unrelated edits, even
-      // while detached. Release pins on reentry before reading the flow layout.
-      const liveRoots: HTMLElement[] = []
-      for (const row of rows.values()) {
-        if (!untrack(row.exiting)) {
-          clearExit(row)
-          if (row.root.parentNode === parent) liveRoots.push(row.root)
-        } else if (row.exit) {
-          if (timing.duration === 0) finishExit(row)
-        } else if (parent ? row.root.parentNode === parent : !anchor.isConnected && !row.root.isConnected) {
-          // Cached output can be removed without its authored parent; its
-          // retained exits must already be invisible when it is reinserted.
-          pinExit(row, first?.poses.get(row.root), timing)
-        }
-      }
-
-      if (!parent || !first || timing.duration === 0) return
       // Read all Last geometry before installing effects that can change it.
-      const lastBox = measureContainer(parent)
-      const lastPoses = liveRoots.map(root => ({ root, pose: measureRow(root, lastBox) }))
+      const { height, poses, timing } = first
+      const last = measureContainer(first.parent)
+      const moves = liveRoots.map(root => ({ root, frames: moveFrames(poses.get(root), measureRow(root, last)) }))
 
-      if (first.height !== lastBox.height) {
-        const frames = [first.height, lastBox.height].map(height => ({ height: pixels(Math.max(0, height - lastBox.heightOffset)) }))
-        playTransient(parent, frames, timing)
+      if (height !== last.height) {
+        const frames = [height, last.height].map(h => ({ height: pixels(Math.max(0, h - last.heightOffset)) }))
+        playTransient(first.parent, frames, timing)
       }
-      for (const { root, pose } of lastPoses) {
-        const frames = moveFrames(first.poses.get(root), pose)
-        if (frames) playTransient(root, frames, timing)
-      }
+      for (const { root, frames } of moves) if (frames) playTransient(root, frames, timing)
     } catch (error) {
       clearEffects()
       throw error

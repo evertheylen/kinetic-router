@@ -168,26 +168,6 @@ it('pins an independently held exit created while cached output has no parent', 
   } finally { release(); await settle() }
 })
 
-it.each(['before the edit', 'during commit'] as const)('snaps when the parent loses its layout box %s', async hides => {
-  const [items, setItems] = createSignal(['a'])
-  const host = mount(() => <div><ul style="position: relative"><LayoutList each={items()}>{item => {
-    if (item() === 'b' && hides === 'during commit') host.firstElementChild!.setAttribute('hidden', '')
-    return <li>{item()}</li>
-  }}</LayoutList></ul></div>)
-  await settle()
-  const ancestor = host.querySelector('div')!, list = host.querySelector('ul')!
-  // Happy DOM returns a zero-sized rect even under a hidden ancestor.
-  vi.spyOn(list, 'getClientRects').mockImplementation(() => ancestor.hidden ? [] as unknown as DOMRectList : [new DOMRect()] as unknown as DOMRectList)
-  if (hides === 'before the edit') ancestor.hidden = true
-
-  setItems(['b']); await settle()
-  ancestor.hidden = false
-  const b = Array.from(list.children).find(row => row.textContent === 'b')!
-  expect(b.getAnimations()).toEqual([])
-  expect(list.getAnimations()).toEqual([])
-  await vi.waitFor(() => expect(list.textContent).toBe('b'))
-})
-
 it.each(['zero duration', 'reduced motion'] as const)('skips row measurement and keeps a held exit out of flow with %s', async mode => {
   const media = window.matchMedia('(prefers-reduced-motion: reduce)')
   const matches = vi.spyOn(media, 'matches', 'get').mockReturnValue(mode === 'reduced motion')
@@ -204,15 +184,14 @@ it.each(['zero duration', 'reduced motion'] as const)('skips row measurement and
   try {
     await settle()
     const list = host.querySelector('ul')!, [a, b] = list.querySelectorAll('li')
-    // Model a real, zero-height box without Happy DOM's delegation to getBoundingClientRect.
-    vi.spyOn(list, 'getClientRects').mockReturnValue([new DOMRect()] as unknown as DOMRectList)
+    const readBoxes = vi.spyOn(list, 'getClientRects')
     const readList = vi.spyOn(list, 'getBoundingClientRect')
     const readA = vi.spyOn(a!, 'getBoundingClientRect').mockImplementation(() =>
       new DOMRect(0, a!.dataset.phase === 'exiting' ? 45 : 10, 100, 20))
     const readB = vi.spyOn(b!, 'getBoundingClientRect')
     const style = vi.spyOn(window, 'getComputedStyle')
     setItems(['b']); await settle()
-    for (const read of [readList, readA, readB]) expect(read).not.toHaveBeenCalled()
+    for (const read of [readBoxes, readList, readA, readB]) expect(read).not.toHaveBeenCalled()
     expect(style.mock.calls.some(([node]) => node === a || node === b)).toBe(false)
     expect(a!.dataset.phase).toBe('exiting')
     const [pin] = a!.getAnimations()

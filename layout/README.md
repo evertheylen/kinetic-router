@@ -49,6 +49,8 @@ render(() => <Queue />, document.body)
   Duration is in seconds and easing is a CSS string. Timing is sampled on
   structural edits; changing it alone doesn't retime running effects. Zero
   duration snaps on the edit. Switching to reduced motion settles effects live.
+  If the parent has no layout box before or after an edit (for example, under
+  `display: none`), it snaps too. Retained exits stay invisible and out of flow.
 - Focus and `inert` are application decisions: use a control outside the list
   as a safe focus target, and mark retained exits inert if they shouldn't be
   interactive. On Undo, restore focus after the row commits and is no longer inert.

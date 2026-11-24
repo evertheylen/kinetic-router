@@ -402,6 +402,24 @@ for (const mode of ['reduced motion', 'zero duration'] as const) {
   })
 }
 
+for (const state of ['already hidden', 'hidden at commit'] as const) {
+  test(`LayoutList snaps when the grid is ${state}`, async ({ page }) => {
+    const queue = page.getByRole('region', { name: 'Reading queue' })
+    // :has() removes the layout box as soon as Solid inserts the new row.
+    const tray = state === 'hidden at commit' ? `.layout-queue-tray:has(${rowSelector(6)})` : '.layout-queue-tray'
+    const sheet = await page.addStyleTag({ content: `${tray} { display: none; }` })
+    await queue.getByRole('button', { name: 'Add title' }).click()
+    await expect(queue.locator(rowSelector(6))).toBeAttached()
+    await expect(queue.locator(listSelector)).toBeHidden()
+    await sheet.evaluate(style => { style.textContent = '' })
+
+    const revealed = await sample(queue)
+    expect(revealed.order).toEqual([6, ...initialOrder])
+    expect(revealed.rows[6].opacity).toBe(1)
+    expect([revealed.list, ...Object.values(revealed.rows)].every(box => box.effects === 0)).toBe(true)
+  })
+}
+
 test('ordinary unmount cancels active LayoutList effects and restores owned styles', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
