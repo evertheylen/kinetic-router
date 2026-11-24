@@ -1,21 +1,22 @@
-# @kinetic-router/animations (prototype)
+# @kinetic-router/motion (prototype)
 
 Browser-native reactive and lifecycle animations for Solid 2. Client-only, private,
 experimental; uses the workspace's Solid 2 catalog version. No router
 integration, dependencies on an animation engine, or per-frame JavaScript.
 For keyed list reordering and animated flow height, use
-[`LayoutList` from `@kinetic-router/layout`](../layout/README.md).
+[`LayoutList` from `@kinetic-router/motion-layout`](../motion-layout/README.md).
 
 ## Motion components
 
 `Motion` animates an existing DOM element through the Web Animations API (WAAPI).
 It adds no wrapper and needs no forwarded ref. Solid lifecycle controls decide
 when an exiting component may be removed; no `AnimatePresence` is needed.
-See [Coming from Motion for React](API-COMPARISON.md) for a migration guide.
+This is a Solid API inspired by Motion for React, not a drop-in port.
+See the [API comparison](API-COMPARISON.md) for the differences.
 
 ```tsx
 import { createSignal } from 'solid-js'
-import { Motion } from '@kinetic-router/animations'
+import { Motion } from '@kinetic-router/motion'
 import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 
 function Card() {
@@ -83,7 +84,7 @@ component root), bind a ref to the exact DOM element you want to animate:
 
 ```tsx
 import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
-import { createTransition, fade } from '@kinetic-router/animations'
+import { createTransition, fade } from '@kinetic-router/motion'
 
 function Panel() {
   const fadeRef = createTransition(fade, { duration: 180 })
@@ -102,7 +103,7 @@ entry/exit speeds; reversal preserves the same timeline's visual progress.
 For reactive changes to an already-mounted element, no lifecycle boundary is needed:
 
 ```tsx
-import { createAnimation } from '@kinetic-router/animations'
+import { createAnimation } from '@kinetic-router/motion'
 
 const animateRef = createAnimation(
   () => ({ transform: `translateX(${expanded() ? 200 : 0}px)` }),
@@ -119,7 +120,7 @@ on a separate wrapper: its first frame is prepared before insertion, then played
 Compile a spring once into ordinary native timing options:
 
 ```tsx
-import { createTransition, slide, spring } from '@kinetic-router/animations'
+import { createTransition, slide, spring } from '@kinetic-router/motion'
 
 const slideRef = createTransition(slide({ x: 100, y: 0 }), spring({
   stiffness: 200, damping: 20,
@@ -134,7 +135,7 @@ or keyframe animations on that element. List exact longhand or custom property n
 It handles reversals, cancellation and reduced motion without a JS animation loop.
 
 ```tsx
-import { createCssTransition } from '@kinetic-router/animations'
+import { createCssTransition } from '@kinetic-router/motion'
 
 const space = createCssTransition({
   apply: (element, direction) => { element.dataset.space = direction },
@@ -167,9 +168,9 @@ See [the integration demo](../lifecycle/demo/main.tsx) for runnable examples.
 From the monorepo root:
 
 ```sh
-pnpm --filter @kinetic-router/animations... -r build
-pnpm --filter @kinetic-router/animations test
-# Shared integration demo; browser tests exercise both packages.
+pnpm --filter @kinetic-router/motion... -r build
+pnpm --filter @kinetic-router/motion test
+# The shared demo exercises motion, motion-layout, and lifecycle.
 pnpm --filter @kinetic-router/lifecycle dev
 pnpm --filter @kinetic-router/lifecycle test:browser:container
 LIFECYCLE_DEV=1 pnpm --filter @kinetic-router/lifecycle test:browser:container

@@ -7,8 +7,8 @@ export default defineConfig({
   // The integration demo consumes workspace sources without dependency cycles.
   resolve: { alias: {
     '@kinetic-router/lifecycle': fileURLToPath(new URL('../src/index.ts', import.meta.url)),
-    '@kinetic-router/animations': fileURLToPath(new URL('../../animations/src/index.ts', import.meta.url)),
-    '@kinetic-router/layout': fileURLToPath(new URL('../../layout/src/index.ts', import.meta.url)),
+    '@kinetic-router/motion': fileURLToPath(new URL('../../motion/src/index.ts', import.meta.url)),
+    '@kinetic-router/motion-layout': fileURLToPath(new URL('../../motion-layout/src/index.ts', import.meta.url)),
   } },
   build: { target: 'esnext' },
 })

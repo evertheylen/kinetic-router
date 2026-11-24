@@ -1,7 +1,7 @@
 import { createMemo, createSignal, Loading, onCleanup, Show, untrack, type Element as SolidElement } from 'solid-js'
 import { render } from '@solidjs/web'
 import { Lifecycle, onExit, useLifecycle, type Direction } from '../src/index.js'
-import { createAnimation, createCssTransition, createTransition, fade, fadeScale, slide, spring } from '../../animations/src/index.js'
+import { createAnimation, createCssTransition, createTransition, fade, fadeScale, slide, spring } from '@kinetic-router/motion'
 import './style.css'
 import { PostcardStudio } from './postcard-studio.js'
 import { ReadingQueue } from './reading-queue.js'

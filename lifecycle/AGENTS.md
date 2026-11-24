@@ -1,7 +1,7 @@
 # Lifecycle prototype
 
 - Keep `README.md` to usage and runnable commands. Public contracts belong beside
-  exports in `src/scope.ts`, `src/flow.ts`, and `../animations/src/`; avoid duplicating
+  exports in `src/scope.ts`, `src/flow.ts`, and `../motion/src/`; avoid duplicating
   them here or preserving investigation history.
 - Retain inputs to Solid's real control flow (`src/retain.ts`), not detached DOM
   snapshots. Solid 2 owners are attached to their parents; `onCleanup` cannot defer

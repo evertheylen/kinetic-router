@@ -1,4 +1,4 @@
-import { LayoutList } from '@kinetic-router/layout'
+import { LayoutList } from '@kinetic-router/motion-layout'
 import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
 import { createSignal, Show } from 'solid-js'
 import './reading-queue.css'

@@ -19,7 +19,7 @@ Open http://localhost:3000 in a browser with the Navigation API.
 - Todos (`/todos`) uses `Lifecycle.For` for tumbling task cards and `Lifecycle.Show`
   for a confetti-filled empty state. Complete a task, then quickly Undo: its exit
   reverses and its victory-note input survives. Complete all for maximum fanfare.
-  The animations package's `createCssTransition` helper animates CSS grid wrappers, so cards, their
+  `createCssTransition` from `@kinetic-router/motion` animates CSS grid wrappers, so cards, their
   spacing, and the empty banner expand/collapse without a disposal jump. The grid
   content stays overflow-visible, so tumbling cards aren't clipped by their shrinking
   slots; exiting items float above neighbours. No manual sizing or per-frame

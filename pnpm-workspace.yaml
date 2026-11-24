@@ -3,8 +3,8 @@ packages:
   - url
   - solid
   - lifecycle
-  - animations
-  - layout
+  - motion
+  - motion-layout
   - example-app
   - integration-tests
   - testing-utils

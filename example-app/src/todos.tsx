@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { Lifecycle, useLifecycle } from "@kinetic-router/lifecycle";
-import { createCssTransition, createTransition, Motion } from "@kinetic-router/animations";
+import { createCssTransition, createTransition, Motion } from "@kinetic-router/motion";
 import "./todos.css";
 
 type Todo = { id: number; title: string; emoji: string };

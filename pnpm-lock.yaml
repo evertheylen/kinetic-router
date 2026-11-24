@@ -54,31 +54,6 @@ importers:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.8(@types/node@26.6.6))
 
-  animations:
-    dependencies:
-      '@kinetic-router/lifecycle':
-        specifier: workspace:*
-        version: link:../lifecycle
-      '@solidjs/web':
-        specifier: 'catalog:'
-        version: 2.0.3(solid-js@2.0.3)
-      solid-js:
-        specifier: 'catalog:'
-        version: 2.0.3
-    devDependencies:
-      '@solidjs/vite-plugin':
-        specifier: 'catalog:'
-        version: 3.0.1(@solidjs/web@2.0.3(solid-js@2.0.3))(solid-js@2.0.3)(vite@8.3.8(@types/node@26.6.6))
-      happy-dom:
-        specifier: 'catalog:'
-        version: 21.0.4
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.1.1(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.8(@types/node@26.6.6))
-
   definition:
     devDependencies:
       '@types/node':
@@ -93,15 +68,15 @@ importers:
 
   example-app:
     dependencies:
-      '@kinetic-router/animations':
-        specifier: workspace:*
-        version: link:../animations
       '@kinetic-router/definition':
         specifier: workspace:*
         version: link:../definition
       '@kinetic-router/lifecycle':
         specifier: workspace:*
         version: link:../lifecycle
+      '@kinetic-router/motion':
+        specifier: workspace:*
+        version: link:../motion
       '@kinetic-router/solid':
         specifier: workspace:*
         version: link:../solid
@@ -174,31 +149,6 @@ importers:
         specifier: 'catalog:'
         version: 8.3.8(@types/node@26.6.6)
 
-  layout:
-    dependencies:
-      '@kinetic-router/lifecycle':
-        specifier: workspace:*
-        version: link:../lifecycle
-      solid-js:
-        specifier: 'catalog:'
-        version: 2.0.3
-    devDependencies:
-      '@solidjs/vite-plugin':
-        specifier: 'catalog:'
-        version: 3.0.1(@solidjs/web@2.0.3(solid-js@2.0.3))(solid-js@2.0.3)(vite@8.3.8(@types/node@26.6.6))
-      '@solidjs/web':
-        specifier: 'catalog:'
-        version: 2.0.3(solid-js@2.0.3)
-      happy-dom:
-        specifier: 'catalog:'
-        version: 21.0.4
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.1.1(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.8(@types/node@26.6.6))
-
   lifecycle:
     dependencies:
       solid-js:
@@ -223,6 +173,56 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.3.8(@types/node@26.6.6)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.1(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.8(@types/node@26.6.6))
+
+  motion:
+    dependencies:
+      '@kinetic-router/lifecycle':
+        specifier: workspace:*
+        version: link:../lifecycle
+      '@solidjs/web':
+        specifier: 'catalog:'
+        version: 2.0.3(solid-js@2.0.3)
+      solid-js:
+        specifier: 'catalog:'
+        version: 2.0.3
+    devDependencies:
+      '@solidjs/vite-plugin':
+        specifier: 'catalog:'
+        version: 3.0.1(@solidjs/web@2.0.3(solid-js@2.0.3))(solid-js@2.0.3)(vite@8.3.8(@types/node@26.6.6))
+      happy-dom:
+        specifier: 'catalog:'
+        version: 21.0.4
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.1(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.8(@types/node@26.6.6))
+
+  motion-layout:
+    dependencies:
+      '@kinetic-router/lifecycle':
+        specifier: workspace:*
+        version: link:../lifecycle
+      solid-js:
+        specifier: 'catalog:'
+        version: 2.0.3
+    devDependencies:
+      '@solidjs/vite-plugin':
+        specifier: 'catalog:'
+        version: 3.0.1(@solidjs/web@2.0.3(solid-js@2.0.3))(solid-js@2.0.3)(vite@8.3.8(@types/node@26.6.6))
+      '@solidjs/web':
+        specifier: 'catalog:'
+        version: 2.0.3(solid-js@2.0.3)
+      happy-dom:
+        specifier: 'catalog:'
+        version: 21.0.4
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.8(@types/node@26.6.6))

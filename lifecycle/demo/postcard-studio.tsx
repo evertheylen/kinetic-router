@@ -1,4 +1,4 @@
-import { Motion, motion } from '@kinetic-router/animations'
+import { Motion, motion } from '@kinetic-router/motion'
 import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 import { createSignal, onCleanup } from 'solid-js'
 import './postcard-studio.css'

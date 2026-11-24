@@ -1,15 +1,15 @@
-# @kinetic-router/layout (prototype)
+# @kinetic-router/motion-layout (prototype)
 
 `LayoutList` adds browser-native FLIP movement, entry/exit fades, and a smooth
 container height change to a keyed Solid 2 list. It opts that list into layout
 measurement and uses [`Lifecycle.For`](../lifecycle/README.md) to keep leaving
 rows alive until their exit finishes. Restore a key during its exit to keep the
-same row, including its local state.
+same row, including its local state. This package does not require `@kinetic-router/motion`.
 
 ```tsx
 import { createSignal } from 'solid-js'
 import { render } from '@solidjs/web'
-import { LayoutList } from '@kinetic-router/layout'
+import { LayoutList } from '@kinetic-router/motion-layout'
 
 const initial = [{ id: 1, title: 'Night atlas' }, { id: 2, title: 'Cloud garden' }]
 
@@ -44,7 +44,7 @@ render(() => <Queue />, document.body)
   retained exits are out of flow but still count for `:nth-child()` and sibling
   selectors. Let `LayoutList` control parent height, row movement and fade, and
   temporary exit positioning. Put independent effects on descendants or use
-  [`@kinetic-router/animations`](../animations/README.md) for other targets.
+  [`@kinetic-router/motion`](../motion/README.md) for other targets.
 - Height animation may reflow browser layout, but doesn't run per-frame JavaScript.
   Duration is in seconds and easing is a CSS string. Timing is sampled on
   structural edits; changing it alone doesn't retime running effects. Zero
@@ -67,8 +67,8 @@ a removal, or **Instant** to see the same changes without animation:
 
 ```sh
 CI=true pnpm install
-pnpm --filter @kinetic-router/layout... -r build
-pnpm --filter @kinetic-router/layout test
+pnpm --filter @kinetic-router/motion-layout... -r build
+pnpm --filter @kinetic-router/motion-layout test
 pnpm --filter @kinetic-router/lifecycle test:browser:container layout.e2e.ts
 pnpm --filter @kinetic-router/lifecycle dev
 # Open http://127.0.0.1:5173/#layout-queue-title

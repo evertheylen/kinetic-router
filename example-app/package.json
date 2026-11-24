@@ -9,9 +9,9 @@
     "test:browser": "pnpm build && playwright test"
   },
   "dependencies": {
-    "@kinetic-router/animations": "workspace:*",
     "@kinetic-router/definition": "workspace:*",
     "@kinetic-router/lifecycle": "workspace:*",
+    "@kinetic-router/motion": "workspace:*",
     "@kinetic-router/solid": "workspace:*",
     "@kinetic-router/testing-utils": "workspace:*",
     "@kinetic-router/url": "workspace:*",

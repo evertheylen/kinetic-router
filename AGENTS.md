@@ -11,7 +11,9 @@ and assume node is configured with `--enable-source-maps` so there's no need for
 | `@kinetic-router/definition` | `definition/` | Framework-agnostic DSL for declaring routes, params, and sitemaps. No runtime routing. |
 | `@kinetic-router/url` | `url/` | `Locator` ⇄ URL (de)serialization. Depends on `definition`. |
 | `@kinetic-router/solid` | `solid/` | The actual SPA router for SolidJS (peer deps: `solid-js` and `@solidjs/web`, both Solid 2.x). |
-| `@kinetic-router/layout` | `layout/` | Optional private Solid 2 FLIP list animations on lifecycle-retained rows. |
+| `@kinetic-router/lifecycle` | `lifecycle/` | Private Solid 2 control flow for retaining exiting rows and branches. |
+| `@kinetic-router/motion` | `motion/` | Private Solid 2 motion components and browser-native animation helpers. |
+| `@kinetic-router/motion-layout` | `motion-layout/` | Optional private FLIP list and grid animations on lifecycle-retained rows. |
 | `example-app` | `example-app/` | Vite + `@solidjs/vite-plugin` demo (private). `pnpm --filter @kinetic-router/example-app dev`. |
 
 Keep history behind `NavigationEngine`: future iOS support should use engine injection,

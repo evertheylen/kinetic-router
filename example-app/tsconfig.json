@@ -7,7 +7,7 @@
   },
   "references": [
     { "path": "../definition/tsconfig.build.json" },
-    { "path": "../animations/tsconfig.build.json" },
+    { "path": "../motion/tsconfig.build.json" },
     { "path": "../lifecycle/tsconfig.build.json" },
     { "path": "../url/tsconfig.build.json" },
     { "path": "../solid/tsconfig.build.json" },

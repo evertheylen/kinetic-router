@@ -1,5 +1,5 @@
 {
-  "name": "@kinetic-router/layout",
+  "name": "@kinetic-router/motion",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,11 +16,11 @@
     "@kinetic-router/lifecycle": "workspace:*"
   },
   "peerDependencies": {
+    "@solidjs/web": "catalog:",
     "solid-js": "catalog:"
   },
   "devDependencies": {
     "@solidjs/vite-plugin": "catalog:",
-    "@solidjs/web": "catalog:",
     "happy-dom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

@@ -11,7 +11,7 @@ and requires Node 22.12+. No router dependency or automatic page transitions.
 
 ```tsx
 import { Lifecycle } from '@kinetic-router/lifecycle'
-import { createTransition, fade } from '@kinetic-router/animations'
+import { createTransition, fade } from '@kinetic-router/motion'
 
 function Panel() {
   const motion = createTransition(fade, { duration: 180 })
@@ -21,7 +21,7 @@ function Panel() {
 <Lifecycle.Show when={open()}><Panel /></Lifecycle.Show>
 ```
 
-Animation helpers live in [`@kinetic-router/animations`](../animations/README.md).
+Animation helpers live in [`@kinetic-router/motion`](../motion/README.md).
 Register `onEnter`, `onExit`, or `onInOut` for other async lifecycle work.
 
 Lists and conditional branches work too:
@@ -52,7 +52,7 @@ Lists and conditional branches work too:
 
 See [the demo](demo/main.tsx) for CSS-only effects and interactive examples.
 The [Reading queue](demo/reading-queue.tsx) pairs keyed retention with
-[`LayoutList`](../layout/README.md) for reorder, add, remove, and Undo.
+[`LayoutList`](../motion-layout/README.md) for reorder, add, remove, and Undo.
 Detailed contracts live beside the [hooks](src/scope.ts)
 and [controls](src/flow.ts).
 

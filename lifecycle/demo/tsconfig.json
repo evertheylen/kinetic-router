@@ -7,8 +7,8 @@
     "types": ["vite/client"],
     "paths": {
       "@kinetic-router/lifecycle": ["../src/index.ts"],
-      "@kinetic-router/animations": ["../../animations/src/index.ts"],
-      "@kinetic-router/layout": ["../../layout/src/index.ts"]
+      "@kinetic-router/motion": ["../../motion/src/index.ts"],
+      "@kinetic-router/motion-layout": ["../../motion-layout/src/index.ts"]
     },
     "jsx": "preserve",
     "jsxImportSource": "@solidjs/web"

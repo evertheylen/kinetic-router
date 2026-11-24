@@ -19,16 +19,16 @@ prefix="kinetic-lifecycle-${workspace_id}"
 
 # Empty mount points only: the volumes hide host dependencies/build output, while
 # the rest of the checkout is read-only. Each worktree gets its own module volumes.
-mkdir -p "$root/node_modules" "$root/lifecycle/node_modules" "$root/animations/node_modules" \
-  "$root/layout/node_modules" "$root/lifecycle/demo/dist"
+mkdir -p "$root/node_modules" "$root/lifecycle/node_modules" "$root/motion/node_modules" \
+  "$root/motion-layout/node_modules" "$root/lifecycle/demo/dist"
 # The quoted script deliberately expands variables inside the container.
 # shellcheck disable=SC2016
 container=$("$engine" create --init --ipc=private --shm-size=1g --workdir /work \
   --mount "type=bind,source=$root,target=/work,readonly" \
   --mount "type=volume,source=$prefix-root-modules,target=/work/node_modules" \
   --mount "type=volume,source=$prefix-lifecycle-modules,target=/work/lifecycle/node_modules" \
-  --mount "type=volume,source=$prefix-animations-modules,target=/work/animations/node_modules" \
-  --mount "type=volume,source=$prefix-layout-modules,target=/work/layout/node_modules" \
+  --mount "type=volume,source=$prefix-motion-modules,target=/work/motion/node_modules" \
+  --mount "type=volume,source=$prefix-motion-layout-modules,target=/work/motion-layout/node_modules" \
   --mount "type=volume,source=$prefix-demo,target=/work/lifecycle/demo/dist" \
   --mount "type=volume,source=kinetic-lifecycle-package-cache,target=/cache" \
   --env CI=true \
@@ -39,7 +39,7 @@ container=$("$engine" create --init --ipc=private --shm-size=1g --workdir /work 
     mkdir -p /results
     # The Playwright image ships npm but no longer includes Corepack.
     npm install --global --ignore-scripts --cache /cache/npm pnpm@12.21.0
-    pnpm --filter @kinetic-router/animations... --filter @kinetic-router/layout... install --frozen-lockfile --store-dir=/cache/pnpm-store
+    pnpm --filter @kinetic-router/motion... --filter @kinetic-router/motion-layout... install --frozen-lockfile --store-dir=/cache/pnpm-store
     actual=$(node -p "require(\"./lifecycle/node_modules/@playwright/test/package.json\").version")
     if [[ "$actual" != "$PLAYWRIGHT_VERSION" ]]; then
       echo "Playwright $actual requires a matching image; update playwright_version in test-browser-container.sh." >&2

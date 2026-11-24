@@ -6,7 +6,7 @@ React's [`AnimatePresence`](https://motion.dev/docs/react-animate-presence), use
 the Solid lifecycle control that owns the condition, list, or branch:
 
 ```tsx
-import { Motion } from '@kinetic-router/animations'
+import { Motion } from '@kinetic-router/motion'
 import { Lifecycle as Lc } from '@kinetic-router/lifecycle'
 
 function Card() {
@@ -51,5 +51,6 @@ function Card() {
   seconds; `ease` takes CSS easing or names like `easeOut`. Legacy ref helpers
   such as `createAnimation` and `createTransition` still use milliseconds.
 
-The components use browser-native interpolation. There is no drag, layout
-animation, or per-frame JavaScript engine.
+The components use browser-native interpolation. They don't implement drag or a
+`layout` prop. For keyed lists and grids, use the separate
+[`LayoutList` from `@kinetic-router/motion-layout`](../motion-layout/README.md).
