@@ -81,11 +81,13 @@ export function ReadingQueue() {
 
   return <section class="layout-queue" aria-labelledby="layout-queue-title">
     <div class="layout-queue-intro">
-      <span>PLAYGROUND / 02</span>
+      <span>02 / REORDER A GRID</span>
       <h2 id="layout-queue-title">Reading queue</h2>
-      <p>Rotate the queue to move the first title to the end and watch the other cards shift across the grid.
-        Write a note, press Esc to remove its card, then press Enter on Undo while it’s fading to keep your note.
-        Choose Slow to see each move and give yourself more time to undo.</p>
+      <p class="motion-instructions">Choose <strong>Slow</strong>, then <strong>Rotate queue</strong>. The first card moves to the end
+        while the others slide into their new places. Rotate again before they settle to interrupt the move.
+        To try Undo, write a note, press Esc in it, then press Enter while its card is fading. Your note comes back.</p>
+      <p class="reduced-motion-instructions">Reduced motion is on, so the cards change places without sliding, even on Slow.
+        Write a note in the first card, then choose <strong>Rotate queue</strong>. The note stays with its title in its new spot.</p>
     </div>
     <div class="layout-queue-tools">
       <button type="button" onClick={() => setItems(entries => entries.length > 1 ? [...entries.slice(1), entries[0]!] : entries)}

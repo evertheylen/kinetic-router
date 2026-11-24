@@ -37,10 +37,10 @@ export function PostcardStudio() {
     <div class="postcard-intro">
       <span>01 / UNDO A DISCARD</span>
       <h2 id="postcard-studio-title">Postcard studio</h2>
-      <p class="postcard-try-undo">Turn on <strong>Slow preview</strong> and write a note.
+      <p class="motion-instructions">Turn on <strong>Slow preview</strong> and write a note.
         Choose <strong>Discard draft</strong> (or press Esc in the note), then <strong>Undo discard</strong> while the card fades.
         Your note comes back. Let the card disappear instead, and <strong>New postcard</strong> starts blank.</p>
-      <p class="postcard-reduced">Reduced motion is on, so discarding skips the fade and the Undo window.
+      <p class="reduced-motion-instructions">Reduced motion is on, so discarding skips the fade and the Undo window.
         Write a note, choose <strong>Discard draft</strong>, then <strong>New postcard</strong>: the new card starts blank.</p>
     </div>
     <div class="postcard-tools">

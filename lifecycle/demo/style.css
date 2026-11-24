@@ -33,7 +33,10 @@ code { color: #afc9ed; }
 .css-inout { opacity: 0; transition: opacity var(--motion-duration) linear; }
 .css-inout[data-direction=in] { opacity: 1; }
 @starting-style { .css-inout[data-direction=in] { opacity: 0; } }
+.reduced-motion-instructions { display: none; }
 @media (prefers-reduced-motion: reduce) {
+  .motion-instructions { display: none; }
+  .reduced-motion-instructions { display: block; }
   .flow-card { transition: none; }
   .css-separate[data-direction] { animation-duration: 1ms; animation-delay: 0ms; }
   .css-inout { transition-duration: 1ms; }

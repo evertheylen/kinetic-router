@@ -383,8 +383,10 @@ test('interrupting a reorder with removal and quick Undo restores the same focus
 for (const mode of ['reduced motion', 'zero duration'] as const) {
   test(`LayoutList snaps list changes with ${mode}`, async ({ page }) => {
     const queue = page.getByRole('region', { name: 'Reading queue' })
-    if (mode === 'reduced motion') await page.emulateMedia({ reducedMotion: 'reduce' })
-    else await speed(queue).selectOption({ label: 'Instant' })
+    if (mode === 'reduced motion') {
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await expect(queue.getByText('Reduced motion is on', { exact: false })).toBeVisible()
+    } else await speed(queue).selectOption({ label: 'Instant' })
     await queue.scrollIntoViewIfNeeded()
     const before = await resting(queue, initialOrder)
     await queue.getByRole('button', { name: 'Rotate queue' }).click()
