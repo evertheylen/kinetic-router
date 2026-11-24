@@ -13,7 +13,12 @@
 }
 .postcard-intro > span { color: var(--studio-mint); }
 .postcard-intro h2 { margin: .25rem 0; font-size: clamp(1.75rem, 5vw, 2.65rem); letter-spacing: -.04em; }
-.postcard-intro p { margin: .5rem 0 1.25rem; max-width: 44ch; }
+.postcard-intro p { margin: .5rem 0 1.25rem; max-width: 60ch; }
+.postcard-reduced { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .postcard-try-undo { display: none; }
+  .postcard-reduced { display: block; }
+}
 .postcard-tools { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
 .postcard-tools label { display: inline-flex; align-items: center; gap: .3rem; }
 .postcard-tools button { background: #224b41; border-color: #80aa97; }

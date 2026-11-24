@@ -220,11 +220,14 @@ test('keyboard Undo reenters from a partial exit, retaining the exact node and i
 
 test('reduced motion settles a paused exit and skips motion and delays on later targets', async ({ page }) => {
   const { card, discard, newDraft, tilt } = await openSlowDraft(page)
+  const reducedHint = page.getByText('Reduced motion is on', { exact: false })
+  await expect(reducedHint).toBeHidden()
   await finishMotion(card)
   await discard.click()
   await pose(card, 0.5)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(card).toHaveCount(0, { timeout: 2000 })
+  await expect(reducedHint).toBeVisible()
 
   await newDraft.click()
   const entry = await pose(card)
