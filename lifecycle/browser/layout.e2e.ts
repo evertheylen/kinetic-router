@@ -50,10 +50,6 @@ async function frames(queue: Locator, options: {
       await Promise.all(playing.map(animation => animation.ready))
     }
 
-    function box(element: HTMLElement) {
-      const { x, y, width, height } = element.getBoundingClientRect()
-      return { x, y, width, height, style: element.style.cssText, effects: own(element).length }
-    }
     return (seek.length ? seek : [undefined]).map(progress => {
       if (progress !== undefined) {
         for (const animation of playing) {
@@ -61,10 +57,16 @@ async function frames(queue: Locator, options: {
           animation.currentTime = delay + Number(duration) * (animation.playbackRate < 0 ? 1 - progress : progress)
         }
       }
+      // Focus can scroll the page a few pixels; measure geometry within the demo.
+      const origin = root.getBoundingClientRect()
+      function box(element: HTMLElement) {
+        const { x, y, width, height } = element.getBoundingClientRect()
+        return { x: x - origin.x, y: y - origin.y, width, height, style: element.style.cssText, effects: own(element).length }
+      }
       const rows = directRows()
       return {
-        list: box(list),
-        footerY: root.querySelector('.layout-queue-summary')!.getBoundingClientRect().y,
+        list: { ...box(list), scrollTop: list.scrollTop },
+        footerY: root.querySelector('.layout-queue-summary')!.getBoundingClientRect().y - origin.y,
         order: rows.map(row => Number(row.dataset.entry)),
         rows: Object.fromEntries(rows.map(row => [Number(row.dataset.entry), {
           ...box(row), opacity: Number(getComputedStyle(row).opacity), inert: row.inert,
@@ -104,7 +106,9 @@ function between(actual: number, start: number, end: number) {
 }
 
 function sameBox(actual: { x: number; y: number; width: number; height: number }, expected: typeof actual) {
-  for (const dim of ['x', 'y', 'width', 'height'] as const) close(actual[dim], expected[dim])
+  for (const dim of ['x', 'y', 'width', 'height'] as const) {
+    expect(Math.abs(actual[dim] - expected[dim]), `${dim}: ${actual[dim]} vs ${expected[dim]}`).toBeLessThan(1.5)
+  }
 }
 
 function styles(frame: Awaited<ReturnType<typeof frames>>[number]) {
@@ -196,6 +200,101 @@ test('LayoutList moves survivors and animates flow height through remove and add
   expect(after.rows[4].opacity).toBe(1)
   expect(styles(after)).toEqual(styles(before))
   expect(await tray.evaluate(element => element.scrollTop)).toBe(20)
+})
+
+test('an unrelated insertion does not restart or unpin an exit in a scrolling LayoutList host', async ({ page }) => {
+  const queue = page.getByRole('region', { name: 'Reading queue' })
+  // Cap the host itself here to exercise its scroll origin, not animated flow height.
+  await page.addStyleTag({ content: '.layout-queue-list { max-height: 115px; overflow-y: scroll; overflow-anchor: none; }' })
+  await queue.scrollIntoViewIfNeeded()
+  await finish(queue)
+  const list = queue.locator(listSelector)
+  const scroll = (top: number) => list.evaluate((node, top) => { node.scrollTop = top; return node.scrollTop }, top)
+  expect(await scroll(20)).toBe(20)
+  const before = await resting(queue, [1, 2, 3])
+  const outgoing = queue.locator(rowSelector(2))
+  const [pinned] = await frames(queue, {
+    click: outgoing.getByRole('button', { name: 'Remove Notes from the coast' }), watch: [rowSelector(2)], seek: [0.5],
+  })
+  sameBox(pinned.rows[2], before.rows[2])
+  expect(pinned.rows[2].opacity).toBeGreaterThan(0)
+  expect(pinned.rows[2].opacity).toBeLessThan(1)
+  const exit = await outgoing.evaluateHandle(row => row.getAnimations())
+  const holdTimes = await exit.evaluate(animations => animations.map(animation => animation.currentTime))
+
+  expect(await scroll(30)).toBe(30)
+  const [edited] = await frames(queue, {
+    click: queue.getByRole('button', { name: 'Add title' }), watch: [rowSelector(4)],
+  })
+  expect(edited.rows[2].inert).toBe(true)
+  // Compare the same point in the host's scrolling coordinate space, using
+  // the actual scroll offsets on either side of the edit.
+  expect(edited.list.scrollTop).not.toBe(pinned.list.scrollTop)
+  sameBox(edited.rows[2], {
+    ...pinned.rows[2], y: pinned.rows[2].y + edited.list.y - pinned.list.y + pinned.list.scrollTop - edited.list.scrollTop,
+  })
+  close(edited.rows[2].opacity, pinned.rows[2].opacity, 0.01)
+  expect(await outgoing.evaluate((row, animations) => {
+    const current = row.getAnimations()
+    return current.length === animations.length && animations.every(animation => current.includes(animation) && animation.playState === 'paused')
+  }, exit)).toBe(true)
+  expect(await exit.evaluate(animations => animations.map(animation => animation.currentTime))).toEqual(holdTimes)
+
+  // Both the still-paused exit and the unrelated entrance must release owned work.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const settled = await resting(queue, [4, 1, 3])
+  expect(styles(settled)).toEqual(styles(before))
+  expect(await exit.evaluate(animations => animations.every(animation => animation.playState === 'idle'))).toBe(true)
+})
+
+test('an initially empty LayoutList grows and returns to its natural empty height after the last exit', async ({ page }) => {
+  const queue = page.getByRole('region', { name: 'Reading queue' })
+  await queue.scrollIntoViewIfNeeded()
+  const instant = queue.getByRole('checkbox', { name: 'Instant' })
+  await instant.check()
+  for (const id of [1, 2, 3]) {
+    await frames(queue, { click: queue.locator(`${rowSelector(id)} button`) })
+  }
+  // Remount with no rows, so the first insertion has no previous row to measure.
+  await queue.getByRole('button', { name: 'Hide list' }).click()
+  await instant.uncheck()
+  await queue.getByRole('button', { name: 'Show list' }).click()
+  const empty = await resting(queue, [])
+  const boxEdges = await queue.locator(listSelector).evaluate(node => {
+    const { paddingTop, paddingBottom, borderTopWidth, borderBottomWidth } = getComputedStyle(node)
+    return [paddingTop, paddingBottom, borderTopWidth, borderBottomWidth].reduce((sum, value) => sum + parseFloat(value), 0)
+  })
+  close(empty.list.height, boxEdges)
+
+  async function grow(id: number) {
+    const [start, mid, end] = await frames(queue, {
+      click: queue.getByRole('button', { name: 'Add title' }), watch: [listSelector, rowSelector(id)], seek: [0, 0.5, 0.99],
+    })
+    await finish(queue)
+    const full = await resting(queue, [id])
+    close(start.list.height, empty.list.height)
+    between(mid.list.height, empty.list.height, full.list.height)
+    close(end.list.height, full.list.height, 3)
+    close(end.footerY, full.footerY, 3)
+    expect(full.list.style).toBe(empty.list.style)
+    return full
+  }
+
+  const full = await grow(4)
+  const [start, mid, end] = await frames(queue, {
+    click: queue.locator(`${rowSelector(4)} button`), watch: [listSelector, rowSelector(4)], seek: [0, 0.5, 0.99],
+  })
+  sameBox(mid.rows[4], full.rows[4])
+  expect(mid.rows[4].inert).toBe(true)
+  await finish(queue)
+  const cleared = await resting(queue, [])
+  close(start.list.height, full.list.height)
+  between(mid.list.height, full.list.height, cleared.list.height)
+  close(end.list.height, cleared.list.height, 3)
+  close(end.footerY, cleared.footerY, 3)
+  close(cleared.list.height, empty.list.height)
+  expect(styles(cleared)).toEqual(styles(empty))
+  await grow(5)
 })
 
 test('interrupting a reorder with removal and quick Undo restores the same focused input and draft', async ({ page }) => {

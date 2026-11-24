@@ -47,7 +47,7 @@ render(() => <Queue />, document.body)
 - Timing is in seconds, with CSS easing. Zero duration and reduced motion snap.
   Focus and `inert` are application decisions: use a control outside the list
   as a safe focus target, and mark retained exits inert if they shouldn't be
-  interactive.
+  interactive. On Undo, restore focus after the row commits and is no longer inert.
 - This is keyed list motion, not shared-element transitions or an observer of
   arbitrary resizing. Ordinary unmount disposes the list immediately.
 

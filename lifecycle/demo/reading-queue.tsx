@@ -1,6 +1,6 @@
 import { LayoutList } from '@kinetic-router/layout'
-import { useLifecycle } from '@kinetic-router/lifecycle'
-import { createEffect, createSignal, Show } from 'solid-js'
+import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
+import { createSignal, Show } from 'solid-js'
 import './reading-queue.css'
 
 type Entry = { id: number; title: string }
@@ -12,16 +12,27 @@ const firstEntries: Entry[] = [
   { id: 3, title: 'The cloud garden' },
 ]
 
-function Row(props: { entry: Entry; index: number; remove: (removal: Removal) => void }) {
+function Row(props: {
+  entry: Entry
+  index: number
+  remove: (removal: Removal) => void
+  restoreNoteFocus: (id: number, input: HTMLInputElement) => void
+}) {
   const { phase } = useLifecycle()
   const [note, setNote] = createSignal('')
   const remove = () => props.remove({ entry: props.entry, index: props.index })
+  let noteInput: HTMLInputElement | undefined
+
+  // The row has committed by this point, including clearing inert on reentry.
+  onInOut(({ direction }) => {
+    if (direction === 'in' && noteInput) props.restoreNoteFocus(props.entry.id, noteInput)
+  })
 
   return <li class="layout-queue-row" data-entry={props.entry.id} inert={phase() === 'exiting'}
     onKeyDown={event => { if (event.key === 'Escape') remove() }}>
     <span class="layout-queue-number" aria-hidden="true">{String(props.index + 1).padStart(2, '0')}</span>
     <label>{props.entry.title}
-      <input id={`reading-queue-note-${props.entry.id}`} aria-label={`${props.entry.title} note`}
+      <input ref={element => { noteInput = element }} aria-label={`${props.entry.title} note`}
         value={note()} onInput={event => setNote(event.currentTarget.value)} placeholder="A note for later…" />
     </label>
     <button type="button" aria-label={`Remove ${props.entry.title}`} onClick={remove}>Remove</button>
@@ -31,15 +42,17 @@ function Row(props: { entry: Entry; index: number; remove: (removal: Removal) =>
 export function ReadingQueue() {
   const [items, setItems] = createSignal(firstEntries)
   const [removed, setRemoved] = createSignal<Removal>()
-  const [focusRequest, requestFocus] = createSignal<Removal>()
   const [shown, setShown] = createSignal(true)
   const [instant, setInstant] = createSignal(false)
   let nextId = firstEntries.length + 1
   let undoButton: HTMLButtonElement | undefined
+  let restoreNoteFor: number | undefined
 
-  createEffect(focusRequest, request => {
-    if (request) document.getElementById(`reading-queue-note-${request.entry.id}`)?.focus()
-  })
+  function restoreNoteFocus(id: number, input: HTMLInputElement) {
+    if (restoreNoteFor !== id) return
+    restoreNoteFor = undefined
+    input.focus()
+  }
 
   function remove(removal: Removal) {
     // Move focus before the retained row becomes inert. Undo stays outside the list.
@@ -52,10 +65,10 @@ export function ReadingQueue() {
     const removal = removed()
     if (!removal) return
     const { entry, index } = removal
+    restoreNoteFor = entry.id
     setItems(entries => [...entries.slice(0, index), entry, ...entries.slice(index)])
     setRemoved(undefined)
     setShown(true)
-    requestFocus(removal)
   }
 
   function add() {
@@ -84,7 +97,7 @@ export function ReadingQueue() {
       <Show when={shown()}>
         <ul class="layout-queue-list" role="list" aria-label="Queued titles" style="position:relative">
           <LayoutList each={items()} by={item => item.id} transition={{ duration: instant() ? 0 : 0.25, ease: 'ease-out' }}>
-            {(item, index) => <Row entry={item()} index={index()} remove={remove} />}
+            {(item, index) => <Row entry={item()} index={index()} remove={remove} restoreNoteFocus={restoreNoteFocus} />}
           </LayoutList>
         </ul>
       </Show>
