@@ -1,6 +1,6 @@
 import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
 import { dynamic, type JSX } from '@solidjs/web'
-import { createEffect, createMemo, merge, omit, untrack } from 'solid-js'
+import { children, createEffect, createMemo, flatten, merge, omit, untrack } from 'solid-js'
 import type { AnimationTarget } from './keyframes.js'
 import { createTargetDriver } from './target-driver.js'
 import { timing } from './timing.js'
@@ -33,7 +33,11 @@ interface MotionOptions {
   transition?: MotionTransition
 }
 
-export type MotionProps<Tag extends MotionTag> = Omit<JSX.IntrinsicElements[Tag], keyof MotionOptions> & MotionOptions
+export interface MotionProps extends MotionOptions {
+  children: JSX.Element
+}
+
+export type MotionTagProps<Tag extends MotionTag> = Omit<JSX.IntrinsicElements[Tag], keyof MotionOptions> & MotionOptions
 
 const targetKeys = ['opacity', 'x', 'y', 'rotate', 'scale'] as const
 
@@ -66,65 +70,101 @@ function motionTiming({ duration = 0.2, delay = 0, ease = 'easeOut', ...rest }: 
   return timing({ duration: duration * 1000, delay: delay * 1000, easing })
 }
 
+function createMotionBinding(props: MotionOptions) {
+  const readExit = () => {
+    const value = props.exit
+    return value === undefined ? undefined : snapshotMotionTarget(value)
+  }
+  let present = untrack(() => snapshotMotionTarget(props.animate))
+  const initial = untrack(() => {
+    const value = props.initial
+    return value === false || value === undefined ? undefined : snapshotMotionTarget(value)
+  })
+  let skipInitialMotion = initial === undefined
+  const exit = untrack(readExit)
+  const lifecycle = exit && useLifecycle()
+  const declared = { ...present, ...initial, ...exit }
+  let ownsOpacity = declared.opacity !== undefined
+  let ownsTransform = hasTransform(declared)
+  if (!ownsOpacity && !ownsTransform) throw new TypeError('Specify at least one motion target property')
+
+  function target(pose: MotionTarget): AnimationTarget {
+    ownsOpacity ||= pose.opacity !== undefined
+    ownsTransform ||= hasTransform(pose)
+    const { opacity = 1, x = 0, y = 0, rotate = 0, scale = 1 } = pose
+    return {
+      ...(ownsOpacity && { opacity }),
+      ...(ownsTransform && { transform: `translate(${x}px, ${y}px) rotate(${rotate}deg) scale(${scale})` }),
+    }
+  }
+
+  const driver = createTargetDriver(() => untrack(() => motionTiming(props.transition)))
+  function bind(element: Element) {
+    const visible = target(present)
+    const exiting = untrack(() => lifecycle?.phase()) === 'exiting'
+    if (exiting) skipInitialMotion = false
+    const first = target({ ...present, ...(exiting ? exit : initial) })
+    driver.prepare(element, first, exiting ? first : visible)
+  }
+
+  if (lifecycle) onInOut(({ direction }) => {
+    // onInOut does not wait for an unrelated enter. Keep the old fill until
+    // a committed restore can retarget it; final owner cleanup cancels it.
+    if (direction !== 'out') return
+    const overlay = untrack(readExit)
+    if (overlay === undefined) return
+    skipInitialMotion = false
+    return driver.retarget(target({ ...present, ...overlay }))?.finished
+  })
+
+  createEffect(() => lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
+    if (!pose) return
+    present = pose
+    const next = target(pose)
+    // The element can be prepared even while Loading holds the first present commit.
+    if (skipInitialMotion) driver.snapTo(next)
+    else driver.retarget(next)
+    skipInitialMotion = false
+  })
+
+  return bind
+}
+
+/**
+ * Client-only: animate the single stable DOM element rendered by the child,
+ * with no wrapper. Put DOM props and refs on the child; remount Motion to
+ * animate a different root.
+ * An exit target needs an enclosing Lifecycle.For, Show, or Match boundary.
+ */
+export function Motion(props: MotionProps): JSX.Element {
+  const bind = createMotionBinding(props)
+  const content = children(() => props.children)
+  let root: Element | undefined
+
+  // Prepare during Solid's resolution, before its renderer can insert the root.
+  // Solid's renderer accepts accessors as JSX output even though JSX.Element omits them.
+  return createMemo(() => {
+    const output = content()
+    const nodes = flatten(output, { skipNonRendered: true })
+    const element = Array.isArray(nodes) && nodes.length === 1 ? nodes[0] : nodes
+    if (!(element instanceof Element)) {
+      throw new TypeError('Motion requires one DOM Element child. Render a single stable root element.')
+    }
+    if (root && root !== element) {
+      throw new TypeError('Motion child replaced its root element. Keep the root stable or remount Motion.')
+    }
+    if (!root) {
+      untrack(() => bind(element))
+      root = element
+    }
+    return output
+  }, { lazy: true, sync: true }) as unknown as JSX.Element
+}
+
 function motionTag<Tag extends MotionTag>(tag: Tag) {
   const Native = dynamic<MotionTag>(() => tag, { static: true })
-  return (props: MotionProps<Tag>) => {
-    const readExit = () => {
-      const value = props.exit
-      return value === undefined ? undefined : snapshotMotionTarget(value)
-    }
-    let present = untrack(() => snapshotMotionTarget(props.animate))
-    const initial = untrack(() => {
-      const value = props.initial
-      return value === false || value === undefined ? undefined : snapshotMotionTarget(value)
-    })
-    let skipInitialMotion = initial === undefined
-    const exit = untrack(readExit)
-    const lifecycle = exit && useLifecycle()
-    const declared = { ...present, ...initial, ...exit }
-    let ownsOpacity = declared.opacity !== undefined
-    let ownsTransform = hasTransform(declared)
-    if (!ownsOpacity && !ownsTransform) throw new TypeError('Specify at least one motion target property')
-
-    function target(pose: MotionTarget): AnimationTarget {
-      ownsOpacity ||= pose.opacity !== undefined
-      ownsTransform ||= hasTransform(pose)
-      const { opacity = 1, x = 0, y = 0, rotate = 0, scale = 1 } = pose
-      return {
-        ...(ownsOpacity && { opacity }),
-        ...(ownsTransform && { transform: `translate(${x}px, ${y}px) rotate(${rotate}deg) scale(${scale})` }),
-      }
-    }
-
-    const driver = createTargetDriver(() => untrack(() => motionTiming(props.transition)))
-    function bind(element: Element) {
-      const visible = target(present)
-      const exiting = untrack(() => lifecycle?.phase()) === 'exiting'
-      if (exiting) skipInitialMotion = false
-      const first = target({ ...present, ...(exiting ? exit : initial) })
-      driver.prepare(element, first, exiting ? first : visible)
-    }
-
-    if (lifecycle) onInOut(({ direction }) => {
-      // onInOut does not wait for an unrelated enter. Keep the old fill until
-      // a committed restore can retarget it; final owner cleanup cancels it.
-      if (direction !== 'out') return
-      const overlay = untrack(readExit)
-      if (overlay === undefined) return
-      skipInitialMotion = false
-      return driver.retarget(target({ ...present, ...overlay }))?.finished
-    })
-
-    createEffect(() => lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
-      if (!pose) return
-      present = pose
-      const next = target(pose)
-      // The ref can prepare before Loading holds the first present commit.
-      if (skipInitialMotion) driver.snapTo(next)
-      else driver.retarget(next)
-      skipInitialMotion = false
-    })
-
+  return (props: MotionTagProps<Tag>) => {
+    const bind = createMotionBinding(props)
     const ref = createMemo(() => {
       const consumer = props.ref
       return typeof consumer === 'function' || Array.isArray(consumer) ? [bind, consumer] : bind
@@ -149,6 +189,4 @@ export const motion = {
   section: motionTag('section'),
   button: motionTag('button'),
   li: motionTag('li'),
-  /** Create a component for another native HTML tag. Hoist it as a stable component. */
-  create: motionTag,
 }

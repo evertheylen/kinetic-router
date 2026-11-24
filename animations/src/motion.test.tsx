@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
-import { createMemo, createRoot, createSignal, flush, Loading, onSettled } from 'solid-js'
+import {
+  createContext, createMemo, createRoot, createSignal, Errored, flush, Loading, onCleanup,
+  onSettled, Show, useContext,
+} from 'solid-js'
 import { render, type JSX } from '@solidjs/web'
 import { Lifecycle as Lc, onExit } from '@kinetic-router/lifecycle'
-import { motion, type MotionProps, type MotionTarget } from './index.js'
+import { Motion, motion, type MotionProps, type MotionTagProps, type MotionTarget } from './index.js'
 
 class TargetAnimation {
   playState: AnimationPlayState = 'paused'
@@ -10,8 +13,10 @@ class TargetAnimation {
   reject!: (error: unknown) => void
   finished = new Promise<this>((resolve, reject) => { this.resolve = resolve; this.reject = reject })
   readonly effect: KeyframeEffect
+  readonly targetWasConnected: boolean
   constructor(effect: KeyframeEffect) {
     this.effect = effect
+    this.targetWasConnected = effect.target!.isConnected
     effects.push(this)
     // WAAPI marks its finished-promise rejection as handled on cancellation.
     void this.finished.catch(() => {})
@@ -86,9 +91,11 @@ describe('motion', () => {
     const hold = new Promise<void>(resolve => { release = resolve })
     function Row() {
       onExit(() => hold)
-      return <motion.li initial={false} animate={{ x: x(), opacity: 1 }} exit={{ opacity: 0 }} />
+      return <li />
     }
-    const host = mount(() => <Lc.Show when={when()}><Row /></Lc.Show>)
+    const host = mount(() => <Lc.Show when={when()}>
+      <Motion initial={false} animate={{ x: x(), opacity: 1 }} exit={{ opacity: 0 }}><Row /></Motion>
+    </Lc.Show>)
     await settle()
     const row = host.firstElementChild
     show(false); await settle()
@@ -117,7 +124,9 @@ describe('motion', () => {
     let reveal!: () => void
     function Panel() {
       const ready = createMemo(() => new Promise<string>(resolve => { reveal = () => resolve('ready') }))
-      return <motion.section initial={initial} animate={{ opacity: opacity() }} exit={{ opacity: 0 }}>{ready()}</motion.section>
+      return <Motion initial={initial} animate={{ opacity: opacity() }} exit={{ opacity: 0 }}>
+        <section>{ready()}</section>
+      </Motion>
     }
     const host = mount(() => <Lc.Show when={true}>
       <Loading fallback="loading"><Panel /></Loading>
@@ -128,6 +137,8 @@ describe('motion', () => {
       setOpacity(0.75); await settle()
       expect(host.textContent).toBe('loading')
       expect(effects).toHaveLength(1)
+      expect(current().targetWasConnected).toBe(false)
+      expect(frames()[0]?.opacity).toBe(initial ? '0' : '0.25')
       reveal()
       await vi.waitFor(() => expect(host.textContent).toBe('ready'))
       await settle()
@@ -153,16 +164,103 @@ describe('motion', () => {
     })
   })
 
-  it('creates other native HTML tags with their own props and ref type', () => {
-    const Input = motion.create('input')
-    expectTypeOf<Parameters<typeof Input>[0]['ref']>().toEqualTypeOf<JSX.Ref<HTMLInputElement>>()
-    expectTypeOf<'svg'>().not.toExtend<Parameters<typeof motion.create>[0]>()
-    expectTypeOf<MotionProps<'button'>['ref']>().toEqualTypeOf<JSX.Ref<HTMLButtonElement>>()
-    expectTypeOf<MotionProps<'li'>['animate']>().toEqualTypeOf<MotionTarget>()
-    const ref = vi.fn((el: HTMLInputElement) => expect(el).toBeInstanceOf(HTMLInputElement))
-    const host = mount(() => <Input animate={{ opacity: 1 }} ref={ref} type="checkbox" checked />)
-    expect(ref).toHaveBeenCalledWith(host.firstElementChild)
-    expect((host.firstElementChild as HTMLInputElement).checked).toBe(true)
-    expect(Object.keys(motion)).toEqual(['div', 'span', 'section', 'button', 'li', 'create'])
+  it('exports only the native shorthands with tag-specific props and refs', () => {
+    expectTypeOf<keyof typeof motion>().toEqualTypeOf<'div' | 'span' | 'section' | 'button' | 'li'>()
+    expectTypeOf<MotionTagProps<'button'>['ref']>().toEqualTypeOf<JSX.Ref<HTMLButtonElement>>()
+    expectTypeOf<MotionTagProps<'li'>['animate']>().toEqualTypeOf<MotionTarget>()
+    expect(Object.keys(motion)).toEqual(['div', 'span', 'section', 'button', 'li'])
+  })
+})
+
+describe('Motion', () => {
+  it('animates the child element itself without repeating setup or losing context, props, state, or its ref', async () => {
+    expectTypeOf<Parameters<typeof Motion>[0]>().toEqualTypeOf<MotionProps>()
+    expectTypeOf<keyof MotionProps>().toEqualTypeOf<'animate' | 'initial' | 'exit' | 'transition' | 'children'>()
+    const Context = createContext('default')
+    const [opacity, setOpacity] = createSignal(0.75)
+    const [label, setLabel] = createSignal('before')
+    const [visible, setVisible] = createSignal(true)
+    const setup = vi.fn(), cleaned = vi.fn()
+    const ref = vi.fn<(element: HTMLButtonElement) => void>()
+    function Card(props: { label: string }) {
+      setup()
+      onCleanup(cleaned)
+      const context = useContext(Context)
+      const [count, setCount] = createSignal(0)
+      return <button ref={ref} title={props.label} onClick={() => setCount(n => n + 1)}>
+        <span>{context}:{count()}</span>
+      </button>
+    }
+    const host = mount(() => <Context value="provided">
+      <Show when={visible()}>
+        <Motion initial={{ opacity: 0 }} animate={{ opacity: opacity() }}>
+          <><Card label={label()} /></>
+        </Motion>
+      </Show>
+    </Context>)
+    const button = host.firstElementChild as HTMLButtonElement
+    expect(ref).toHaveBeenCalledExactlyOnceWith(button)
+    expect(button.textContent).toBe('provided:0')
+    expect(effects[0]!.targetWasConnected).toBe(false)
+    expect(effects[0]!.effect.getKeyframes()[0]?.opacity).toBe('0')
+    expect(current().playState).toBe('running')
+
+    button.click()
+    setLabel('after'); setOpacity(0.5); await settle()
+    expect(host.firstElementChild).toBe(button)
+    expect(button.textContent).toBe('provided:1')
+    expect(button.title).toBe('after')
+    expect(setup).toHaveBeenCalledOnce()
+    expect(ref).toHaveBeenCalledOnce()
+    expect(effects.every(({ effect }) => effect.target === button)).toBe(true)
+    expect(frames()[1]?.opacity).toBe('0.5')
+
+    setVisible(false); await settle()
+    expect(host.firstElementChild).toBeNull()
+    expect(cleaned).toHaveBeenCalledOnce()
+    expect(current().playState).toBe('idle')
+  })
+
+  it.each([
+    ['empty', (): JSX.Element => null],
+    ['text', (): JSX.Element => 'text'],
+    ['multiple roots', (): JSX.Element => <><i /><b /></>],
+  ] as const)('reports %s to Solid’s error boundary without binding', async (_, view) => {
+    const host = mount(() => <Errored fallback={error => String(error())}>
+      <Motion animate={{ opacity: 1 }}>{view()}</Motion>
+    </Errored>)
+    await settle()
+    expect(host.textContent).toContain('Motion requires one DOM Element child')
+    expect(effects).toHaveLength(0)
+  })
+
+  it('reports a replaced root without retargeting and cleans up when the errored owner unmounts', async () => {
+    const [first, setFirst] = createSignal(true)
+    const [visible, setVisible] = createSignal(true)
+    const [opacity, setOpacity] = createSignal(1)
+    const cleaned = vi.fn()
+    function Card() {
+      onCleanup(cleaned)
+      return <Show when={first()} fallback={<article />}><article /></Show>
+    }
+    const host = mount(() => <Show when={visible()}>
+      <Errored fallback={error => String(error())}>
+        <Motion animate={{ opacity: opacity() }}><Card /></Motion>
+      </Errored>
+    </Show>)
+    const original = host.firstElementChild
+    const previous = current()
+    expect(previous.effect.target).toBe(original)
+
+    setFirst(false); await settle()
+    expect(host.textContent).toContain('Motion child replaced its root element')
+    expect(original?.isConnected).toBe(false)
+    setOpacity(0.5); await settle()
+    expect(effects).toHaveLength(1)
+
+    // Solid keeps errored content alive behind its fallback so it can retry.
+    setVisible(false); await settle()
+    expect(previous.playState).toBe('idle')
+    expect(cleaned).toHaveBeenCalledOnce()
   })
 })
