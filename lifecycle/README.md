@@ -4,8 +4,8 @@ Lifecycle-aware control flow for Solid 2. Components keep
 their DOM, reactive state, and event handlers while exiting; restoring them before
 exit completes preserves the same instance.
 
-Client-only, private, experimental. Uses the workspace's Solid 2 catalog version
-and requires Node 22.12+. No router dependency or automatic page transitions.
+Client-only and experimental. Requires Solid 2 and Node 22.12+.
+No router dependency or automatic page transitions.
 
 ## Use
 

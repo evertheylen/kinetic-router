@@ -1,7 +1,7 @@
 # @kinetic-router/motion (prototype)
 
-Browser-native reactive and lifecycle animations for Solid 2. Client-only, private,
-experimental; uses the workspace's Solid 2 catalog version. No router dependency,
+Browser-native reactive and lifecycle animations for Solid 2. Client-only and
+experimental. No router dependency,
 external animation engine, or per-frame JavaScript.
 For keyed list reordering and animated flow height, use
 [`LayoutList` from `@kinetic-router/motion-layout`](../motion-layout/README.md).
@@ -79,8 +79,9 @@ same card and its local draft.
 
 ## Routed pages
 
-Use `MotionOutlet` in the layout that displays the page, and `Motion` or a motion
-tag in the page itself. No `Lc.Show` around the page is necessary:
+In an app using `@kinetic-router/solid`, install `@kinetic-router/motion-router`
+and `@kinetic-router/motion`. Use `MotionOutlet` in the layout that displays the
+page, and `Motion` or a motion tag in the page itself. No `Lc.Show` around the page is necessary:
 
 ```tsx
 import { MotionOutlet } from '@kinetic-router/motion-router'

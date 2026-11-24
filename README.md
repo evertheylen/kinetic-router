@@ -13,9 +13,8 @@ ordinary-looking links and render pages through `<Outlet>` components.
 - Cached page instances that preserve DOM state across Back/Forward navigation.
 - Opt-in, cancellable page preparation on hover, focus, or primary press.
 - Reactive lifecycle signals for loading resources, visibility, and page focus.
-- Experimental per-outlet page animations in this workspace: `MotionOutlet` from
-  `@kinetic-router/motion-router` pairs with the private `@kinetic-router/motion`
-  and `@kinetic-router/lifecycle` packages. These three packages are not published.
+- Experimental [per-outlet page animations](motion/README.md#routed-pages) with
+  `MotionOutlet` from `@kinetic-router/motion-router` and `@kinetic-router/motion`.
 - Injectable navigation engines, including a memory engine for headless use.
 - Optional [dumb SSR](solid/docs/dumb-ssr.md): public HTML followed by a fresh
   client render, without hydration or server-state transfer.

@@ -50,7 +50,7 @@ function presentExit(outlet: HTMLElement, page: Node) {
   };
 }
 
-/** Experimental workspace companion to `@kinetic-router/motion` and
+/** Experimental companion to `@kinetic-router/motion` and
  * `@kinetic-router/lifecycle`. Same props and dumb-SSR behavior as Outlet;
  * each nested slot opts in separately. A retained HTML page stays a direct child,
  * but its normal-flow root is temporarily taken out of flow with a fixed layout
