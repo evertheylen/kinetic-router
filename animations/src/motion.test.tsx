@@ -3,7 +3,7 @@ import {
   createContext, createMemo, createRoot, createSignal, Errored, flush, Loading, onCleanup,
   onSettled, Show, useContext,
 } from 'solid-js'
-import { render, type JSX } from '@solidjs/web'
+import { Portal, render, type JSX } from '@solidjs/web'
 import { Lifecycle as Lc, onExit } from '@kinetic-router/lifecycle'
 import { Motion, motion, type MotionProps, type MotionTagProps, type MotionTarget } from './index.js'
 
@@ -173,13 +173,14 @@ describe('motion', () => {
 })
 
 describe('Motion', () => {
-  it('animates the child element itself without repeating setup or losing context, props, state, or its ref', async () => {
+  it('keeps the cached child’s element, context, props, state, and ref until its owner unmounts', async () => {
     expectTypeOf<Parameters<typeof Motion>[0]>().toEqualTypeOf<MotionProps>()
     expectTypeOf<keyof MotionProps>().toEqualTypeOf<'animate' | 'initial' | 'exit' | 'transition' | 'children'>()
     const Context = createContext('default')
     const [opacity, setOpacity] = createSignal(0.75)
     const [label, setLabel] = createSignal('before')
     const [visible, setVisible] = createSignal(true)
+    const [mounted, setMounted] = createSignal(true)
     const setup = vi.fn(), cleaned = vi.fn()
     const ref = vi.fn<(element: HTMLButtonElement) => void>()
     function Card(props: { label: string }) {
@@ -191,12 +192,14 @@ describe('Motion', () => {
         <span>{context}:{count()}</span>
       </button>
     }
+    function Shelf() {
+      const card = <Motion initial={{ opacity: 0 }} animate={{ opacity: opacity() }}>
+        <><Card label={label()} /></>
+      </Motion>
+      return <Show when={visible()}>{card}</Show>
+    }
     const host = mount(() => <Context value="provided">
-      <Show when={visible()}>
-        <Motion initial={{ opacity: 0 }} animate={{ opacity: opacity() }}>
-          <><Card label={label()} /></>
-        </Motion>
-      </Show>
+      <Show when={mounted()}><Shelf /></Show>
     </Context>)
     const button = host.firstElementChild as HTMLButtonElement
     expect(ref).toHaveBeenCalledExactlyOnceWith(button)
@@ -217,14 +220,84 @@ describe('Motion', () => {
 
     setVisible(false); await settle()
     expect(host.firstElementChild).toBeNull()
+    expect(cleaned).not.toHaveBeenCalled()
+    setVisible(true); await settle()
+    expect(host.firstElementChild).toBe(button)
+    expect(button.textContent).toBe('provided:1')
+    expect(setup).toHaveBeenCalledOnce()
+    expect(ref).toHaveBeenCalledOnce()
+
+    setMounted(false); await settle()
+    expect(host.firstElementChild).toBeNull()
     expect(cleaned).toHaveBeenCalledOnce()
     expect(current().playState).toBe('idle')
+  })
+
+  it('does not leave prebuilt output at its initial pose when first inserted later', async () => {
+    const [visible, setVisible] = createSignal(false)
+    const [opacity, setOpacity] = createSignal(0.25)
+    function Shelf() {
+      const card = <Motion initial={{ opacity: 0 }} animate={{ opacity: opacity() }}><article /></Motion>
+      return <Show when={visible()}>{card}</Show>
+    }
+    const host = mount(() => <Shelf />)
+    setOpacity(0.75); await settle()
+    expect(host.firstElementChild).toBeNull()
+    setVisible(true); await settle()
+    expect(host.firstElementChild?.tagName).toBe('ARTICLE')
+    expect(current().playState).toBe('finished')
+    expect(frames().at(-1)?.opacity).toBe('0.75')
+  })
+
+  it.each([false, undefined, { opacity: 0 }] as const)('applies initial=%j when the child root itself suspends', async initial => {
+    const [opacity, setOpacity] = createSignal(0.25)
+    let reveal!: (value: boolean) => void
+    const pending = new Promise<boolean>(resolve => { reveal = resolve })
+    function Card() {
+      const ready = createMemo(() => pending)
+      return <Show when={ready()}><section>ready</section></Show>
+    }
+    const host = mount(() => <Loading fallback="loading">
+      <Motion initial={initial} animate={{ opacity: opacity() }}><Card /></Motion>
+    </Loading>)
+    try {
+      await settle()
+      expect(host.textContent).toBe('loading')
+      setOpacity(0.75); await settle()
+      expect(host.textContent).toBe('loading')
+      expect(effects).toHaveLength(0)
+      reveal(true)
+      await vi.waitFor(() => expect(host.textContent).toBe('ready'))
+      await settle()
+      expect(effects[0]!.targetWasConnected).toBe(false)
+      expect(current().playState).toBe(initial ? 'running' : 'finished')
+      expect(frames().map(frame => frame.opacity)).toEqual(initial ? ['0', '0.75'] : ['0.75', '0.75'])
+    } finally {
+      reveal(true); await settle()
+    }
+  })
+
+  it('preserves the root when the surrounding non-rendered leaves change', async () => {
+    const [before, setBefore] = createSignal(true)
+    const root = document.createElement('article')
+    const host = mount(() => <Motion animate={{ opacity: 1 }}>
+      {before() ? [null, root] : [root, false, undefined, '']}
+    </Motion>)
+    expect(host.firstChild).toBe(root)
+    expect(host.childNodes).toHaveLength(1)
+    setBefore(false); await settle()
+    expect(host.firstChild).toBe(root)
+    expect(host.childNodes).toHaveLength(1)
+    expect(effects).toHaveLength(1)
   })
 
   it.each([
     ['empty', (): JSX.Element => null],
     ['text', (): JSX.Element => 'text'],
     ['multiple roots', (): JSX.Element => <><i /><b /></>],
+    ['mixed text and element', (): JSX.Element => <>text<i /></>],
+    ['DOM text beside an element', (): JSX.Element => [document.createTextNode(''), <i />]],
+    ['Portal marker beside an element', (): JSX.Element => <><i /><Portal><b /></Portal></>],
   ] as const)('reports %s to Solid’s error boundary without binding', async (_, view) => {
     const host = mount(() => <Errored fallback={error => String(error())}>
       <Motion animate={{ opacity: 1 }}>{view()}</Motion>

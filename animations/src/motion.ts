@@ -1,6 +1,6 @@
 import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
 import { dynamic, type JSX } from '@solidjs/web'
-import { children, createEffect, createMemo, flatten, merge, omit, untrack } from 'solid-js'
+import { children, createEffect, createMemo, createSignal, merge, omit, untrack } from 'solid-js'
 import type { AnimationTarget } from './keyframes.js'
 import { createTargetDriver } from './target-driver.js'
 import { timing } from './timing.js'
@@ -99,12 +99,14 @@ function createMotionBinding(props: MotionOptions) {
   }
 
   const driver = createTargetDriver(() => untrack(() => motionTiming(props.transition)))
+  const [bound, setBound] = createSignal(false, { ownedWrite: true })
   function bind(element: Element) {
     const visible = target(present)
     const exiting = untrack(() => lifecycle?.phase()) === 'exiting'
     if (exiting) skipInitialMotion = false
     const first = target({ ...present, ...(exiting ? exit : initial) })
     driver.prepare(element, first, exiting ? first : visible)
+    setBound(true)
   }
 
   if (lifecycle) onInOut(({ direction }) => {
@@ -117,7 +119,8 @@ function createMotionBinding(props: MotionOptions) {
     return driver.retarget(target({ ...present, ...overlay }))?.finished
   })
 
-  createEffect(() => lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
+  // Do not consume the first present pose until preparation has a real target.
+  createEffect(() => bound() && lifecycle?.phase() !== 'exiting' ? snapshotMotionTarget(props.animate) : undefined, pose => {
     if (!pose) return
     present = pose
     const next = target(pose)
@@ -130,10 +133,15 @@ function createMotionBinding(props: MotionOptions) {
   return bind
 }
 
+function isElement(value: unknown): value is Element {
+  return typeof value === 'object' && value !== null && 'nodeType' in value && value.nodeType === Node.ELEMENT_NODE
+}
+
 /**
  * Client-only: animate the single stable DOM element rendered by the child,
  * with no wrapper. Put DOM props and refs on the child; remount Motion to
- * animate a different root.
+ * animate a different root. Put Loading around Motion or inside the stable
+ * root, not in place of the root.
  * An exit target needs an enclosing Lifecycle.For, Show, or Match boundary.
  */
 export function Motion(props: MotionProps): JSX.Element {
@@ -141,13 +149,12 @@ export function Motion(props: MotionProps): JSX.Element {
   const content = children(() => props.children)
   let root: Element | undefined
 
-  // Prepare during Solid's resolution, before its renderer can insert the root.
-  // Solid's renderer accepts accessors as JSX output even though JSX.Element omits them.
+  // Keep the resolved child owned even if the caller temporarily stops rendering
+  // this output. Prepare before Solid inserts it; JSX.Element omits accessor output.
   return createMemo(() => {
-    const output = content()
-    const nodes = flatten(output, { skipNonRendered: true })
-    const element = Array.isArray(nodes) && nodes.length === 1 ? nodes[0] : nodes
-    if (!(element instanceof Element)) {
+    const rendered = content.toArray().filter(child => child != null && typeof child !== 'boolean' && child !== '')
+    const element = rendered[0]
+    if (rendered.length !== 1 || !isElement(element)) {
       throw new TypeError('Motion requires one DOM Element child. Render a single stable root element.')
     }
     if (root && root !== element) {
@@ -157,8 +164,8 @@ export function Motion(props: MotionProps): JSX.Element {
       untrack(() => bind(element))
       root = element
     }
-    return output
-  }, { lazy: true, sync: true }) as unknown as JSX.Element
+    return element
+  }, { sync: true }) as unknown as JSX.Element
 }
 
 function motionTag<Tag extends MotionTag>(tag: Tag) {
