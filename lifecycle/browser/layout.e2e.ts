@@ -5,6 +5,9 @@ test.use({ reducedMotion: 'no-preference' })
 const listSelector = '.layout-queue-list'
 const rowSelector = (id: number) => `[data-entry="${id}"]`
 const speed = (queue: Locator) => queue.getByRole('combobox', { name: 'Animation speed' })
+const initialOrder = [1, 2, 3, 4, 5]
+const withoutFirst = initialOrder.slice(1)
+const rotatedOrder = [...withoutFirst, 1]
 
 let errors: string[]
 test.beforeEach(async ({ page }) => {
@@ -106,42 +109,74 @@ function styles(frame: Awaited<ReturnType<typeof sample>>) {
   return [frame.list.style, ...Object.values(frame.rows).map(row => row.style)]
 }
 
-test('LayoutList reorders direct custom rows on both axes without owning descendant effects', async ({ page }) => {
+test('the Reading queue grid moves multiple LayoutList rows at once without owning descendant effects', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
-  await page.addStyleTag({ content: '.layout-queue-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; }' })
   await queue.scrollIntoViewIfNeeded()
-  await expect(queue.locator(`${listSelector} > *`)).toHaveCount(3)
-  const before = await resting(queue, [1, 2, 3])
+  await expect(queue.locator(listSelector)).toHaveCSS('display', 'grid')
+  await expect(queue.locator(`${listSelector} > *`)).toHaveCount(initialOrder.length)
+  const before = await resting(queue, initialOrder)
+  close(before.rows[1].y, before.rows[2].y)
+  expect(before.rows[2].x).toBeGreaterThan(before.rows[1].x)
+  close(before.rows[1].x, before.rows[3].x)
+  expect(before.rows[3].y).toBeGreaterThan(before.rows[1].y)
   const note = queue.locator(`${rowSelector(3)} input`)
   const independent = await note.evaluateHandle(input => input.animate(
     [{ outlineOffset: '0px' }, { outlineOffset: '2px' }], { duration: 300, iterations: Infinity },
   ))
 
   await queue.getByRole('button', { name: 'Rotate queue' }).click()
-  await pauseEffects(queue, rowSelector(3))
+  await pauseEffects(queue, ...initialOrder.map(rowSelector))
   const start = await sample(queue, 0)
   const mid = await sample(queue, 0.5)
-  expect(start.order).toEqual([2, 3, 1])
-  sameBox(start.rows[3], before.rows[3])
+  expect(start.order).toEqual(rotatedOrder)
+  for (const id of initialOrder) sameBox(start.rows[id], before.rows[id])
+  close(mid.rows[1].x, before.rows[1].x)
+  between(mid.rows[1].y, before.rows[1].y, before.rows[5].y)
+  between(mid.rows[2].x, before.rows[2].x, before.rows[1].x)
+  close(mid.rows[2].y, before.rows[2].y)
   between(mid.rows[3].x, before.rows[3].x, before.rows[2].x)
   between(mid.rows[3].y, before.rows[3].y, before.rows[2].y)
   expect(await note.evaluate((input, animation) => input.getAnimations().length === 1 && input.getAnimations()[0] === animation, independent)).toBe(true)
 
   await finish(queue)
-  const after = await resting(queue, [2, 3, 1])
-  sameBox(after.rows[3], before.rows[2])
+  const after = await resting(queue, rotatedOrder)
+  rotatedOrder.forEach((id, slot) => sameBox(after.rows[id], before.rows[initialOrder[slot]!]))
   close(after.list.height, before.list.height)
   expect(styles(after)).toEqual(styles(before))
   expect(await independent.evaluate(animation => animation.playState)).toBe('running')
 })
 
+test('the Reading queue fits a narrow phone in one column', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 })
+  const queue = page.getByRole('region', { name: 'Reading queue' })
+  const frame = await resting(queue, initialOrder)
+  for (const [index, id] of withoutFirst.entries()) {
+    const previous = frame.rows[initialOrder[index]!]
+    const card = frame.rows[id]
+    close(card.x, previous.x)
+    close(card.width, previous.width)
+    expect(card.y).toBeGreaterThan(previous.y + previous.height)
+  }
+  expect(await queue.evaluate(element => {
+    const { left, right } = element.getBoundingClientRect()
+    return left >= 0 && right <= window.innerWidth && element.scrollWidth <= element.clientWidth
+  })).toBe(true)
+  expect(await queue.locator(listSelector).evaluate(list =>
+    [list, ...list.children].every(element => element.scrollWidth <= element.clientWidth),
+  )).toBe(true)
+})
+
 test('LayoutList moves survivors and animates flow height through remove and add in a scrolled tray', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
-  await page.addStyleTag({ content: '.layout-queue-tray { max-height: 135px; overflow-y: scroll; overflow-anchor: none; }' })
+  await page.addStyleTag({ content: `
+    .layout-queue-list { display: flex; flex-direction: column; align-items: stretch; }
+    .layout-queue-list > li { flex: none; }
+    .layout-queue-tray { max-height: 135px; overflow-y: scroll; overflow-anchor: none; }
+  ` })
   await queue.scrollIntoViewIfNeeded()
   const tray = queue.locator('.layout-queue-tray')
   expect(await tray.evaluate(element => { element.scrollTop = 20; return element.scrollTop })).toBe(20)
-  const before = await resting(queue, [1, 2, 3])
+  const before = await resting(queue, initialOrder)
   const outgoing = queue.locator(rowSelector(1))
   const originalRow = (await outgoing.elementHandle())!
 
@@ -160,7 +195,7 @@ test('LayoutList moves survivors and animates flow height through remove and add
   expect(mid.rows[1].opacity).toBeLessThan(1)
 
   await finish(queue)
-  const smaller = await resting(queue, [2, 3])
+  const smaller = await resting(queue, withoutFirst)
   expect(await originalRow.evaluate(row => ({
     connected: row.isConnected, effects: row.getAnimations().length, style: row.style.cssText,
   }))).toEqual({ connected: false, effects: 0, style: before.rows[1].style })
@@ -173,23 +208,23 @@ test('LayoutList moves survivors and animates flow height through remove and add
   close(almostDone.footerY, smaller.footerY, 3)
 
   await queue.getByRole('button', { name: 'Add title' }).click()
-  await pauseEffects(queue, listSelector, rowSelector(4), rowSelector(2))
+  await pauseEffects(queue, listSelector, rowSelector(6), rowSelector(2))
   const enter = await sample(queue, 0)
   const growing = await sample(queue, 0.5)
   const almostFull = await sample(queue, 0.99)
   close(enter.list.height, smaller.list.height)
   sameBox(enter.rows[2], smaller.rows[2])
-  expect(enter.rows[4].opacity).toBeLessThan(0.05)
-  expect(growing.rows[4].opacity).toBeGreaterThan(enter.rows[4].opacity)
-  expect(growing.rows[4].opacity).toBeLessThan(1)
+  expect(enter.rows[6].opacity).toBeLessThan(0.05)
+  expect(growing.rows[6].opacity).toBeGreaterThan(enter.rows[6].opacity)
+  expect(growing.rows[6].opacity).toBeLessThan(1)
   await finish(queue)
-  const after = await resting(queue, [4, 2, 3])
+  const after = await resting(queue, [6, ...withoutFirst])
   between(growing.list.height, smaller.list.height, after.list.height)
   between(growing.rows[2].y, smaller.rows[2].y, after.rows[2].y)
   sameBox(after.rows[2], before.rows[2])
   close(almostFull.list.height, after.list.height, 3)
   close(almostFull.footerY, after.footerY, 3)
-  expect(after.rows[4].opacity).toBe(1)
+  expect(after.rows[6].opacity).toBe(1)
   expect(styles(after)).toEqual(styles(before))
   expect(await tray.evaluate(element => element.scrollTop)).toBe(20)
 })
@@ -206,13 +241,13 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
       overflow-y: scroll;
       overflow-anchor: none;
     }
-    .layout-queue-list > li { grid-column: 2; }
+    .layout-queue-list > li { grid-column: 2; margin: .15rem .2rem; }
   ` })
   await queue.scrollIntoViewIfNeeded()
   const list = queue.locator(listSelector)
   const scroll = (top: number) => list.evaluate((node, top) => { node.scrollTop = top; return node.scrollTop }, top)
   expect(await scroll(20)).toBe(20)
-  const before = await resting(queue, [1, 2, 3])
+  const before = await resting(queue, initialOrder)
   const outgoing = queue.locator(rowSelector(2))
   await outgoing.getByRole('button', { name: 'Remove Notes from the coast' }).click()
   await pauseEffects(queue, rowSelector(2))
@@ -227,7 +262,7 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
 
   expect(await scroll(30)).toBe(30)
   await queue.getByRole('button', { name: 'Add title' }).click()
-  await pauseEffects(queue, rowSelector(4))
+  await pauseEffects(queue, rowSelector(6))
   const edited = await sample(queue)
   expect(edited.rows[2].inert).toBe(true)
   // Compare the same point in the host's scrolling coordinate space, using
@@ -245,7 +280,7 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
 
   // Both the still-paused exit and the unrelated entrance must release owned work.
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  const settled = await resting(queue, [4, 1, 3])
+  const settled = await resting(queue, [6, 1, 3, 4, 5])
   expect(styles(settled)).toEqual(styles(before))
   expect(await exit.evaluate(animations => animations.every(animation => animation.playState === 'idle'))).toBe(true)
 })
@@ -254,7 +289,7 @@ test('an initially empty LayoutList grows and returns to its natural empty heigh
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
   await speed(queue).selectOption({ label: 'Instant' })
-  for (const id of [1, 2, 3]) {
+  for (const id of initialOrder) {
     await queue.locator(`${rowSelector(id)} button`).click()
   }
   // Remount with no rows, so the first insertion has no previous row to measure.
@@ -284,14 +319,14 @@ test('an initially empty LayoutList grows and returns to its natural empty heigh
     return full
   }
 
-  const full = await grow(4)
-  await queue.locator(`${rowSelector(4)} button`).click()
-  await pauseEffects(queue, listSelector, rowSelector(4))
+  const full = await grow(6)
+  await queue.locator(`${rowSelector(6)} button`).click()
+  await pauseEffects(queue, listSelector, rowSelector(6))
   const start = await sample(queue, 0)
   const mid = await sample(queue, 0.5)
   const end = await sample(queue, 0.99)
-  sameBox(mid.rows[4], full.rows[4])
-  expect(mid.rows[4].inert).toBe(true)
+  sameBox(mid.rows[6], full.rows[6])
+  expect(mid.rows[6].inert).toBe(true)
   await finish(queue)
   const cleared = await resting(queue, [])
   close(start.list.height, full.list.height)
@@ -300,13 +335,13 @@ test('an initially empty LayoutList grows and returns to its natural empty heigh
   close(end.footerY, cleared.footerY, 3)
   close(cleared.list.height, empty.list.height)
   expect(styles(cleared)).toEqual(styles(empty))
-  await grow(5)
+  await grow(7)
 })
 
 test('interrupting a reorder with removal and quick Undo restores the same focused input and draft', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
-  const before = await resting(queue, [1, 2, 3])
+  const before = await resting(queue, initialOrder)
   const row = queue.locator(rowSelector(1))
   const note = row.getByRole('textbox')
   const original = await note.elementHandle()
@@ -315,7 +350,7 @@ test('interrupting a reorder with removal and quick Undo restores the same focus
   await queue.getByRole('button', { name: 'Rotate queue' }).click()
   await pauseEffects(queue, rowSelector(1))
   const moving = await sample(queue, 0.5)
-  between(moving.rows[1].y, before.rows[1].y, before.rows[3].y)
+  between(moving.rows[1].y, before.rows[1].y, before.rows[5].y)
   await note.evaluate(input => input.focus({ preventScroll: true }))
 
   await page.keyboard.press('Escape')
@@ -340,8 +375,8 @@ test('interrupting a reorder with removal and quick Undo restores the same focus
   await expect(note).toBeFocused()
   await expect(note).toHaveValue('Keep this draft')
   await finish(queue)
-  const after = await resting(queue, [2, 3, 1])
-  sameBox(after.rows[1], before.rows[3])
+  const after = await resting(queue, rotatedOrder)
+  sameBox(after.rows[1], before.rows[5])
   expect(styles(after)).toEqual(styles(before))
 })
 
@@ -351,17 +386,17 @@ for (const mode of ['reduced motion', 'zero duration'] as const) {
     if (mode === 'reduced motion') await page.emulateMedia({ reducedMotion: 'reduce' })
     else await speed(queue).selectOption({ label: 'Instant' })
     await queue.scrollIntoViewIfNeeded()
-    const before = await resting(queue, [1, 2, 3])
+    const before = await resting(queue, initialOrder)
     await queue.getByRole('button', { name: 'Rotate queue' }).click()
     const reordered = await sample(queue)
-    expect(reordered.order).toEqual([2, 3, 1])
-    sameBox(reordered.rows[1], before.rows[3])
+    expect(reordered.order).toEqual(rotatedOrder)
+    sameBox(reordered.rows[1], before.rows[5])
     expect(styles(reordered)).toEqual(styles(before))
     expect([reordered.list, ...Object.values(reordered.rows)].every(box => box.effects === 0)).toBe(true)
 
     await queue.getByRole('button', { name: 'Remove The night atlas' }).click()
     const removed = await sample(queue)
-    expect(removed.order).toEqual([2, 3])
+    expect(removed.order).toEqual(withoutFirst)
     expect(removed.list.height).toBeLessThan(before.list.height - 20)
     expect([removed.list, ...Object.values(removed.rows)].every(box => box.effects === 0)).toBe(true)
   })
@@ -370,7 +405,7 @@ for (const mode of ['reduced motion', 'zero duration'] as const) {
 test('ordinary unmount cancels active LayoutList effects and restores owned styles', async ({ page }) => {
   const queue = page.getByRole('region', { name: 'Reading queue' })
   await queue.scrollIntoViewIfNeeded()
-  const before = await resting(queue, [1, 2, 3])
+  const before = await resting(queue, initialOrder)
   const list = await queue.locator(listSelector).elementHandle()
   const row = await queue.locator(rowSelector(1)).elementHandle()
   await queue.getByRole('button', { name: 'Remove The night atlas' }).click()
@@ -383,6 +418,6 @@ test('ordinary unmount cancels active LayoutList effects and restores owned styl
   expect(await list!.evaluate(element => element.style.cssText)).toBe(before.list.style)
   expect(await row!.evaluate(element => element.style.cssText)).toBe(before.rows[1].style)
   await queue.getByRole('button', { name: 'Show list' }).click()
-  await expect(queue.locator(`${listSelector} > li`)).toHaveCount(2)
-  await resting(queue, [2, 3])
+  await expect(queue.locator(`${listSelector} > li`)).toHaveCount(withoutFirst.length)
+  await resting(queue, withoutFirst)
 })

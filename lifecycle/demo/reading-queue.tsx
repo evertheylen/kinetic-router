@@ -11,6 +11,8 @@ const firstEntries: Entry[] = [
   { id: 1, title: 'The night atlas' },
   { id: 2, title: 'Notes from the coast' },
   { id: 3, title: 'The cloud garden' },
+  { id: 4, title: 'A field guide to rain' },
+  { id: 5, title: 'Letters from the north' },
 ]
 
 function Row(props: {
@@ -81,8 +83,9 @@ export function ReadingQueue() {
     <div class="layout-queue-intro">
       <span>PLAYGROUND / 02</span>
       <h2 id="layout-queue-title">Reading queue</h2>
-      <p>Move the first title to the end, or add one at the top. Write a note, press Esc to remove the title,
-        then press Enter on Undo while it’s fading to keep your note. Choose Slow for more time to undo.</p>
+      <p>Rotate the queue to move the first title to the end and watch the other cards shift across the grid.
+        Write a note, press Esc to remove its card, then press Enter on Undo while it’s fading to keep your note.
+        Choose Slow to see each move and give yourself more time to undo.</p>
     </div>
     <div class="layout-queue-tools">
       <button type="button" onClick={() => setItems(entries => entries.length > 1 ? [...entries.slice(1), entries[0]!] : entries)}

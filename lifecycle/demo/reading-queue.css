@@ -26,9 +26,11 @@
 
 .layout-queue-tray { border-radius: .75rem; background: #201c2e; }
 .layout-queue-list {
-  display: flex;
-  flex-direction: column;
-  gap: .4rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  align-items: start;
+  gap: .65rem;
   margin: 0;
   padding: .65rem;
   border: 1px solid #656077;
@@ -36,12 +38,10 @@
   list-style: none;
 }
 .layout-queue-row {
-  flex: none;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: .6rem;
-  margin: .15rem .2rem;
   padding: .5rem .65rem;
   border: 1px solid #656077;
   border-radius: .5rem;
@@ -51,6 +51,10 @@
 .layout-queue-row input { min-width: 0; padding: .25rem .4rem; border-color: #8a779d; background: #241e34; }
 .layout-queue-row button { font-size: .8rem; }
 .layout-queue-summary { margin: 0; padding: .6rem .85rem; }
+
+@media (min-width: 700px) {
+  .layout-queue-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 @media (max-width: 420px) {
   .layout-queue-row { grid-template-columns: minmax(0, 1fr) auto; }

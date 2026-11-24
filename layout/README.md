@@ -58,9 +58,10 @@ render(() => <Queue />, document.body)
 ## Run
 
 From the repository root, build the optional package and run its browser checks,
-or open the [Reading queue](../lifecycle/demo/reading-queue.tsx) to try add,
-reorder, remove, and keyboard Undo. Choose **Slow** for more time to undo before
-the row leaves, or **Instant** to see the same changes without animation:
+or open the [Reading queue](../lifecycle/demo/reading-queue.tsx). On desktop,
+click **Rotate queue** to see several cards move across and between grid rows
+at once. Choose **Slow** to follow each move and give yourself more time to undo
+a removal, or **Instant** to see the same changes without animation:
 
 ```sh
 CI=true pnpm install
@@ -68,5 +69,5 @@ pnpm --filter @kinetic-router/layout... -r build
 pnpm --filter @kinetic-router/layout test
 pnpm --filter @kinetic-router/lifecycle test:browser:container layout.e2e.ts
 pnpm --filter @kinetic-router/lifecycle dev
-# Open http://127.0.0.1:5173 and find Reading queue.
+# Open http://127.0.0.1:5173/#layout-queue-title
 ```
