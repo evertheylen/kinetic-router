@@ -8,6 +8,8 @@ test.beforeEach(async ({ page }) => {
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
   await page.goto('/')
+  // Keep document scroll anchoring from moving the viewport during a geometry sample.
+  await page.addStyleTag({ content: 'html, body { overflow-anchor: none; }' })
 })
 test.afterEach(() => { expect(errors).toEqual([]) })
 
@@ -57,20 +59,19 @@ async function frames(queue: Locator, options: {
           animation.currentTime = delay + Number(duration) * (animation.playbackRate < 0 ? 1 - progress : progress)
         }
       }
-      // Focus can scroll the page a few pixels; measure geometry within the demo.
-      const origin = root.getBoundingClientRect()
-      function box(element: HTMLElement) {
-        const { x, y, width, height } = element.getBoundingClientRect()
-        return { x: x - origin.x, y: y - origin.y, width, height, style: element.style.cssText, effects: own(element).length }
-      }
+      const host = list.getBoundingClientRect()
       const rows = directRows()
       return {
-        list: { ...box(list), scrollTop: list.scrollTop },
-        footerY: root.querySelector('.layout-queue-summary')!.getBoundingClientRect().y - origin.y,
+        list: { width: host.width, height: host.height, style: list.style.cssText, effects: own(list).length, scrollTop: list.scrollTop },
+        footerY: root.querySelector('.layout-queue-summary')!.getBoundingClientRect().y - host.y,
         order: rows.map(row => Number(row.dataset.entry)),
-        rows: Object.fromEntries(rows.map(row => [Number(row.dataset.entry), {
-          ...box(row), opacity: Number(getComputedStyle(row).opacity), inert: row.inert,
-        }])),
+        rows: Object.fromEntries(rows.map(row => {
+          const { x, y, width, height } = row.getBoundingClientRect()
+          return [Number(row.dataset.entry), {
+            x: x - host.x, y: y - host.y, width, height, style: row.style.cssText, effects: own(row).length,
+            opacity: Number(getComputedStyle(row).opacity), inert: row.inert,
+          }]
+        })),
       }
     })
   }, { button: await click?.elementHandle(), watch, seek, listSelector })
@@ -242,7 +243,7 @@ test('an unrelated insertion does not restart or unpin an exit in a scrolling La
   // the actual scroll offsets on either side of the edit.
   expect(edited.list.scrollTop).not.toBe(pinned.list.scrollTop)
   sameBox(edited.rows[2], {
-    ...pinned.rows[2], y: pinned.rows[2].y + edited.list.y - pinned.list.y + pinned.list.scrollTop - edited.list.scrollTop,
+    ...pinned.rows[2], y: pinned.rows[2].y + pinned.list.scrollTop - edited.list.scrollTop,
   })
   close(edited.rows[2].opacity, pinned.rows[2].opacity, 0.01)
   expect(await outgoing.evaluate((row, animations) => {
