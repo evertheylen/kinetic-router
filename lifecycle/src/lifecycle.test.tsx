@@ -7,12 +7,7 @@ import {
 import { Portal, render } from '@solidjs/web'
 import { Lifecycle, onEnter, onExit, onInOut, useLifecycle, type Direction } from './index.js'
 
-function deferred() {
-  let resolve!: () => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+const deferred = () => Promise.withResolvers<void>()
 
 const disposers: (() => void)[] = []
 function mount(view: () => SolidElement) {
@@ -736,8 +731,10 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
         'after:NEW:0:present,B:1:exiting,A:1:present',
         'exit:NEW:0:present,B:1:exiting,A:1:present',
       ])
-      exit.resolve(); await settle()
+      const survivor = host.firstElementChild
+      exit.resolve(); await exit.promise // Change a value in the same turn as its sibling's completion.
       setItems([{ id: 'c', label: 'NEWER' }, { id: 'a', label: 'A' }]); await settle()
+      expect(host.firstElementChild).toBe(survivor)
       expect(text()).toBe('NEWER:0:present,A:1:present')
       expect(observations).toHaveLength(3)
     } finally {

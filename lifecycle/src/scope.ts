@@ -47,8 +47,9 @@ type Registration = { kind: Kind; handler: InOutHandler; owner: Owner; run?: Run
  */
 export class Scope {
   readonly state: LifecycleState
-  private disposed = false
-  private exiting = false
+  // Final disposal can run outside a flush. Invalidate hooks immediately, even
+  // though Solid won't publish that write to state.phase until commit.
+  private requestedPhase: Phase = 'present'
   private handlers = new Set<Registration>()
   private setPhase
   private changed: () => void
@@ -60,16 +61,16 @@ export class Scope {
     this.setPhase = setPhase
   }
 
-  get direction(): Direction { return this.exiting ? 'out' : 'in' }
+  get direction(): Direction { return this.requestedPhase === 'present' ? 'in' : 'out' }
 
   setPresent(present: boolean) {
-    const exiting = !present
-    if (this.disposed || exiting === this.exiting) return
-    this.exiting = exiting
-    this.setPhase(exiting ? 'exiting' : 'present')
+    const phase = present ? 'present' : 'exiting'
+    if (this.requestedPhase === 'disposed' || this.requestedPhase === phase) return
+    this.requestedPhase = phase
+    this.setPhase(phase)
     for (const registration of this.handlers) {
       // Standalone enters survive removal; completed ones restart on reentry.
-      if (registration.kind !== 'enter' || (!exiting && registration.run?.state === 'done')) {
+      if (registration.kind !== 'enter' || (present && registration.run?.state === 'done')) {
         this.cancel(registration)
       }
       this.queue(registration)
@@ -86,7 +87,7 @@ export class Scope {
     createRenderEffect(() => undefined, () => {
       this.handlers.add(registration)
       this.queue(registration)
-      this.changed()
+      if (registration.run) this.changed()
     }, { schedule: true })
     onCleanup(() => {
       this.handlers.delete(registration)
@@ -97,8 +98,8 @@ export class Scope {
 
   private queue(registration: Registration) {
     if (registration.run) return
-    if (registration.kind === 'enter' && this.exiting) return
-    if (registration.kind === 'exit' && !this.exiting) return
+    if (registration.kind === 'enter' && this.direction === 'out') return
+    if (registration.kind === 'exit' && this.direction === 'in') return
     // Reserve work during rendering; invocation waits for committed DOM and refs.
     registration.run = { controller: new AbortController(), state: 'queued' }
   }
@@ -106,8 +107,8 @@ export class Scope {
   /** Run committed work; return true if the exit is complete. A hook can request
    * reentry, so never prune in the same pass in which a hook was invoked. */
   advance(): boolean {
-    let removable = this.exiting
-    const entering = [...this.handlers].some(({ kind, run }) =>
+    let removable = this.requestedPhase === 'exiting'
+    const entering = removable && [...this.handlers].some(({ kind, run }) =>
       kind === 'enter' && run && run.state !== 'done',
     )
     for (const registration of this.handlers) {
@@ -126,10 +127,10 @@ export class Scope {
   }
 
   private invoke(registration: Registration, run: Run) {
-    if (this.disposed || registration.run !== run) return
+    if (this.requestedPhase === 'disposed' || registration.run !== run) return
     run.state = 'running'
     const finish = () => {
-      if (this.disposed || registration.run !== run) return
+      if (this.requestedPhase === 'disposed' || registration.run !== run) return
       run.state = 'done'
       this.changed()
     }
@@ -153,8 +154,8 @@ export class Scope {
   }
 
   dispose() {
-    if (this.disposed) return
-    this.disposed = true
+    if (this.requestedPhase === 'disposed') return
+    this.requestedPhase = 'disposed'
     this.setPhase('disposed')
     for (const registration of this.handlers) this.cancel(registration)
     this.handlers.clear()

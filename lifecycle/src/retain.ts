@@ -1,5 +1,5 @@
 import {
-  For, createEffect, createRenderEffect, createSignal, onCleanup, untrack,
+  For, createEffect, createRenderEffect, createSignal, onCleanup,
   type Accessor, type Element as SolidElement,
 } from 'solid-js'
 import { Scope, ScopeContext } from './scope.js'
@@ -14,19 +14,15 @@ export function retain<T>(
   mode: Accessor<RetentionMode> = () => 'parallel',
   beforeChange?: () => void | (() => void),
 ): SolidElement {
-  function entry(selection: Selection<T>, index: number) {
-    // Box values so function-valued items aren't interpreted as signal computations.
-    const [box, setBox] = createSignal({ value: selection.value }, { ownedWrite: true })
-    const [position, setPosition] = createSignal(index, { ownedWrite: true })
+  function entry(initial: Selection<T>, index: number) {
+    // A selection already boxes the item: even a function is data, not a signal updater.
+    const [selection, setSelection] = createSignal(initial, {
+      ownedWrite: true, equals: (a, b) => Object.is(a.value, b.value),
+    })
+    const [position, setIndex] = createSignal(index, { ownedWrite: true })
     return {
-      key: selection.key,
-      scope: new Scope(invalidate),
-      value: () => box().value,
-      index: position,
-      update(value: T, index: number) {
-        if (!Object.is(untrack(box).value, value)) setBox({ value })
-        setPosition(index)
-      },
+      key: initial.key, scope: new Scope(invalidate),
+      value: () => selection().value, index: position, setSelection, setIndex,
     }
   }
   type Entry = ReturnType<typeof entry>
@@ -41,13 +37,12 @@ export function retain<T>(
   const [workChanged, invalidate] = createSignal(undefined, { equals: false, ownedWrite: true })
 
   function stage(rows: Entry[]) {
-    staged = rows
+    staged = rows // Same array; visible publishes it on Solid's next commit.
     setVisible(rows)
   }
 
   createEffect(() => { workChanged(); return visible() }, rendered => {
-    // A completion may have woken this effect just as reconciliation staged new
-    // rows/phases. Dispatch only for the snapshot Solid has committed to the DOM.
+    // If reconciliation staged newer rows in this flush, wait for their DOM commit.
     if (rendered !== staged) return
     const committed = pendingAfterChange
     pendingAfterChange = undefined
@@ -68,16 +63,17 @@ export function retain<T>(
     const reusable = new Map(staged.map(row => [row.key, row]))
     waitingForDisposal = mode === 'out-in' && [...mounted].some(row => !keys.has(row.key) || reusable.get(row.key) !== row)
     const allowed = waitingForDisposal ? selections.filter(selection => reusable.has(selection.key)) : selections
-    if (beforeChange && !pendingAfterChange) {
+    if (beforeChange && initialized && !pendingAfterChange) {
       const previous = staged.filter(row => row.scope.direction === 'in')
-      if (initialized && (previous.length !== allowed.length
-        || allowed.some((selection, index) => reusable.get(selection.key) !== previous[index]))) pendingAfterChange = beforeChange()
-      initialized = true
+      const changed = previous.length !== allowed.length || allowed.some(({ key }, index) => reusable.get(key) !== previous[index])
+      if (changed) pendingAfterChange = beforeChange()
     }
+    initialized = true
     const selected = allowed.map((selection, index) => {
       const retained = reusable.get(selection.key)
       if (!retained) return entry(selection, index)
-      retained.update(selection.value, index)
+      retained.setSelection(selection)
+      retained.setIndex(index)
       retained.scope.setPresent(true)
       return retained
     })
