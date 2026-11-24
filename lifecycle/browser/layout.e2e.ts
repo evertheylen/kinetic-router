@@ -72,7 +72,8 @@ async function sample(queue: Locator, progress?: number) {
 
 async function finish(queue: Locator) {
   await queue.locator(listSelector).evaluate(async list => {
-    const effects = [list, ...list.querySelectorAll(':scope > li')].flatMap(node => node.getAnimations())
+    // Finish the demo's grid and badge motion, not independent descendant effects.
+    const effects = [list, ...list.querySelectorAll(':scope > li, .layout-queue-number')].flatMap(node => node.getAnimations())
     const completions = effects.map(animation => {
       const finished = animation.finished
       animation.finish()
@@ -126,6 +127,12 @@ test('the Reading queue grid moves multiple LayoutList rows at once without owni
 
   await queue.getByRole('button', { name: 'Rotate queue' }).click()
   await pauseEffects(queue, ...initialOrder.map(rowSelector))
+  // The row and its rank badge share component timing, not effects or DOM ownership.
+  const first = queue.locator(rowSelector(1))
+  for (const target of [first, first.locator('.layout-queue-number')]) {
+    expect(await target.evaluate(el => el.getAnimations()[0]?.effect?.getTiming()))
+      .toMatchObject({ duration: 2000, easing: 'ease-out' })
+  }
   const start = await sample(queue, 0)
   const mid = await sample(queue, 0.5)
   expect(start.order).toEqual(rotatedOrder)
@@ -144,6 +151,29 @@ test('the Reading queue grid moves multiple LayoutList rows at once without owni
   close(after.list.height, before.list.height)
   expect(styles(after)).toEqual(styles(before))
   expect(await independent.evaluate(animation => animation.playState)).toBe('running')
+})
+
+test('a descendant Motion exit shares the LayoutList row’s lifetime, not its animation', async ({ page }) => {
+  const queue = page.getByRole('region', { name: 'Reading queue' })
+  const row = queue.locator(rowSelector(1))
+  await row.getByRole('button').click()
+  await pauseEffects(queue, rowSelector(1))
+  const badge = await row.locator('.layout-queue-number').evaluateHandle(async el => {
+    const [exit] = el.getAnimations()
+    exit!.pause()
+    await exit!.ready
+    return exit!
+  })
+  expect(await badge.evaluate(a => (a.effect as KeyframeEffect).getKeyframes().at(-1)!.opacity)).toBe('0')
+  await row.evaluate(async el => {
+    const [pin] = el.getAnimations()
+    pin!.finish()
+    await pin!.finished
+  })
+  await expect(row).toHaveCSS('opacity', '0')
+  await expect(row).toHaveCSS('position', 'absolute')
+  await badge.evaluate(a => a.finish())
+  await expect(row).toHaveCount(0)
 })
 
 test('the Reading queue fits a narrow phone in one column', async ({ page }) => {

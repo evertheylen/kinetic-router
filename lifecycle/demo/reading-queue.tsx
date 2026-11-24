@@ -1,5 +1,6 @@
-import { LayoutList } from '@kinetic-router/motion-layout'
-import { onInOut, useLifecycle } from '@kinetic-router/lifecycle'
+import { LayoutList, type LayoutTransition } from '@kinetic-router/motion-layout'
+import { motion } from '@kinetic-router/motion'
+import { onEnter, useLifecycle } from '@kinetic-router/lifecycle'
 import { createSignal, Show } from 'solid-js'
 import './reading-queue.css'
 
@@ -18,6 +19,7 @@ const firstEntries: Entry[] = [
 function Row(props: {
   entry: Entry
   index: number
+  transition: LayoutTransition
   remove: (removal: Removal) => void
   restoreNoteFocus: (id: number, input: HTMLInputElement) => void
 }) {
@@ -27,13 +29,12 @@ function Row(props: {
   let noteInput: HTMLInputElement | undefined
 
   // The row has committed by this point, including clearing inert on reentry.
-  onInOut(({ direction }) => {
-    if (direction === 'in' && noteInput) props.restoreNoteFocus(props.entry.id, noteInput)
-  })
+  onEnter(() => { if (noteInput) props.restoreNoteFocus(props.entry.id, noteInput) })
 
   return <li class="layout-queue-row" data-entry={props.entry.id} inert={phase() === 'exiting'}
     onKeyDown={event => { if (event.key === 'Escape') remove() }}>
-    <span class="layout-queue-number" aria-hidden="true">{String(props.index + 1).padStart(2, '0')}</span>
+    <motion.span class="layout-queue-number" aria-hidden="true" animate={{ opacity: props.index === 0 ? 1 : 0.75 }}
+      exit={{ opacity: 0 }} transition={props.transition}>{String(props.index + 1).padStart(2, '0')}</motion.span>
     <label>{props.entry.title}
       <input ref={element => { noteInput = element }} aria-label={`${props.entry.title} note`}
         value={note()} onInput={event => setNote(event.currentTarget.value)} placeholder="A note for later…" />
@@ -47,6 +48,7 @@ export function ReadingQueue() {
   const [removed, setRemoved] = createSignal<Removal>()
   const [shown, setShown] = createSignal(true)
   const [duration, setDuration] = createSignal(normalDuration)
+  const transition = { get duration() { return duration() }, ease: 'easeOut' }
   let nextId = firstEntries.length + 1
   let undoButton: HTMLButtonElement | undefined
   let restoreNoteFor: number | undefined
@@ -108,8 +110,8 @@ export function ReadingQueue() {
     <div class="layout-queue-tray">
       <Show when={shown()}>
         <ul class="layout-queue-list" role="list" aria-label="Queued titles" style="position:relative">
-          <LayoutList each={items()} by={item => item.id} transition={{ duration: duration(), ease: 'ease-out' }}>
-            {(item, index) => <Row entry={item()} index={index()} remove={remove} restoreNoteFocus={restoreNoteFocus} />}
+          <LayoutList each={items()} by={item => item.id} transition={transition}>
+            {(item, index) => <Row entry={item()} index={index()} transition={transition} remove={remove} restoreNoteFocus={restoreNoteFocus} />}
           </LayoutList>
         </ul>
       </Show>

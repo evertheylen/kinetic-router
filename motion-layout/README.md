@@ -43,14 +43,18 @@ render(() => <Queue />, document.body)
   rows from shrinking (`flex: none`). Prefer normal layout spacing such as `gap`:
   retained exits are out of flow but still count for `:nth-child()` and sibling
   selectors. Let `LayoutList` control parent height, row movement and fade, and
-  temporary exit positioning. Put independent effects on descendants or use
-  [`@kinetic-router/motion`](../motion/README.md) for other targets.
+  temporary exit positioning. To combine it with [`Motion`](../motion/README.md),
+  animate a descendant, not the measured row. `LayoutList` already provides the
+  row's lifecycle boundary; a descendant `exit` doesn't need another `Lifecycle.For`.
 - Height animation may reflow browser layout, but doesn't run per-frame JavaScript.
-  Duration is in seconds and easing is a CSS string. Timing is sampled on
-  structural edits; changing it alone doesn't retime running effects. Zero
+  Share `{ duration, ease }` with `Motion`: duration is in seconds and `ease`
+  accepts CSS or `easeIn`, `easeOut`, `easeInOut`. List motion starts with the
+  edit and has no `delay` option. Changing timing alone doesn't retime running effects. Zero
   duration snaps on the edit. Switching to reduced motion settles effects live.
   If the parent has no layout box before or after an edit (for example, under
-  `display: none`), it snaps too. Retained exits stay invisible and out of flow.
+  `display: none`), it snaps too. A fully faded row held by other work stays out
+  of flow. Undo at that point fades it in at its new slot; Undo mid-fade moves
+  it from its still-visible position.
 - Focus and `inert` are application decisions: use a control outside the list
   as a safe focus target, and mark retained exits inert if they shouldn't be
   interactive. On Undo, restore focus after the row commits and is no longer inert.

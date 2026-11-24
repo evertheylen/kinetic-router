@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createContext, createMemo, createSignal, Errored, flatten, Loading, onCleanup, onSettled, Show, useContext } from 'solid-js'
 import { render } from '@solidjs/web'
-import { onExit, useLifecycle } from '@kinetic-router/lifecycle'
-import { LayoutList } from './layout-list.js'
+import { onEnter, onExit, useLifecycle } from '@kinetic-router/lifecycle'
+import { LayoutList, type LayoutTransition } from './layout-list.js'
 
 const disposers: (() => void)[] = []
 function mount(view: Parameters<typeof render>[0]) {
@@ -118,10 +118,17 @@ it.each(['before detach', 'while detached'] as const)('keeps an independently he
       expect(endpoint).not.toHaveProperty('top')
       expect(endpoint).not.toHaveProperty('left')
     }
+    // Once invisible, even a formerly measured exit should fade back in at its
+    // new slot rather than traveling from where the old pin happened to be.
+    vi.spyOn(a, 'getBoundingClientRect').mockImplementation(() =>
+      new DOMRect(0, a.dataset.phase === 'exiting' ? 80 : 20, 100, 20))
     setItems(['c', 'a', 'b']); await settle()
     expect(list.children[1]).toBe(a)
     expect(a.dataset.phase).toBe('present')
     expect(a.getAnimations()).not.toContain(pin)
+    const restored = (a.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!
+    expect(restored.opacity).toBe('0')
+    expect(restored).not.toHaveProperty('translate')
 
     setItems(['c', 'b']); await settle()
     for (const animation of a.getAnimations()) animation.finish()
@@ -211,9 +218,30 @@ it.each(['zero duration', 'reduced motion'] as const)('skips row measurement and
   } finally { release(); await settle() }
 })
 
+it('starts the fade during a pending enter and waits for it after the enter settles', async () => {
+  const entered = Promise.withResolvers<void>()
+  const [items, setItems] = createSignal(['a'])
+  const host = mount(() => <ul style="position: relative"><LayoutList each={items()}>{item => {
+    onEnter(() => entered.promise)
+    return <li>{item()}</li>
+  }}</LayoutList></ul>)
+  try {
+    await settle()
+    const row = host.querySelector('li')!
+    setItems([]); await settle()
+    const [fade] = row.getAnimations()
+    expect(fade).toBeDefined()
+    fade!.pause()
+    entered.resolve(); await settle()
+    expect(row.isConnected).toBe(true)
+    fade!.finish()
+    await vi.waitFor(() => expect(row.isConnected).toBe(false))
+  } finally { entered.resolve() }
+})
+
 it('animates supported rows when another row lacks WAAPI', async () => {
   const [items, setItems] = createSignal(['a', 'b'])
-  const host = mount(() => <ul style="position: relative"><LayoutList each={items()}>
+  const host = mount(() => <ul style="position: relative"><LayoutList each={items()} transition={{ ease: 'easeInOut' }}>
     {item => <li>{item()}</li>}
   </LayoutList></ul>)
   await settle()
@@ -230,6 +258,7 @@ it('animates supported rows when another row lacks WAAPI', async () => {
   expect(a!.getAnimations()).toEqual([])
   const moves = b!.getAnimations()
   expect(moves).toHaveLength(1)
+  expect(moves[0]!.effect!.getTiming().easing).toBe('ease-in-out')
   expect((moves[0]!.effect as KeyframeEffect).getKeyframes()).toMatchObject([
     { translate: '0px 20px' }, { translate: '0px 0px' },
   ])
@@ -244,6 +273,19 @@ it.each([0.25, 0])('reports a static parent on the first structural change with 
   expect(host.textContent).toBe('a')
   setItems(['b']); await settle()
   expect(host.textContent).toContain('set position: relative on its parent')
+})
+
+it('rejects native millisecond timing instead of interpreting it as seconds', async () => {
+  const native = { duration: 250, easing: 'linear' }
+  // @ts-expect-error Native options can be variables, not just excess keys in a literal.
+  const transition: LayoutTransition = native
+  const [items, setItems] = createSignal(['a'])
+  const host = mount(() => <Errored fallback={error => String(error())}><ul style="position: relative">
+    <LayoutList each={items()} transition={transition}>{item => <li>{item()}</li>}</LayoutList>
+  </ul></Errored>)
+  await settle()
+  setItems(['b']); await settle()
+  expect(host.textContent).toContain('duration in seconds')
 })
 
 it('rejects a non-number duration without coercion', async () => {
