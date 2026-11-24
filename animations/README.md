@@ -3,6 +3,8 @@
 Browser-native reactive and lifecycle animations for Solid 2. Client-only, private,
 experimental; uses the workspace's Solid 2 catalog version. No router
 integration, dependencies on an animation engine, or per-frame JavaScript.
+For keyed list reordering and animated flow height, use
+[`LayoutList` from `@kinetic-router/layout`](../layout/README.md).
 
 ## Motion components
 

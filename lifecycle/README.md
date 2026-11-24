@@ -51,6 +51,8 @@ Lists and conditional branches work too:
   interactive unless the component manages focus, `inert`, or ARIA itself.
 
 See [the demo](demo/main.tsx) for CSS-only effects and interactive examples.
+The [Reading queue](demo/reading-queue.tsx) pairs keyed retention with
+[`LayoutList`](../layout/README.md) for reorder, add, remove, and Undo.
 Detailed contracts live beside the [hooks](src/scope.ts)
 and [controls](src/flow.ts).
 

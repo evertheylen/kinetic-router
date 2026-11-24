@@ -1,0 +1,57 @@
+.layout-queue {
+  --queue-ink: #f5ead8;
+  --queue-gold: #ffcc80;
+  padding: clamp(1rem, 4vw, 2rem);
+  border: 1px solid #656077;
+  border-radius: 1.25rem;
+  background: #28243a;
+  color: var(--queue-ink);
+}
+.layout-queue-intro > span, .layout-queue-number, .layout-queue-summary {
+  color: var(--queue-gold);
+  font: 700 .75rem/1.4 ui-monospace, monospace;
+  letter-spacing: .12em;
+}
+.layout-queue-intro h2 { margin: .25rem 0; font-size: clamp(1.75rem, 5vw, 2.65rem); letter-spacing: -.04em; }
+.layout-queue-intro p { max-width: 55ch; margin: .5rem 0 1.25rem; }
+.layout-queue-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1rem; }
+.layout-queue-tools label { display: inline-flex; align-items: center; gap: .25rem; }
+.layout-queue button { background: #433957; border-color: #8a779d; }
+.layout-queue button:hover { background: #57466d; }
+.layout-queue button:disabled, .layout-queue button[aria-disabled="true"] { color: #c7bbce; cursor: default; }
+.layout-queue button[aria-disabled="false"] { background: var(--queue-gold); color: #30223a; border-color: var(--queue-gold); }
+.layout-queue button[aria-disabled="false"]:hover { background: #ffdeaa; }
+.layout-queue button:focus-visible, .layout-queue input:focus-visible { outline-color: var(--queue-gold); }
+
+.layout-queue-tray { border-radius: .75rem; background: #201c2e; }
+.layout-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin: 0;
+  padding: .65rem;
+  border: 1px solid #656077;
+  border-radius: .75rem;
+  list-style: none;
+}
+.layout-queue-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .6rem;
+  margin: .15rem .2rem;
+  padding: .5rem .65rem;
+  border: 1px solid #656077;
+  border-radius: .5rem;
+  background: #352c48;
+}
+.layout-queue-row label { display: grid; gap: .2rem; font-size: .85rem; font-weight: 600; }
+.layout-queue-row input { min-width: 0; padding: .25rem .4rem; border-color: #8a779d; background: #241e34; }
+.layout-queue-row button { font-size: .8rem; }
+.layout-queue-summary { margin: 0; padding: .6rem .85rem; }
+
+@media (max-width: 420px) {
+  .layout-queue-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .layout-queue-number { display: none; }
+}
