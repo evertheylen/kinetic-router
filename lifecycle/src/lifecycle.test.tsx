@@ -706,6 +706,45 @@ describe('lifecycle control flow on Solid 2 client owners + real DOM', () => {
     expect(host.children.length).toBe(0)
   })
 
+  it('brackets only committed key changes, before row writes and after DOM but before lifecycle handlers', async () => {
+    const [items, setItems] = createSignal([{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }])
+    const gate = deferred(), exit = deferred()
+    const observations: string[] = []
+    const text = () => [...host.children].map(row => row.textContent).join(',')
+    const { host } = mount(() => <Lifecycle.For each={items()} by={item => item.id} onBeforeChange={() => {
+      observations.push(`before:${text()}`)
+      return () => { observations.push(`after:${text()}`) }
+    }}>{(item, index) => {
+      const { phase } = useLifecycle()
+      onExit(() => { observations.push(`exit:${text()}`); return exit.promise })
+      return <p>{item().label}:{index()}:{phase()}</p>
+    }}</Lifecycle.For>)
+    await settle()
+    expect(observations).toEqual([])
+    const select = action(function* () {
+      setItems([{ id: 'c', label: 'NEW' }, { id: 'a', label: 'A' }])
+      yield gate.promise
+    })
+    const pending = select()
+    try {
+      await vi.waitFor(() => expect(isPending(items)).toBe(true))
+      expect(observations).toEqual([])
+      expect(text()).toBe('A:0:present,B:1:present,C:2:present')
+      gate.resolve(); await pending; await settle()
+      expect(observations).toEqual([
+        'before:A:0:present,B:1:present,C:2:present',
+        'after:NEW:0:present,B:1:exiting,A:1:present',
+        'exit:NEW:0:present,B:1:exiting,A:1:present',
+      ])
+      exit.resolve(); await settle()
+      setItems([{ id: 'c', label: 'NEWER' }, { id: 'a', label: 'A' }]); await settle()
+      expect(text()).toBe('NEWER:0:present,A:1:present')
+      expect(observations).toHaveLength(3)
+    } finally {
+      gate.resolve(); exit.resolve(); await pending
+    }
+  })
+
   it('rejects duplicate keys before mounting any rows', async () => {
     const row = vi.fn(() => <p>row</p>)
     const { host } = mount(() => <Errored fallback={error => <p>{String(error())}</p>}>

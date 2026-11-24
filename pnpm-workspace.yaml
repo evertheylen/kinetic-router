@@ -4,6 +4,7 @@ packages:
   - solid
   - lifecycle
   - animations
+  - layout
   - example-app
   - integration-tests
   - testing-utils

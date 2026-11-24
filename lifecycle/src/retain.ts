@@ -12,6 +12,7 @@ export function retain<T>(
   source: Accessor<readonly Selection<T>[]>,
   render: (value: Accessor<T>, index: Accessor<number>) => SolidElement,
   mode: Accessor<RetentionMode> = () => 'parallel',
+  beforeChange?: () => void | (() => void),
 ): SolidElement {
   function entry(selection: Selection<T>, index: number) {
     // Box values so function-valued items aren't interpreted as signal computations.
@@ -32,6 +33,8 @@ export function retain<T>(
   // A row has an owner only once Solid's For consumes it, and until its cleanup.
   const mounted = new Set<Entry>()
   let waitingForDisposal = false
+  let initialized = false
+  let afterChange: void | (() => void)
   const [disposal, retrySelection] = createSignal(undefined, { equals: false, ownedWrite: true })
   let staged: Entry[] = []
   const [visible, setVisible] = createSignal(staged, { ownedWrite: true })
@@ -46,6 +49,9 @@ export function retain<T>(
     // A completion may have woken this effect just as reconciliation staged new
     // rows/phases. Dispatch only for the snapshot Solid has committed to the DOM.
     if (rendered !== staged) return
+    const committed = afterChange
+    afterChange = undefined
+    committed?.()
     const next = rendered.filter(row => !row.scope.advance())
     if (next.length !== rendered.length) stage(next)
   })
@@ -62,6 +68,12 @@ export function retain<T>(
     const reusable = new Map(staged.map(row => [row.key, row]))
     waitingForDisposal = mode === 'out-in' && [...mounted].some(row => !keys.has(row.key) || reusable.get(row.key) !== row)
     const allowed = waitingForDisposal ? selections.filter(selection => reusable.has(selection.key)) : selections
+    if (beforeChange) {
+      const previous = staged.filter(row => row.scope.direction === 'in')
+      if (initialized && (previous.length !== allowed.length
+        || allowed.some((selection, index) => reusable.get(selection.key) !== previous[index]))) afterChange = beforeChange()
+      initialized = true
+    }
     const selected = allowed.map((selection, index) => {
       const retained = reusable.get(selection.key)
       if (!retained) return entry(selection, index)

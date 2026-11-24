@@ -19,6 +19,11 @@ function conditional<T>(child: ConditionalChildren<T>, value: Accessor<NonNullab
 export interface ForProps<T> {
   each: readonly T[] | null | undefined | false
   by?: (item: T) => unknown
+  /** Runs during committed rendering, before changing the selected keys or their
+   * order. The previous rows are still rendered. Not called for initial rendering,
+   * same-key value updates, or final disposal of an already-exiting row. Return
+   * a callback to run after the latest change renders, before lifecycle handlers. */
+  onBeforeChange?: () => void | (() => void)
   children: (item: Accessor<T>, index: Accessor<number>) => SolidElement
 }
 
@@ -27,6 +32,8 @@ export function For<T>(props: ForProps<T>): SolidElement {
   return retain(
     () => (props.each || []).map(value => ({ key: props.by ? props.by(value) : value, value })),
     (item, index) => untrack(() => render(item, index)),
+    undefined,
+    props.onBeforeChange,
   )
 }
 

@@ -174,6 +174,19 @@ importers:
         specifier: 'catalog:'
         version: 8.3.8(@types/node@26.6.6)
 
+  layout:
+    dependencies:
+      '@kinetic-router/lifecycle':
+        specifier: workspace:*
+        version: link:../lifecycle
+      solid-js:
+        specifier: 'catalog:'
+        version: 2.0.3
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   lifecycle:
     dependencies:
       solid-js:
